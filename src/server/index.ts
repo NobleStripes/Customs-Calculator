@@ -171,8 +171,9 @@ app.post('/api/calculate/batch', async (request, response) => {
         csfPhp = csfConversionResult.convertedAmount
       }
 
-      const transitChargePhp = 0
-      const ipcPhp = getImportProcessingChargePhp(valueInPhp)
+      const declarationType = String(shipment.declarationType || 'consumption').toLowerCase()
+      const transitChargePhp = declarationType === 'transit' ? TRANSIT_CHARGE_PHP : 0
+      const ipcPhp = declarationType === 'transit' ? 250 : getImportProcessingChargePhp(valueInPhp)
       const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
       const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
       const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp

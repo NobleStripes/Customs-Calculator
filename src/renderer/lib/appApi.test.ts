@@ -117,6 +117,77 @@ describe('appApi backend-first calculation', () => {
   })
 })
 
+describe('appApi.batchCalculate', () => {
+  it('applies transit-specific global fees in the local fallback path', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.batchCalculate([
+      {
+        hsCode: '8421.23',
+        value: 30000,
+        freight: 0,
+        insurance: 0,
+        originCountry: 'JPN',
+        currency: 'PHP',
+        declarationType: 'transit',
+        containerSize: 'none',
+        arrastreWharfage: 0,
+        doxStampOthers: 0,
+      },
+    ])
+
+    expect(result.success).toBe(true)
+    expect(result.data).toHaveLength(1)
+    expect(result.data?.[0]?.breakdown?.globalFees?.transitCharge).toBeCloseTo(1000)
+    expect(result.data?.[0]?.breakdown?.globalFees?.ipc).toBeCloseTo(250)
+    expect(result.data?.[0]?.breakdown?.globalFees?.totalGlobalTax).toBeCloseTo(1380)
+    expect(result.data?.[0]?.costBase?.vatBase).toBeCloseTo(38567.5)
+    expect(result.data?.[0]?.vat?.amount).toBeCloseTo(4628.1)
+  })
+
+  it('keeps transit totals distinct from consumption totals for the same shipment', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.batchCalculate([
+      {
+        hsCode: '8421.23',
+        value: 30000,
+        freight: 0,
+        insurance: 0,
+        originCountry: 'JPN',
+        currency: 'PHP',
+        declarationType: 'consumption',
+        containerSize: 'none',
+        arrastreWharfage: 0,
+        doxStampOthers: 0,
+      },
+      {
+        hsCode: '8421.23',
+        value: 30000,
+        freight: 0,
+        insurance: 0,
+        originCountry: 'JPN',
+        currency: 'PHP',
+        declarationType: 'transit',
+        containerSize: 'none',
+        arrastreWharfage: 0,
+        doxStampOthers: 0,
+      },
+    ])
+
+    const consumptionRow = result.data?.[0]
+    const transitRow = result.data?.[1]
+
+    expect(result.success).toBe(true)
+    expect(result.data).toHaveLength(2)
+    expect(consumptionRow?.breakdown?.globalFees?.transitCharge).toBeCloseTo(0)
+    expect(consumptionRow?.breakdown?.globalFees?.ipc).toBeCloseTo(500)
+    expect(consumptionRow?.totalLandedCost).toBeCloseTo(42355.6)
+    expect(transitRow?.totalLandedCost).toBeCloseTo(43195.6)
+    expect((transitRow?.totalLandedCost || 0) - (consumptionRow?.totalLandedCost || 0)).toBeCloseTo(840)
+  })
+})
+
 describe('appApi HS lookup', () => {
   it('uses the server HS search endpoint when available', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({

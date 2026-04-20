@@ -9,6 +9,7 @@ type ShipmentRow = {
   insurance: number
   originCountry: string
   currency: string
+  declarationType: 'consumption' | 'warehousing' | 'transit'
   containerSize: 'none' | '20ft' | '40ft'
   arrastreWharfage: number
   doxStampOthers: number
@@ -68,9 +69,10 @@ const parseCsvText = (input: string): ShipmentRow[] => {
     const insurance = Number(parts[3] || 0)
     const originCountry = (parts[4] || '').toUpperCase()
     const currency = (parts[5] || DEFAULT_CURRENCY).toUpperCase()
-    const containerSize = (parts[6] || '20ft').toLowerCase() as ShipmentRow['containerSize']
-    const arrastreWharfage = Number(parts[7] || 0)
-    const doxStampOthers = Number(parts[8] || 0)
+    const declarationType = (parts[6] || 'consumption').toLowerCase() as ShipmentRow['declarationType']
+    const containerSize = (parts[7] || '20ft').toLowerCase() as ShipmentRow['containerSize']
+    const arrastreWharfage = Number(parts[8] || 0)
+    const doxStampOthers = Number(parts[9] || 0)
 
     if (!hsCode || Number.isNaN(value) || value <= 0 || Number.isNaN(freight) || Number.isNaN(insurance) || !originCountry || Number.isNaN(arrastreWharfage) || Number.isNaN(doxStampOthers)) {
       continue
@@ -83,6 +85,7 @@ const parseCsvText = (input: string): ShipmentRow[] => {
       insurance,
       originCountry,
       currency,
+      declarationType: declarationType === 'consumption' || declarationType === 'warehousing' || declarationType === 'transit' ? declarationType : 'consumption',
       containerSize: containerSize === '40ft' || containerSize === '20ft' || containerSize === 'none' ? containerSize : '20ft',
       arrastreWharfage,
       doxStampOthers,
@@ -100,6 +103,7 @@ const toCsv = (rows: BatchResultRow[]): string => {
     'insurance',
     'originCountry',
     'currency',
+    'declarationType',
     'containerSize',
     'arrastreWharfage',
     'doxStampOthers',
@@ -122,6 +126,7 @@ const toCsv = (rows: BatchResultRow[]): string => {
       row.insurance.toFixed(2),
       row.originCountry,
       row.currency,
+      row.declarationType,
       row.containerSize,
       row.arrastreWharfage.toFixed(2),
       row.doxStampOthers.toFixed(2),
@@ -177,7 +182,7 @@ export const BatchImport: React.FC = () => {
     if (parsed.length === 0) {
       setShipments([])
       setResults([])
-      setError('No valid rows found. Expected columns: hsCode,value,freight,insurance,originCountry,currency(optional),containerSize(optional),arrastreWharfage(optional),doxStampOthers(optional).')
+      setError('No valid rows found. Expected columns: hsCode,value,freight,insurance,originCountry,currency(optional),declarationType(optional),containerSize(optional),arrastreWharfage(optional),doxStampOthers(optional).')
       return
     }
 
@@ -249,14 +254,14 @@ export const BatchImport: React.FC = () => {
       <div className="batch-layout">
         <section className="batch-panel">
           <h2>Input CSV</h2>
-          <p className="hint">Use header: hsCode,value,freight,insurance,originCountry,currency,containerSize,arrastreWharfage,doxStampOthers</p>
+          <p className="hint">Use header: hsCode,value,freight,insurance,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers</p>
 
           <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
 
           <textarea
             value={rawCsv}
             onChange={(event) => setRawCsv(event.target.value)}
-            placeholder="hsCode,value,freight,insurance,originCountry,currency,containerSize,arrastreWharfage,doxStampOthers\n8471.30,1000,100,25,CHN,USD,20ft,4500,265\n8517.62,2500,200,30,USA,USD,40ft,6000,300"
+            placeholder="hsCode,value,freight,insurance,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers\n8471.30,1000,100,25,CHN,USD,consumption,20ft,4500,265\n8517.62,2500,200,30,USA,USD,transit,40ft,6000,300"
           />
 
           <div className="actions">
@@ -286,13 +291,14 @@ export const BatchImport: React.FC = () => {
                   <th>Insurance</th>
                   <th>Origin</th>
                   <th>Currency</th>
+                  <th>Declaration</th>
                   <th>Container</th>
                 </tr>
               </thead>
               <tbody>
                 {shipments.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="empty-cell">
+                    <td colSpan={8} className="empty-cell">
                       Parse CSV to preview rows.
                     </td>
                   </tr>
@@ -305,6 +311,7 @@ export const BatchImport: React.FC = () => {
                     <td>{row.insurance.toFixed(2)}</td>
                     <td>{row.originCountry}</td>
                     <td>{row.currency}</td>
+                    <td>{row.declarationType}</td>
                     <td>{row.containerSize}</td>
                   </tr>
                 ))}

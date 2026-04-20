@@ -54,6 +54,7 @@ type ShipmentRow = {
   insurance: number
   originCountry: string
   currency: string
+  declarationType: 'consumption' | 'warehousing' | 'transit'
   containerSize: 'none' | '20ft' | '40ft'
   arrastreWharfage: number
   doxStampOthers: number
@@ -155,6 +156,7 @@ const fallbackRates: Record<string, number> = {
 
 const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
 const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
+const TRANSIT_CHARGE_PHP = 1000
 const VAT_RATE = 0.12
 
 const getImportProcessingChargePhp = (dutiableValuePhp: number): number => {
@@ -745,8 +747,8 @@ export const appApi = {
           csfPhp = csfConversion.data.convertedAmount
         }
 
-        const transitChargePhp = 0
-        const ipcPhp = getImportProcessingChargePhp(valueInPhp)
+        const transitChargePhp = shipment.declarationType === 'transit' ? TRANSIT_CHARGE_PHP : 0
+        const ipcPhp = shipment.declarationType === 'transit' ? 250 : getImportProcessingChargePhp(valueInPhp)
         const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
         const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
         const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp
