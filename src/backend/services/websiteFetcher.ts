@@ -17,7 +17,7 @@ const DEFAULT_ALLOWED_HOSTS = [
   'finder.tariffcommission.gov.ph',
 ]
 
-type RegulatorySource = 'boc' | 'bir' | 'tariff-commission'
+export type RegulatorySource = 'boc' | 'bir' | 'tariff-commission'
 
 const REGULATORY_SEED_URLS: Record<RegulatorySource, string[]> = {
   bir: [
@@ -230,7 +230,7 @@ export class WebsiteFetcherService {
       responseType: 'text',
       headers: {
         Accept: 'text/html,application/xhtml+xml',
-        'User-Agent': 'Customs-Calculator/1.0 (+desktop-app)',
+        'User-Agent': 'Customs-Calculator/1.0 (+web-proxy)',
       },
       validateStatus: (status) => status >= 200 && status < 400,
     })

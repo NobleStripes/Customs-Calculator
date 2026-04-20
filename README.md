@@ -16,15 +16,16 @@ The project is in an active build-out phase: core calculation and operator workf
 
 **Tech Stack:**
 - **Frontend:** React 18 with TypeScript
-- **Runtime:** Browser SPA
-- **Data Layer:** In-browser seeded app API for current workflows
-- **Build Tools:** Vite
+- **Runtime:** Browser SPA with a small Express API
+- **Data Layer:** In-browser app API plus server-side website fetch proxy for approved government sources
+- **Build Tools:** Vite, esbuild
 - **Styling:** CSS3 with modern features
 
 **Architecture:**
 - **`src/renderer/`** - React single-page interface used by operators for calculator, browser, and batch workflows.
-- **`src/renderer/lib/appApi.ts`** - Browser-native application API that currently powers calculations, search, conversion, export, and seeded reference data.
-- **`src/backend/`** - Legacy Node-side services retained as a reference for the next server-side phase, including ingestion and website-fetch adapters.
+- **`src/renderer/lib/appApi.ts`** - Browser-facing application API that powers calculations, search, conversion, export, and calls the Express proxy for website fetching.
+- **`src/server/`** - Express server for health checks, regulated website fetch proxy routes, and production static hosting.
+- **`src/backend/`** - Shared Node-side services used by the Express API, including regulatory website fetch/discovery logic.
 
 ## Features
 
@@ -47,7 +48,8 @@ The project is in an active build-out phase: core calculation and operator workf
 
 ### In Progress
 - [ ] Data management/admin UI for tariff source imports and review queue
-- [ ] Server-side Customs/BIR/Tariff Commission source adapters (HTML/CSV/PDF ingestion)
+- [x] Server-side Customs/BIR/Tariff Commission website fetch proxy
+- [ ] Customs/BIR/Tariff Commission source adapters (HTML/CSV/PDF ingestion and structured extraction)
 - [ ] Tariff source governance views (import status, confidence, and rate change audit)
 
 ### Planned
@@ -80,13 +82,13 @@ Use this quick-start when running locally for website development.
    ```bash
    npm run dev
    ```
-   Starts the Vite dev server.
+   Starts both the Express API server and the Vite dev server.
 
-4. **Preview the built app**
+4. **Run the built app**
    ```bash
    npm start
    ```
-   Serves the production build locally using `vite preview`.
+   Builds should be created first with `npm run build`; `npm start` then runs the Express server and serves both the API and the static frontend.
 
 ## Detailed Technical Notes
 
@@ -345,7 +347,7 @@ Notes:
 
 ## Browser App API
 
-The active website uses a browser-native app API in `src/renderer/lib/appApi.ts` instead of Electron IPC.
+The active website uses `src/renderer/lib/appApi.ts` as the browser-facing API layer. Most calculator features run locally in the browser, while approved website fetching is delegated to the Express proxy.
 
 ### Available App Methods
 
@@ -368,8 +370,18 @@ The active website uses a browser-native app API in `src/renderer/lib/appApi.ts`
 - `generateCalculationDocument` - Generate browser download report
 
 **Website Fetching:**
-- `fetchWebsiteContent` - Returns a clear server-side-required error in current website mode
-- `fetchRegulatoryUpdates` - Returns a clear server-side-required error in current website mode
+- `fetchWebsiteContent` - Calls the Express proxy to fetch and sanitize approved website content
+- `fetchRegulatoryUpdates` - Calls the Express proxy to discover and fetch approved BOC, BIR, or Tariff Commission pages
+
+## Express API
+
+The Express server in `src/server/index.ts` exposes a small same-origin API for the browser app:
+
+- `GET /api/health` - Health check
+- `GET /api/fetch-website-content?url=...&query=...` - Fetches a single approved page and returns sanitized content
+- `GET /api/fetch-regulatory-updates?source=boc|bir|tariff-commission&query=...` - Discovers and fetches recent regulatory pages
+
+In development, Vite proxies `/api/*` requests to `http://127.0.0.1:8787`. In production, the Express server serves both the API and the built frontend.
 
 ## Development Guide
 
@@ -439,9 +451,9 @@ npm run format
 ## Known Issues & Limitations
 
 1. **Exchange Rates:** Current website mode uses fallback FX data; live-rate refresh is part of the future server-side phase.
-2. **Regulatory Fetching:** Customs/BIR/Tariff Commission website fetching still requires a real server-side endpoint in web mode.
+2. **Structured Extraction:** The current proxy returns sanitized page content and discovery results, but not issuer-specific structured parsing yet.
 3. **Seeded Data Scope:** The current browser dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage.
-4. **Admin Tooling:** Import/review workflow UI and server-backed source governance are still in progress.
+4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress.
 
 ## Future Enhancements
 
@@ -468,6 +480,7 @@ MIT
 ### v0.1.0 (Current)
 - Website-first React + TypeScript runtime
 - Seeded browser app API for calculation workflows
+- Express API for same-origin Customs/BIR/Tariff Commission website fetching
 - Duty and VAT engine with surcharge-aware taxable base
 - Currency conversion with fallback behavior in web mode
 - Ranked HS code search with keyboard navigation support

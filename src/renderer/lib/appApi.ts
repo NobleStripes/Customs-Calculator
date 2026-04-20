@@ -265,6 +265,36 @@ const browserDownload = (content: string, fileName: string, contentType: string)
 
 const makeSuccess = <T>(data: T) => Promise.resolve({ success: true, data })
 const makeError = (error: unknown) => Promise.resolve({ success: false, error: String(error) })
+const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+
+const callApi = async <T>(path: string): ApiResponse<T> => {
+  try {
+    const response = await fetch(`${apiBase}${path}`, {
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+
+    const payload = (await response.json()) as { success?: boolean; data?: T; error?: string }
+
+    if (!response.ok || payload.success === false) {
+      return {
+        success: false,
+        error: payload.error || `Request failed with status ${response.status}`,
+      }
+    }
+
+    return {
+      success: true,
+      data: payload.data as T,
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
 
 export const appApi = {
   initDB: (): ApiResponse<undefined> => makeSuccess(undefined),
@@ -461,9 +491,23 @@ export const appApi = {
 
   getPendingReviewRows: async (payload: { importJobId: number }) => makeSuccess(pendingReviewRows[payload.importJobId] || []),
 
-  fetchWebsiteContent: async () => makeError('Website fetching requires a server-side endpoint in web mode.'),
+  fetchWebsiteContent: async (payload: { url: string; query?: string }) => {
+    const params = new URLSearchParams({ url: payload.url })
+    if (payload.query?.trim()) {
+      params.set('query', payload.query.trim())
+    }
 
-  fetchRegulatoryUpdates: async () => makeError('Regulatory website fetching requires a server-side endpoint in web mode.'),
+    return callApi(`/api/fetch-website-content?${params.toString()}`)
+  },
+
+  fetchRegulatoryUpdates: async (payload: { source: 'boc' | 'bir' | 'tariff-commission'; query?: string }) => {
+    const params = new URLSearchParams({ source: payload.source })
+    if (payload.query?.trim()) {
+      params.set('query', payload.query.trim())
+    }
+
+    return callApi(`/api/fetch-regulatory-updates?${params.toString()}`)
+  },
 
   generateCalculationDocument: async (payload: { formData: Record<string, unknown>; results: Record<string, unknown> }) => {
     try {
