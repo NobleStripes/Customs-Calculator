@@ -1,0 +1,136 @@
+.tariff-browser-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tariff-browser-header {
+  background: linear-gradient(135deg, #264653 0%, #2a9d8f 100%);
+  color: #fff;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.tariff-browser-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.tariff-browser-header p {
+  margin-top: 6px;
+  opacity: 0.94;
+}
+
+.tariff-controls {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+
+.control-group {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.control-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: #1f3b4d;
+}
+
+.control-group input,
+.control-group select {
+  width: 100%;
+  border: 1px solid #c2d1d9;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 0.95rem;
+}
+
+.tariff-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.stat-card span {
+  display: block;
+  color: #4c6472;
+  font-size: 0.85rem;
+}
+
+.stat-card strong {
+  display: block;
+  margin-top: 4px;
+  color: #163345;
+  font-size: 1.05rem;
+}
+
+.error-message {
+  background: #fdecef;
+  color: #8a1f2d;
+  border-left: 4px solid #d13d52;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.tariff-table-panel {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  text-align: left;
+  background: #e9f1f4;
+  color: #204458;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e2ebef;
+  padding: 9px;
+  font-size: 0.92rem;
+  vertical-align: top;
+}
+
+.description-cell {
+  min-width: 320px;
+}
+
+.empty-cell {
+  text-align: center;
+  color: #658090;
+  font-style: italic;
+}
+
+@media (max-width: 980px) {
+  .tariff-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .tariff-stats {
+    grid-template-columns: 1fr;
+  }
+}
