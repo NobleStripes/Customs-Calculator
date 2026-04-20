@@ -40,6 +40,8 @@ const schema = [
     vat_rate REAL NOT NULL DEFAULT 0.12,
     surcharge_rate REAL NOT NULL DEFAULT 0,
     effective_date DATE NOT NULL,
+    end_date DATE,
+    notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (hs_code) REFERENCES hs_codes(code)
   )`,
@@ -85,7 +87,10 @@ export const initializeDatabase = (): Promise<void> => {
 
     const executeNextStatement = () => {
       if (completed >= schema.length) {
-        seedInitialData().then(resolve).catch(reject)
+        ensureTariffRatesSchemaCompatibility(database)
+          .then(() => seedInitialData())
+          .then(resolve)
+          .catch(reject)
         return
       }
 
@@ -101,6 +106,48 @@ export const initializeDatabase = (): Promise<void> => {
     }
 
     executeNextStatement()
+  })
+}
+
+const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    database.all("PRAGMA table_info('tariff_rates')", (err, rows: any[]) => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      const existingColumns = new Set((rows || []).map((row) => row.name))
+      const migrationStatements: string[] = []
+
+      if (!existingColumns.has('end_date')) {
+        migrationStatements.push('ALTER TABLE tariff_rates ADD COLUMN end_date DATE')
+      }
+
+      if (!existingColumns.has('notes')) {
+        migrationStatements.push('ALTER TABLE tariff_rates ADD COLUMN notes TEXT')
+      }
+
+      if (migrationStatements.length === 0) {
+        resolve()
+        return
+      }
+
+      let completed = 0
+      migrationStatements.forEach((statement) => {
+        database.run(statement, (migrationErr) => {
+          if (migrationErr) {
+            reject(migrationErr)
+            return
+          }
+
+          completed += 1
+          if (completed === migrationStatements.length) {
+            resolve()
+          }
+        })
+      })
+    })
   })
 }
 

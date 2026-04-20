@@ -1,14 +1,14 @@
 # Philippines Customs Calculator
 
-A standalone desktop application for calculating Philippine customs duties, VAT, and import compliance requirements.
+Customs-Calculator is a desktop application built with Electron, React, and SQLite to help Philippine importers quickly estimate landed costs and compliance requirements. It combines HS code lookup, duty and VAT computation, category-based tariff browsing, batch shipment calculations, and downloadable PDF reports in one workflow-friendly interface. Designed for SMEs, brokers, and operations teams, it reduces manual computation, improves consistency, and provides a practical starting point for customs planning before final validation with official Bureau of Customs rules.
 
 ## Project Overview
 
 **Tech Stack:**
 - **Frontend:** React 18 with TypeScript
 - **Desktop:** Electron 28
-- **Backend:** Node.js with Express (embedded in Electron)
-- **Database:** SQLite3 (better-sqlite3)
+- **Backend:** Node.js services (embedded in Electron main process)
+- **Database:** SQLite3
 - **Build Tools:** Vite, esbuild
 - **Styling:** CSS3 with modern features
 
@@ -16,11 +16,11 @@ A standalone desktop application for calculating Philippine customs duties, VAT,
 - **`src/main/`** - Electron main process and IPC handlers
 - **`src/renderer/`** - React frontend (SPA)
 - **`src/backend/`** - Node.js backend services
-- **`src/db/`** - Database schema and initialization
+- **`src/backend/db/`** - Database schema and initialization
 
 ## Features
 
-### Phase 1-2 (Completed)
+### Current Implementation
 ✅ Project scaffolding with Electron + React + TypeScript
 ✅ SQLite database with tariff and HS code data
 ✅ Core calculator services:
@@ -31,23 +31,19 @@ A standalone desktop application for calculating Philippine customs duties, VAT,
   - Compliance rule engine
 ✅ Frontend components:
   - Calculator page with real-time results
+  - Batch Import page with CSV parsing, preview, and export
+  - Tariff Browser page with search and category filtering
   - HS code autocomplete search
   - Calculation results display
   - Sidebar navigation
 ✅ IPC communication layer for secure main ↔ renderer communication
+✅ PDF report generation from calculation results
 
-### Phase 3-4 (In Progress)
-- Batch import processor
-- Document generation (PDF)
-- Tariff browser/database viewer
-- Historical rate tracking
-
-### Phase 5+ (Future)
-- Export to CSV
-- Report generation
-- Data import/export
+### Planned Enhancements
+- Automated historical tariff tracking and comparison
+- Data import/export tooling improvements
 - Settings management
-- Offline mode improvements
+- Offline mode enhancements
 
 ## Setup Instructions
 
@@ -101,7 +97,9 @@ customs-calculator/
 │   │   ├── index.css              # Global styles
 │   │   ├── App.css                # App layout styles
 │   │   ├── pages/                 # Page components
-│   │   │   └── Calculator.tsx     # Main calculator page
+│   │   │   ├── Calculator.tsx
+│   │   │   ├── BatchImport.tsx
+│   │   │   └── TariffBrowser.tsx
 │   │   └── components/            # Reusable components
 │   │       ├── Sidebar.tsx
 │   │       ├── HSCodeSearch.tsx
@@ -113,7 +111,8 @@ customs-calculator/
 │   │   └── services/
 │   │       ├── tariffCalculator.ts    # Duty & VAT calculations
 │   │       ├── complianceChecker.ts   # Compliance rules
-│   │       └── currencyConverter.ts   # Currency conversion
+│   │       ├── currencyConverter.ts   # Currency conversion
+│   │       └── documentGenerator.ts   # PDF report generation
 │   │
 │   └── types/                     # TypeScript type definitions
 │
@@ -214,6 +213,52 @@ Handles multi-currency conversion:
 - `getConversionMatrix(baseCurrency)` - Gets all rates for a base currency
 - Uses external API with offline fallback rates
 
+## Tariff Duty Calculation Logic
+
+The calculator uses this sequence for each shipment:
+
+1. Find the applicable tariff row for the selected HS code.
+2. Compute import duty from declared value.
+3. Add surcharge if configured for that HS code.
+4. Compute VAT on the dutiable base.
+5. Return total landed cost.
+
+Formulas used:
+
+- Duty Amount = Declared Value * Duty Rate
+- Surcharge Amount = Declared Value * Surcharge Rate
+- Dutiable Base = Declared Value + Duty Amount + Surcharge Amount
+- VAT Amount = Dutiable Base * VAT Rate
+- Total Landed Cost = Dutiable Base + VAT Amount
+
+Worked example:
+
+- Declared Value: 1,000.00 USD
+- Duty Rate: 5%
+- Surcharge Rate: 0%
+- VAT Rate: 12%
+
+Results:
+
+- Duty Amount = 1,000.00 * 0.05 = 50.00
+- Surcharge Amount = 1,000.00 * 0.00 = 0.00
+- Dutiable Base = 1,000.00 + 50.00 + 0.00 = 1,050.00
+- VAT Amount = 1,050.00 * 0.12 = 126.00
+- Total Landed Cost = 1,050.00 + 126.00 = 1,176.00
+
+Notes:
+
+- If no tariff row is found, duty defaults to 0 and VAT defaults to 12%.
+- Currency conversion is handled separately when users need cross-currency estimates.
+
+### Validation Rules
+
+- HS code is required before calculation can run.
+- Declared value must be greater than 0.
+- Origin country is accepted as optional for now (currently not used to vary rates in the seeded dataset).
+- Destination port is required for compliance checks and reporting context.
+- If tariff lookup fails at runtime, the service returns a handled error instead of silently producing a partial result.
+
 ## IPC Communication (Electron)
 
 The app uses Electron's IPC for secure communication between main and renderer processes:
@@ -227,9 +272,12 @@ The app uses Electron's IPC for secure communication between main and renderer p
 - `calculate-duty` - Calculate import duty
 - `calculate-vat` - Calculate VAT
 - `search-hs-codes` - Search for HS codes
+- `get-tariff-catalog` - Get tariff rows for browser view
+- `get-tariff-categories` - Get available tariff categories
 - `get-compliance-requirements` - Get compliance info
 - `convert-currency` - Currency conversion
 - `batch-calculate` - Bulk calculations
+- `generate-calculation-document` - Generate PDF report
 
 **Usage from React:**
 ```typescript
@@ -337,8 +385,6 @@ npm run dist
 - [ ] Cloud sync for calculation history
 - [ ] Government API integration for real-time tariff updates
 - [ ] Mobile app version
-- [ ] Batch import from CSV/Excel
-- [ ] PDF report generation
 - [ ] Barcode/QR code scanning
 - [ ] API export for integration with logistics software
 
@@ -359,11 +405,12 @@ MIT
 - Initial project scaffold
 - Database schema and seeding
 - Core calculator services
-- Basic React frontend
+- React frontend with Calculator, Batch Import, and Tariff Browser pages
 - IPC communication layer
 - Sidebar navigation
 - HS code search
 - Calculation results display
+- PDF report generation
 
 ---
 
