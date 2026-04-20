@@ -1,8 +1,18 @@
 # Philippines Customs Calculator
 
-Customs-Calculator is a desktop application built with Electron, React, and SQLite to help Philippine importers quickly estimate landed costs and compliance requirements. It combines HS code lookup, duty and VAT computation, category-based tariff browsing, batch shipment calculations, and downloadable PDF reports in one workflow-friendly interface. Designed for SMEs, brokers, and operations teams, it reduces manual computation, improves consistency, and provides a practical starting point for customs planning before final validation with official Bureau of Customs rules.
+Customs-Calculator is a desktop application for Philippine import costing and compliance pre-checks, built with Electron, React, and SQLite. The current release supports HS code search with ranked suggestions, duty and VAT computation (including surcharge-aware taxable base), multi-currency workflows (with PHP as the computation base), batch shipment processing, tariff browsing, compliance checks, and PDF report export. It is designed for SMEs, brokers, and operations teams that need consistent landed-cost estimates before final confirmation against official Bureau of Customs and BIR issuances.
+
+## Quick Summary
+
+- Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
+- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs.
+- Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
+- Data platform foundation in place: source import jobs, review queue, and audit tables are implemented.
+- Current focus: admin data-management UI and automated Customs/BIR source adapters.
 
 ## Project Overview
+
+The project is in an active build-out phase: core calculation and operator workflows are complete, while automated Customs/BIR data ingestion and admin governance tooling are being implemented next.
 
 **Tech Stack:**
 - **Frontend:** React 18 with TypeScript
@@ -13,39 +23,45 @@ Customs-Calculator is a desktop application built with Electron, React, and SQLi
 - **Styling:** CSS3 with modern features
 
 **Architecture:**
-- **`src/main/`** - Electron main process and IPC handlers
-- **`src/renderer/`** - React frontend (SPA)
-- **`src/backend/`** - Node.js backend services
-- **`src/backend/db/`** - Database schema and initialization
+- **`src/main/`** - Electron app lifecycle, IPC registration, and secure desktop integration.
+- **`src/renderer/`** - React single-page interface used by operators for calculator, browser, and batch workflows.
+- **`src/backend/`** - Domain services for tariff calculation, compliance, currency conversion, document export, and ingestion logic.
+- **`src/backend/db/`** - SQLite schema bootstrap, compatibility migrations, and initial seed data.
 
 ## Features
 
-### Current Implementation
-✅ Project scaffolding with Electron + React + TypeScript
-✅ SQLite database with tariff and HS code data
-✅ Core calculator services:
-  - Tariff duty calculation
-  - VAT calculation
-  - Currency conversion
-  - HS code search
-  - Compliance rule engine
-✅ Frontend components:
-  - Calculator page with real-time results
-  - Batch Import page with CSV parsing, preview, and export
-  - Tariff Browser page with search and category filtering
-  - HS code autocomplete search
-  - Calculation results display
-  - Sidebar navigation
-✅ IPC communication layer for secure main ↔ renderer communication
-✅ PDF report generation from calculation results
+### Completed
+- [x] Project scaffolding with Electron + React + TypeScript
+- [x] SQLite database with HS code, tariff, compliance, exchange rate, and history tables
+- [x] Duty and VAT computation engine (effective-date aware tariff lookup)
+- [x] VAT taxable base calculation includes surcharge
+- [x] Multi-currency calculator flow (converts to PHP for computation, then back to display currency)
+- [x] Currency conversion service with cache/live/fallback behavior
+- [x] HS code autocomplete search by code and description
+- [x] HS code search ranking and normalization (supports code searches with/without dots)
+- [x] HS code keyboard navigation (Arrow Up/Down, Enter, Escape)
+- [x] Compliance requirement checks by HS code/category/value
+- [x] Calculator page with real-time results and FX context display
+- [x] Batch Import page with CSV parse, preview, calculate, and export
+- [x] Tariff Browser page with search and category filtering
+- [x] IPC layer for secure main-renderer communication
+- [x] PDF report generation for calculation output
+- [x] Tariff data ingestion backend foundation (preview/import jobs/review queue/audit via IPC)
 
-### Planned Enhancements
-- Automated historical tariff tracking and comparison
-- Data import/export tooling improvements
-- Settings management
-- Offline mode enhancements
+### In Progress
+- [ ] Data management/admin UI for tariff source imports and review queue
+- [ ] Automated Customs/BIR source adapters (HTML/CSV/PDF ingestion)
+- [ ] Tariff source governance views (import status, confidence, and rate change audit)
+
+### Planned
+- [ ] Automated historical tariff tracking and comparison dashboards
+- [ ] Data import/export tooling improvements (templates, mapping, conflict resolution UX)
+- [ ] Settings management
+- [ ] Offline mode enhancements
 
 ## Setup Instructions
+
+Use this quick-start when running locally for development or packaging.
 
 ### Prerequisites
 - Node.js 18+ (https://nodejs.org/)
@@ -53,32 +69,36 @@ Customs-Calculator is a desktop application built with Electron, React, and SQLi
 
 ### Installation
 
-1. **Install dependencies:**
+1. **Install dependencies**
    ```bash
    npm install
    ```
 
-2. **Build the project:**
+2. **Build the project**
    ```bash
    npm run build
    ```
 
-3. **Development mode (with hot reload):**
+3. **Run development mode (hot reload for main and renderer)**
    ```bash
    npm run dev
    ```
-   This starts both the Electron main process and React dev server.
+   Starts both the Electron main process bundle watcher and the React dev server.
 
-4. **Start production build:**
+4. **Run the built app (production mode)**
    ```bash
    npm start
    ```
 
-5. **Package as standalone executable:**
+5. **Package as a desktop executable**
    ```bash
    npm run dist
    ```
-   Output will be in the `release/` directory.
+   Build artifacts are generated in the `release/` directory.
+
+## Detailed Technical Notes
+
+The sections below are intended for contributors and maintainers.
 
 ## Project Structure
 
@@ -126,66 +146,135 @@ customs-calculator/
 
 ## Database Schema
 
+The app uses SQLite with both core calculator tables and ingestion/audit tables.
+
 ### hs_codes
 ```sql
 CREATE TABLE hs_codes (
-  id INTEGER PRIMARY KEY,
-  code TEXT UNIQUE,              -- e.g., '8471.30'
-  description TEXT,              -- Product description
-  category TEXT,                 -- Electronics, Food, Textiles, etc.
-  created_at DATETIME
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   code TEXT UNIQUE NOT NULL,      -- e.g., '8471.30'
+   description TEXT NOT NULL,
+   category TEXT NOT NULL,
+   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 ### tariff_rates
 ```sql
 CREATE TABLE tariff_rates (
-  id INTEGER PRIMARY KEY,
-  hs_code TEXT,                  -- Foreign key to hs_codes
-  duty_rate REAL,                -- Import duty rate (e.g., 0.10 for 10%)
-  vat_rate REAL,                 -- Value-added tax rate (default 0.12)
-  surcharge_rate REAL,           -- Additional surcharges
-  effective_date DATE,           -- When rate becomes effective
-  end_date DATE,                 -- Optional end date for rate
-  created_at DATETIME
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   hs_code TEXT NOT NULL,
+   duty_rate REAL NOT NULL DEFAULT 0,
+   vat_rate REAL NOT NULL DEFAULT 0.12,
+   surcharge_rate REAL NOT NULL DEFAULT 0,
+   effective_date DATE NOT NULL,
+   end_date DATE,
+   notes TEXT,
+   source_id INTEGER,
+   confidence_score INTEGER NOT NULL DEFAULT 100,
+   import_status TEXT NOT NULL DEFAULT 'approved',
+   last_modified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 ### compliance_rules
 ```sql
 CREATE TABLE compliance_rules (
-  id INTEGER PRIMARY KEY,
-  hs_code_range TEXT,            -- HS code this rule applies to
-  category TEXT,                 -- Product category
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   hs_code_range TEXT NOT NULL,
+   category TEXT NOT NULL,
   required_documents TEXT,       -- Comma-separated list
   restrictions TEXT,             -- Comma-separated restrictions
   special_conditions TEXT,       -- Additional conditions
-  created_at DATETIME
+   source_id INTEGER,
+   effective_date DATE,
+   end_date DATE,
+   confidence_score INTEGER NOT NULL DEFAULT 100,
+   import_status TEXT NOT NULL DEFAULT 'approved',
+   last_modified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 ### exchange_rates
 ```sql
 CREATE TABLE exchange_rates (
-  id INTEGER PRIMARY KEY,
-  currency_pair TEXT UNIQUE,     -- e.g., 'USD_PHP'
-  rate REAL,                     -- Exchange rate
-  last_updated DATETIME
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   currency_pair TEXT UNIQUE NOT NULL,
+   rate REAL NOT NULL,
+   last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 ### calculation_history
 ```sql
 CREATE TABLE calculation_history (
-  id INTEGER PRIMARY KEY,
-  hs_code TEXT,
-  product_value REAL,
-  currency TEXT,
-  origin_country TEXT,
-  duty_amount REAL,
-  vat_amount REAL,
-  total_landed_cost REAL,
-  created_at DATETIME
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   hs_code TEXT NOT NULL,
+   value REAL NOT NULL,
+   currency TEXT NOT NULL,
+   duty_amount REAL NOT NULL,
+   vat_amount REAL NOT NULL,
+   total_landed_cost REAL NOT NULL,
+   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Ingestion and Audit Tables
+```sql
+CREATE TABLE tariff_sources (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   source_name TEXT NOT NULL,
+   source_type TEXT NOT NULL,
+   source_reference TEXT,
+   status TEXT NOT NULL DEFAULT 'active',
+   fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+   imported_at DATETIME,
+   notes TEXT,
+   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE import_jobs (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   source_id INTEGER NOT NULL,
+   status TEXT NOT NULL DEFAULT 'running',
+   total_rows INTEGER NOT NULL DEFAULT 0,
+   imported_rows INTEGER NOT NULL DEFAULT 0,
+   pending_review_rows INTEGER NOT NULL DEFAULT 0,
+   error_rows INTEGER NOT NULL DEFAULT 0,
+   error_message TEXT,
+   started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+   completed_at DATETIME
+);
+
+CREATE TABLE extracted_rows_review (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   source_id INTEGER NOT NULL,
+   import_job_id INTEGER NOT NULL,
+   row_number INTEGER,
+   raw_payload TEXT NOT NULL,
+   normalized_payload TEXT,
+   confidence_score INTEGER NOT NULL,
+   review_status TEXT NOT NULL DEFAULT 'pending',
+   review_notes TEXT,
+   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+   reviewed_at DATETIME
+);
+
+CREATE TABLE rate_change_audit (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   hs_code TEXT NOT NULL,
+   old_duty_rate REAL,
+   new_duty_rate REAL,
+   old_vat_rate REAL,
+   new_vat_rate REAL,
+   old_surcharge_rate REAL,
+   new_surcharge_rate REAL,
+   reason TEXT,
+   source_id INTEGER,
+   import_job_id INTEGER,
+   changed_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
@@ -193,11 +282,11 @@ CREATE TABLE calculation_history (
 
 ### TariffCalculator
 Handles all tariff and VAT calculations:
-- `calculateDuty(value, hsCode, originCountry)` - Returns duty amount and rate
-- `calculateVAT(dutiableValue, hsCode)` - Returns VAT amount
-- `searchHSCodes(query)` - Searches HS codes by code or description
+- `calculateDuty(value, hsCode, originCountry)` - Computes duty and surcharge for active tariff rows
+- `calculateVAT(dutiableValue, hsCode)` - Computes VAT from the active tariff row
+- `searchHSCodes(query)` - Searches HS codes by code/description with ranked results
 - `getHSCodeDetails(code)` - Gets detailed HS code info
-- `calculateTotalLandedCost(...)` - Full cost calculation
+- `calculateTotalLandedCost(...)` - Full landed-cost helper (value + duty + surcharge + VAT)
 
 ### ComplianceChecker
 Manages import compliance requirements:
@@ -208,10 +297,18 @@ Manages import compliance requirements:
 
 ### CurrencyConverter
 Handles multi-currency conversion:
-- `convert(amount, fromCurrency, toCurrency)` - Converts between currencies
+- `convert(amount, fromCurrency, toCurrency)` - Converts currencies and returns rate source (identity/cache/live/fallback)
 - `convertToPhilippinePeso(amount, currency)` - Quick conversion to PHP
 - `getConversionMatrix(baseCurrency)` - Gets all rates for a base currency
-- Uses external API with offline fallback rates
+- Uses exchange-rate API with SQLite caching and static fallback rates
+
+### TariffDataIngestionService
+Handles source import preview and ingestion workflows:
+- `parseCsvText(input)` - Parses source rows from CSV text
+- `previewRows(rows)` - Validates and normalizes rows before import
+- `importRows(request)` - Imports rows with confidence-based review queue routing
+- `getImportJobs(limit)` - Lists recent import runs
+- `getPendingReviewRows(importJobId)` - Lists rows awaiting manual review
 
 ## Tariff Duty Calculation Logic
 
@@ -249,7 +346,7 @@ Results:
 Notes:
 
 - If no tariff row is found, duty defaults to 0 and VAT defaults to 12%.
-- Currency conversion is handled separately when users need cross-currency estimates.
+- For non-PHP input, the app converts values to PHP before duty/VAT computation, then converts results back to display currency.
 
 ### Validation Rules
 
@@ -277,6 +374,10 @@ The app uses Electron's IPC for secure communication between main and renderer p
 - `get-compliance-requirements` - Get compliance info
 - `convert-currency` - Currency conversion
 - `batch-calculate` - Bulk calculations
+- `preview-tariff-import` - Validate and preview tariff source rows
+- `import-tariff-data` - Execute tariff source import
+- `get-import-jobs` - Get recent import job statuses
+- `get-pending-review-rows` - Get rows queued for manual review
 - `generate-calculation-document` - Generate PDF report
 
 **Usage from React:**
@@ -375,9 +476,10 @@ npm run dist
 
 ## Known Issues & Limitations
 
-1. **Exchange Rates:** Currency conversion requires internet connection. Falls back to static rates if API unavailable.
+1. **Exchange Rates:** Live rates depend on internet availability; the app falls back to static rates when unavailable.
 2. **Database Size:** Current SQLite setup supports ~100,000 HS codes. For larger datasets, consider migration to PostgreSQL.
-3. **Performance:** Search across large HS code tables may slow down with >500,000 entries. Indexing is implemented but may need optimization.
+3. **Performance:** Search across very large HS code tables may degrade beyond ~500,000 entries; indexing is implemented but may need further tuning.
+4. **Ingestion UI:** Import/review backend workflow is implemented, but full admin UI for source operations is still in progress.
 
 ## Future Enhancements
 
@@ -402,15 +504,14 @@ MIT
 ## Changelog
 
 ### v0.1.0 (Current)
-- Initial project scaffold
-- Database schema and seeding
-- Core calculator services
-- React frontend with Calculator, Batch Import, and Tariff Browser pages
-- IPC communication layer
-- Sidebar navigation
-- HS code search
-- Calculation results display
-- PDF report generation
+- Electron + React + TypeScript desktop scaffold
+- SQLite schema, compatibility migrations, and seed data
+- Duty and VAT engine with surcharge-aware taxable base
+- Currency conversion with cache/live/fallback behavior
+- Ranked HS code search with keyboard navigation support
+- Calculator, Batch Import, and Tariff Browser pages
+- Compliance checks and PDF report export
+- Tariff ingestion backend foundation (preview/import jobs/review queue/audit) with IPC handlers
 
 ---
 
