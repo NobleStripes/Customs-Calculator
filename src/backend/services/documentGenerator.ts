@@ -64,6 +64,7 @@ export class DocumentGenerator {
     results: CalculationResultsData
     generatedAt?: string
   }): void {
+    const calculationCurrency = 'PHP'
     const now = payload.generatedAt || new Date().toISOString()
     const dutyRate = payload.results.duty?.rate || 0
     const dutyAmount = payload.results.duty?.amount || 0
@@ -107,36 +108,36 @@ export class DocumentGenerator {
     doc.fontSize(13).text('Tax and Duty Breakdown')
     doc.moveDown(0.3)
     doc.fontSize(11)
-    doc.text(`Taxable Value PH: ${taxableValue.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`Brokerage Fee: ${brokerageFee.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`Arrastre / Wharfage: ${arrastreWharfage.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`Dox Stamp & Others: ${doxStampOthers.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`VAT Base / TLC: ${vatBase.toFixed(2)} ${payload.formData.currency}`)
+    doc.text(`Taxable Value PH: ${taxableValue.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`Brokerage Fee: ${brokerageFee.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`Arrastre / Wharfage: ${arrastreWharfage.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`Dox Stamp & Others: ${doxStampOthers.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`VAT Base / TLC: ${vatBase.toFixed(2)} ${calculationCurrency}`)
     doc.moveDown(0.3)
-    doc.text(`CUD: ${dutyAmount.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`VAT: ${vatAmount.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`Total Item Tax: ${itemTaxTotal.toFixed(2)} ${payload.formData.currency}`)
+    doc.text(`CUD: ${dutyAmount.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`VAT: ${vatAmount.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`Total Item Tax: ${itemTaxTotal.toFixed(2)} ${calculationCurrency}`)
     doc.moveDown(0.3)
     if (transitCharge > 0) {
-      doc.text(`TC: ${transitCharge.toFixed(2)} ${payload.formData.currency}`)
+      doc.text(`TC: ${transitCharge.toFixed(2)} ${calculationCurrency}`)
     }
-    doc.text(`IPC: ${ipc.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`CSF: ${csf.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`CDS: ${cds.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`IRS: ${irs.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`Total Global Tax: ${totalGlobalTax.toFixed(2)} ${payload.formData.currency}`)
+    doc.text(`IPC: ${ipc.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`CSF: ${csf.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`CDS: ${cds.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`IRS: ${irs.toFixed(2)} ${calculationCurrency}`)
+    doc.text(`Total Global Tax: ${totalGlobalTax.toFixed(2)} ${calculationCurrency}`)
     doc.moveDown(0.3)
     doc.text(`Duty Rate: ${dutyRate.toFixed(2)}%`)
     doc.text(`VAT Rate: ${vatRate.toFixed(2)}%`)
-    doc.text(`Surcharge: ${surcharge.toFixed(2)} ${payload.formData.currency}`)
+    doc.text(`Surcharge: ${surcharge.toFixed(2)} ${calculationCurrency}`)
     doc.moveDown(0.7)
     doc.fontSize(12).text(
-      `Total Tax and Fees: ${totalTaxAndFees.toFixed(2)} ${payload.formData.currency}`,
+      `Total Tax and Fees: ${totalTaxAndFees.toFixed(2)} ${calculationCurrency}`,
       { underline: true }
     )
     doc.moveDown(0.4)
     doc.fontSize(12).text(
-      `Total Landed Cost: ${payload.results.totalLandedCost.toFixed(2)} ${payload.formData.currency}`,
+      `Total Landed Cost: ${payload.results.totalLandedCost.toFixed(2)} ${calculationCurrency}`,
       { underline: true }
     )
 

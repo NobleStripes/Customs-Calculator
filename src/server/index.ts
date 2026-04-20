@@ -180,46 +180,45 @@ app.post('/api/calculate/batch', async (request, response) => {
       const vatBasePhp = valueInPhp + dutyResult.amount + dutyResult.surcharge + brokerageFeePhp + Number(shipment.arrastreWharfage || 0) + Number(shipment.doxStampOthers || 0) + totalGlobalFeesPhp
       const vatAmountPhp = vatBasePhp * VAT_RATE
       const complianceResult = await complianceChecker.getRequirements(resolvedCode.code, valueInPhp, 'MNL')
-      const convertFromPhp = (amount: number) => (shipmentCurrency === 'PHP' ? amount : amount / conversionResult.rate)
-
       results.push({
         ...shipment,
         hsCode: resolvedCode.code,
         duty: {
-          amount: convertFromPhp(dutyResult.amount),
-          surcharge: convertFromPhp(dutyResult.surcharge),
+          amount: dutyResult.amount,
+          surcharge: dutyResult.surcharge,
           rate: dutyResult.rate,
           notes: dutyResult.notes,
         },
         vat: {
-          amount: convertFromPhp(vatAmountPhp),
+          amount: vatAmountPhp,
           rate: VAT_RATE * 100,
         },
         compliance: complianceResult,
         costBase: {
-          taxableValue: convertFromPhp(valueInPhp),
-          brokerageFee: convertFromPhp(brokerageFeePhp),
-          arrastreWharfage: convertFromPhp(Number(shipment.arrastreWharfage || 0)),
-          doxStampOthers: convertFromPhp(Number(shipment.doxStampOthers || 0)),
-          vatBase: convertFromPhp(vatBasePhp),
+          taxableValue: valueInPhp,
+          brokerageFee: brokerageFeePhp,
+          arrastreWharfage: Number(shipment.arrastreWharfage || 0),
+          doxStampOthers: Number(shipment.doxStampOthers || 0),
+          vatBase: vatBasePhp,
         },
         breakdown: {
           itemTaxes: {
-            cud: convertFromPhp(dutyResult.amount),
-            vat: convertFromPhp(vatAmountPhp),
-            totalItemTax: convertFromPhp(dutyResult.amount + vatAmountPhp),
+            cud: dutyResult.amount,
+            vat: vatAmountPhp,
+            totalItemTax: dutyResult.amount + vatAmountPhp,
           },
           globalFees: {
-            transitCharge: convertFromPhp(transitChargePhp),
-            ipc: convertFromPhp(ipcPhp),
-            csf: convertFromPhp(csfPhp),
-            cds: convertFromPhp(cdsPhp),
-            irs: convertFromPhp(irsPhp),
-            totalGlobalTax: convertFromPhp(totalGlobalFeesPhp),
+            transitCharge: transitChargePhp,
+            ipc: ipcPhp,
+            csf: csfPhp,
+            cds: cdsPhp,
+            irs: irsPhp,
+            totalGlobalTax: totalGlobalFeesPhp,
           },
-          totalTaxAndFees: convertFromPhp(dutyResult.amount + vatAmountPhp + totalGlobalFeesPhp),
+          totalTaxAndFees: dutyResult.amount + vatAmountPhp + totalGlobalFeesPhp,
         },
-        totalLandedCost: convertFromPhp(vatBasePhp + vatAmountPhp),
+        totalLandedCost: vatBasePhp + vatAmountPhp,
+        calculationCurrency: 'PHP',
         fx: {
           applied: shipmentCurrency !== 'PHP',
           rateToPhp: conversionResult.rate,

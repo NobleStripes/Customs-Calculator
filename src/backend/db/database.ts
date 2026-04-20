@@ -25,6 +25,19 @@ export const getDatabase = (): sqlite3.Database => {
   return db
 }
 
+const runStatement = (database: sqlite3.Database, sql: string, params: Array<string | number | null> = []): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    database.run(sql, params, (err: Error | null) => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      resolve()
+    })
+  })
+}
+
 const schema = [
   `CREATE TABLE IF NOT EXISTS hs_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,7 +238,10 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
       }
 
       if (migrationStatements.length === 0) {
-        ensureComplianceRulesSchemaCompatibility(database).then(resolve).catch(reject)
+        ensureComplianceRulesSchemaCompatibility(database)
+          .then(() => cleanupDuplicateSeedRows(database))
+          .then(resolve)
+          .catch(reject)
         return
       }
 
@@ -239,12 +255,61 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
 
           completed += 1
           if (completed === migrationStatements.length) {
-            ensureComplianceRulesSchemaCompatibility(database).then(resolve).catch(reject)
+            ensureComplianceRulesSchemaCompatibility(database)
+              .then(() => cleanupDuplicateSeedRows(database))
+              .then(resolve)
+              .catch(reject)
           }
         })
       })
     })
   })
+}
+
+const cleanupDuplicateSeedRows = async (database: sqlite3.Database): Promise<void> => {
+  await runStatement(
+    database,
+    `
+      DELETE FROM tariff_rates
+      WHERE id NOT IN (
+        SELECT MIN(id)
+        FROM tariff_rates
+        GROUP BY
+          hs_code,
+          duty_rate,
+          vat_rate,
+          surcharge_rate,
+          effective_date,
+          IFNULL(end_date, ''),
+          IFNULL(notes, ''),
+          IFNULL(source_id, -1),
+          confidence_score,
+          IFNULL(import_status, '')
+      )
+    `
+  )
+
+  await runStatement(
+    database,
+    `
+      DELETE FROM compliance_rules
+      WHERE id NOT IN (
+        SELECT MIN(id)
+        FROM compliance_rules
+        GROUP BY
+          hs_code_range,
+          category,
+          IFNULL(required_documents, ''),
+          IFNULL(restrictions, ''),
+          IFNULL(special_conditions, ''),
+          IFNULL(source_id, -1),
+          IFNULL(effective_date, ''),
+          IFNULL(end_date, ''),
+          confidence_score,
+          IFNULL(import_status, '')
+      )
+    `
+  )
 }
 
 const ensureComplianceRulesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
@@ -359,8 +424,34 @@ const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
 
     tariffData.forEach((item) => {
       database.run(
-        'INSERT OR IGNORE INTO tariff_rates (hs_code, duty_rate, vat_rate, surcharge_rate, effective_date) VALUES (?, ?, ?, ?, ?)',
-        [item.hs_code, item.duty_rate, item.vat_rate, item.surcharge_rate, todayDate],
+        `
+          INSERT INTO tariff_rates (hs_code, duty_rate, vat_rate, surcharge_rate, effective_date)
+          SELECT ?, ?, ?, ?, ?
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM tariff_rates
+            WHERE hs_code = ?
+              AND duty_rate = ?
+              AND vat_rate = ?
+              AND surcharge_rate = ?
+              AND effective_date = ?
+              AND end_date IS NULL
+              AND source_id IS NULL
+              AND (import_status = 'approved' OR import_status IS NULL)
+          )
+        `,
+        [
+          item.hs_code,
+          item.duty_rate,
+          item.vat_rate,
+          item.surcharge_rate,
+          todayDate,
+          item.hs_code,
+          item.duty_rate,
+          item.vat_rate,
+          item.surcharge_rate,
+          todayDate,
+        ],
         (err: Error | null) => {
           if (err) {
             console.error(`Error inserting tariff for ${item.hs_code}:`, err)
@@ -420,8 +511,35 @@ const insertComplianceRules = (database: sqlite3.Database): Promise<void> => {
 
     complianceData.forEach((item) => {
       database.run(
-        'INSERT OR IGNORE INTO compliance_rules (hs_code_range, category, required_documents, restrictions, special_conditions) VALUES (?, ?, ?, ?, ?)',
-        [item.hs_code_range, item.category, item.required_documents, item.restrictions, item.special_conditions],
+        `
+          INSERT INTO compliance_rules (hs_code_range, category, required_documents, restrictions, special_conditions)
+          SELECT ?, ?, ?, ?, ?
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM compliance_rules
+            WHERE hs_code_range = ?
+              AND category = ?
+              AND IFNULL(required_documents, '') = ?
+              AND IFNULL(restrictions, '') = ?
+              AND IFNULL(special_conditions, '') = ?
+              AND source_id IS NULL
+              AND effective_date IS NULL
+              AND end_date IS NULL
+              AND (import_status = 'approved' OR import_status IS NULL)
+          )
+        `,
+        [
+          item.hs_code_range,
+          item.category,
+          item.required_documents,
+          item.restrictions,
+          item.special_conditions,
+          item.hs_code_range,
+          item.category,
+          item.required_documents,
+          item.restrictions,
+          item.special_conditions,
+        ],
         (err: Error | null) => {
           if (err) {
             console.error(`Error inserting compliance rule for ${item.hs_code_range}:`, err)

@@ -196,7 +196,27 @@ const normalizeRate = (value: string | number | undefined, fallback: number): nu
   return numeric > 1 ? numeric / 100 : numeric
 }
 
-const normalizeHsCode = (hsCode: string): string => hsCode.trim().toUpperCase()
+const normalizeHsCode = (hsCode: string): string => {
+  const compact = hsCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+  if (/^\d{4}$/.test(compact)) {
+    return compact
+  }
+
+  if (/^\d{6}$/.test(compact)) {
+    return `${compact.slice(0, 4)}.${compact.slice(4)}`
+  }
+
+  if (/^\d{8}$/.test(compact)) {
+    return `${compact.slice(0, 4)}.${compact.slice(4, 6)}.${compact.slice(6)}`
+  }
+
+  if (/^\d{10}$/.test(compact)) {
+    return `${compact.slice(0, 4)}.${compact.slice(4, 6)}.${compact.slice(6, 8)}.${compact.slice(8)}`
+  }
+
+  return hsCode.trim().toUpperCase()
+}
 
 const parseDateOrFallback = (value: string | undefined, fallback: string): string => {
   if (!value) {

@@ -283,7 +283,16 @@ export class TariffCalculator {
           tr.surcharge_rate,
           tr.effective_date
         FROM hs_codes hc
-        JOIN tariff_rates tr ON tr.hs_code = hc.code
+        JOIN tariff_rates tr ON tr.id = (
+          SELECT tr2.id
+          FROM tariff_rates tr2
+          WHERE tr2.hs_code = hc.code
+            AND tr2.effective_date <= date('now')
+            AND (tr2.end_date IS NULL OR tr2.end_date > date('now'))
+            AND (tr2.import_status = 'approved' OR tr2.import_status IS NULL)
+          ORDER BY tr2.effective_date DESC, COALESCE(tr2.last_modified_at, tr2.created_at) DESC, tr2.id DESC
+          LIMIT 1
+        )
         WHERE (hc.code LIKE ? OR hc.description LIKE ?)
       `
 

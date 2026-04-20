@@ -226,16 +226,6 @@ export const Calculator: React.FC = () => {
           ? complianceResult.data ?? null
           : null
 
-      const convertFromPhp = (amount: number): number => {
-        if (inputCurrency === 'PHP') {
-          return amount
-        }
-
-        return amount / fxRateToPhp
-      }
-
-      const convertedDutyAmount = convertFromPhp(dutyAmount)
-      const convertedSurchargeAmount = convertFromPhp(surchargeAmount)
       const brokerageFeePhp = getBrokerageFeePhp(taxableValuePhp)
       const arrastreWharfagePhp = formData.arrastreWharfage
       const doxStampOthersPhp = formData.doxStampOthers
@@ -271,52 +261,45 @@ export const Calculator: React.FC = () => {
         totalGlobalFeesPhp
       const vatAmountPhp = vatBasePhp * VAT_RATE
       const totalTaxAndFeesPhp = dutyAmount + vatAmountPhp + totalGlobalFeesPhp
-      const convertedVatAmount = convertFromPhp(vatAmountPhp)
-      const convertedTotal = convertFromPhp(vatBasePhp + vatAmountPhp)
-      const convertedTaxableValue = convertFromPhp(taxableValuePhp)
-      const convertedBrokerageFee = convertFromPhp(brokerageFeePhp)
-      const convertedArrastreWharfage = convertFromPhp(arrastreWharfagePhp)
-      const convertedDoxStampOthers = convertFromPhp(doxStampOthersPhp)
-      const convertedVatBase = convertFromPhp(vatBasePhp)
 
       setResults({
         duty: {
           ...dutyData,
-          amount: convertedDutyAmount,
-          surcharge: convertedSurchargeAmount,
+          amount: dutyAmount,
+          surcharge: surchargeAmount,
         },
         vat: {
           rate: VAT_RATE * 100,
-          amount: convertedVatAmount,
+          amount: vatAmountPhp,
         },
         compliance: complianceData,
         costBase: {
           fob: formData.value,
           freight: formData.freight,
           insurance: formData.insurance,
-          taxableValue: convertedTaxableValue,
-          brokerageFee: convertedBrokerageFee,
-          arrastreWharfage: convertedArrastreWharfage,
-          doxStampOthers: convertedDoxStampOthers,
-          vatBase: convertedVatBase,
+          taxableValue: taxableValuePhp,
+          brokerageFee: brokerageFeePhp,
+          arrastreWharfage: arrastreWharfagePhp,
+          doxStampOthers: doxStampOthersPhp,
+          vatBase: vatBasePhp,
         },
         breakdown: {
           itemTaxes: {
-            cud: convertedDutyAmount,
-            vat: convertedVatAmount,
-            totalItemTax: convertedDutyAmount + convertedVatAmount,
+            cud: dutyAmount,
+            vat: vatAmountPhp,
+            totalItemTax: dutyAmount + vatAmountPhp,
           },
           globalFees: {
-            transitCharge: convertFromPhp(transitChargePhp),
-            ipc: convertFromPhp(ipcPhp),
-            csf: convertFromPhp(csfPhp),
-            cds: convertFromPhp(cdsPhp),
-            irs: convertFromPhp(irsPhp),
-            totalGlobalTax: convertFromPhp(totalGlobalFeesPhp),
+            transitCharge: transitChargePhp,
+            ipc: ipcPhp,
+            csf: csfPhp,
+            cds: cdsPhp,
+            irs: irsPhp,
+            totalGlobalTax: totalGlobalFeesPhp,
           },
-          totalTaxAndFees: convertFromPhp(totalTaxAndFeesPhp),
+          totalTaxAndFees: totalTaxAndFeesPhp,
         },
-        totalLandedCost: convertedTotal,
+        totalLandedCost: vatBasePhp + vatAmountPhp,
         calculationCurrency: 'PHP',
         fx: {
           applied: inputCurrency !== 'PHP',

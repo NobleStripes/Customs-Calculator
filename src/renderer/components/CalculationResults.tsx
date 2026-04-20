@@ -14,6 +14,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
   const [exporting, setExporting] = useState(false)
   const [exportMessage, setExportMessage] = useState<string | null>(null)
   const [exportFormat, setExportFormat] = useState<'pdf' | 'word' | 'excel'>('pdf')
+  const calculationCurrency = results.calculationCurrency || 'PHP'
 
   const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', {
@@ -77,7 +78,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
         <div className="result-card summary">
           <h3>Total Landed Cost</h3>
           <p className="amount">
-            {formatCurrency(results.totalLandedCost, formData.currency)}
+            {formatCurrency(results.totalLandedCost, calculationCurrency)}
           </p>
           <p className="detail">
             FOB Value: {formatCurrency(formData.value, formData.currency)}
@@ -97,7 +98,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
         <div className="result-card">
           <h3>Taxable Value (PHP Base)</h3>
           <p className="amount">
-            {formatCurrency(costBase.taxableValue || 0, formData.currency)}
+            {formatCurrency(costBase.taxableValue || 0, calculationCurrency)}
           </p>
           <p className="detail">
             FOB + Freight + Insurance converted using the applied forex rate
@@ -107,7 +108,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
         <div className="result-card">
           <h3>Brokerage Fee</h3>
           <p className="amount">
-            {formatCurrency(costBase.brokerageFee || 0, formData.currency)}
+            {formatCurrency(costBase.brokerageFee || 0, calculationCurrency)}
           </p>
           <p className="detail">
             Formula: (Taxable Value in Peso - 200,000) x 0.00125 + 5,300
@@ -119,46 +120,46 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <div className="breakdown-table">
             <div className="breakdown-row">
               <span>CUD</span>
-              <strong>{formatCurrency(dutyAmount, formData.currency)}</strong>
+              <strong>{formatCurrency(dutyAmount, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
               <span>VAT</span>
-              <strong>{formatCurrency(vatAmount, formData.currency)}</strong>
+              <strong>{formatCurrency(vatAmount, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row total-row">
               <span>Total Item Tax</span>
-              <strong>{formatCurrency(itemTaxTotal, formData.currency)}</strong>
+              <strong>{formatCurrency(itemTaxTotal, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row spacer-row" aria-hidden="true" />
             {extraFees.transitCharge > 0 && (
               <div className="breakdown-row">
                 <span>TC</span>
-                <strong>{formatCurrency(extraFees.transitCharge, formData.currency)}</strong>
+                <strong>{formatCurrency(extraFees.transitCharge, calculationCurrency)}</strong>
               </div>
             )}
             <div className="breakdown-row">
               <span>IPC</span>
-              <strong>{formatCurrency(extraFees.ipc, formData.currency)}</strong>
+              <strong>{formatCurrency(extraFees.ipc, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
               <span>CSF</span>
-              <strong>{formatCurrency(extraFees.csf, formData.currency)}</strong>
+              <strong>{formatCurrency(extraFees.csf, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
               <span>CDS</span>
-              <strong>{formatCurrency(extraFees.cds, formData.currency)}</strong>
+              <strong>{formatCurrency(extraFees.cds, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
               <span>IRS</span>
-              <strong>{formatCurrency(extraFees.irs, formData.currency)}</strong>
+              <strong>{formatCurrency(extraFees.irs, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row total-row">
               <span>Total Global Tax</span>
-              <strong>{formatCurrency(globalTaxTotal, formData.currency)}</strong>
+              <strong>{formatCurrency(globalTaxTotal, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row grand-total-row">
               <span>Total Tax and Fees</span>
-              <strong>{formatCurrency(totalTaxAndFees, formData.currency)}</strong>
+              <strong>{formatCurrency(totalTaxAndFees, calculationCurrency)}</strong>
             </div>
           </div>
           <p className="detail breakdown-note">
@@ -169,7 +170,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
         <div className="result-card">
           <h3>Import Duty</h3>
           <p className="amount">
-            {formatCurrency(results.duty?.amount || 0, formData.currency)}
+            {formatCurrency(results.duty?.amount || 0, calculationCurrency)}
           </p>
           <p className="detail">
             Rate: {formatNumber(results.duty?.rate || 0)}%
@@ -179,7 +180,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
         <div className="result-card">
           <h3>Value Added Tax (VAT)</h3>
           <p className="amount">
-            {formatCurrency(results.vat?.amount || 0, formData.currency)}
+            {formatCurrency(results.vat?.amount || 0, calculationCurrency)}
           </p>
           <p className="detail">
             Rate: {formatNumber(results.vat?.rate || 0)}%
@@ -192,7 +193,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
             <p className="amount">
               {formatCurrency(
                 results.duty.surcharge,
-                formData.currency
+                calculationCurrency
               )}
             </p>
             <p className="detail">Applied surcharges and fees</p>
@@ -241,7 +242,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
       <div className="results-summary">
         {results.fx?.applied && (
           <p className="fx-banner">
-            Calculations were performed in PHP for tariff accuracy and converted back to {formData.currency} for display.
+            Calculations were performed and are displayed in PHP for tariff accuracy.
           </p>
         )}
         <p>
@@ -251,21 +252,21 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <li>FOB Value: {formatCurrency(formData.value, formData.currency)}</li>
           <li>Freight: {formatCurrency(formData.freight || 0, formData.currency)}</li>
           <li>Insurance: {formatCurrency(formData.insurance || 0, formData.currency)}</li>
-          <li>Taxable Value PH: {formatCurrency(costBase.taxableValue || 0, formData.currency)}</li>
+          <li>Taxable Value PH: {formatCurrency(costBase.taxableValue || 0, calculationCurrency)}</li>
           <li>Duty Rate: {formatNumber(results.duty?.rate || 0)}%</li>
-          <li>Duty Amount: {formatCurrency(results.duty?.amount || 0, formData.currency)}</li>
-          <li>Surcharge: {formatCurrency(results.duty?.surcharge || 0, formData.currency)}</li>
-          <li>Brokerage Fee: {formatCurrency(costBase.brokerageFee || 0, formData.currency)}</li>
-          <li>Arrastre / Wharfage: {formatCurrency(costBase.arrastreWharfage || 0, formData.currency)}</li>
-          <li>Dox Stamp & Others: {formatCurrency(costBase.doxStampOthers || 0, formData.currency)}</li>
-          <li>VAT Base / TLC: {formatCurrency(costBase.vatBase || 0, formData.currency)}</li>
-          <li>Total Item Tax: {formatCurrency(itemTaxTotal, formData.currency)}</li>
-          <li>Total Global Tax: {formatCurrency(globalTaxTotal, formData.currency)}</li>
-          <li>Total Tax and Fees: {formatCurrency(totalTaxAndFees, formData.currency)}</li>
+          <li>Duty Amount: {formatCurrency(results.duty?.amount || 0, calculationCurrency)}</li>
+          <li>Surcharge: {formatCurrency(results.duty?.surcharge || 0, calculationCurrency)}</li>
+          <li>Brokerage Fee: {formatCurrency(costBase.brokerageFee || 0, calculationCurrency)}</li>
+          <li>Arrastre / Wharfage: {formatCurrency(costBase.arrastreWharfage || 0, calculationCurrency)}</li>
+          <li>Dox Stamp & Others: {formatCurrency(costBase.doxStampOthers || 0, calculationCurrency)}</li>
+          <li>VAT Base / TLC: {formatCurrency(costBase.vatBase || 0, calculationCurrency)}</li>
+          <li>Total Item Tax: {formatCurrency(itemTaxTotal, calculationCurrency)}</li>
+          <li>Total Global Tax: {formatCurrency(globalTaxTotal, calculationCurrency)}</li>
+          <li>Total Tax and Fees: {formatCurrency(totalTaxAndFees, calculationCurrency)}</li>
           <li>VAT Rate: {formatNumber(results.vat?.rate || 0)}%</li>
-          <li>VAT Amount: {formatCurrency(results.vat?.amount || 0, formData.currency)}</li>
+          <li>VAT Amount: {formatCurrency(results.vat?.amount || 0, calculationCurrency)}</li>
           <li className="total">
-            Total: {formatCurrency(results.totalLandedCost, formData.currency)}
+            Total: {formatCurrency(results.totalLandedCost, calculationCurrency)}
           </li>
         </ul>
       </div>

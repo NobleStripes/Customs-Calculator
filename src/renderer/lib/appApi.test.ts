@@ -186,6 +186,35 @@ describe('appApi.batchCalculate', () => {
     expect(transitRow?.totalLandedCost).toBeCloseTo(43195.6)
     expect((transitRow?.totalLandedCost || 0) - (consumptionRow?.totalLandedCost || 0)).toBeCloseTo(840)
   })
+
+  it('returns computed batch amounts in PHP even when the input currency is not PHP', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.batchCalculate([
+      {
+        hsCode: '8421.23',
+        value: 100,
+        freight: 0,
+        insurance: 0,
+        originCountry: 'JPN',
+        currency: 'USD',
+        declarationType: 'consumption',
+        containerSize: 'none',
+        arrastreWharfage: 0,
+        doxStampOthers: 0,
+      },
+    ])
+
+    const row = result.data?.[0]
+
+    expect(result.success).toBe(true)
+    expect(row?.calculationCurrency).toBe('PHP')
+    expect(row?.fx?.baseCurrency).toBe('PHP')
+    expect(row?.costBase?.taxableValue).toBeCloseTo(5600)
+    expect(row?.duty?.amount).toBeCloseTo(392)
+    expect(row?.vat?.amount).toBeCloseTo(1371.48)
+    expect(row?.totalLandedCost).toBeCloseTo(12800.48)
+  })
 })
 
 describe('appApi HS lookup', () => {

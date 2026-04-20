@@ -32,10 +32,23 @@ type BatchResultRow = ShipmentRow & {
     source?: 'cache' | 'live' | 'fallback' | 'identity'
     timestamp?: string
   }
+  calculationCurrency?: string
+  costBase?: {
+    taxableValue?: number
+  }
   totalLandedCost?: number
 }
 
 const DEFAULT_CURRENCY = 'USD'
+const RESULT_CURRENCY = 'PHP'
+
+const formatCurrency = (amount: number, currency: string = RESULT_CURRENCY) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)
 
 const parseCsvText = (input: string): ShipmentRow[] => {
   const lines = input
@@ -107,11 +120,11 @@ const toCsv = (rows: BatchResultRow[]): string => {
     'containerSize',
     'arrastreWharfage',
     'doxStampOthers',
-    'dutyAmount',
+    'dutyAmountPhp',
     'dutyRate',
-    'vatAmount',
+    'vatAmountPhp',
     'vatRate',
-    'totalLandedCost',
+    'totalLandedCostPhp',
   ]
 
   const lines = rows.map((row) => {
@@ -154,7 +167,7 @@ export const BatchImport: React.FC = () => {
         const duty = row.duty?.amount || 0
         const vat = row.vat?.amount || 0
         acc.shipments += 1
-        acc.declaredValue += row.value
+        acc.taxableValuePhp += row.costBase?.taxableValue || 0
         acc.totalDuty += duty
         acc.totalVat += vat
         acc.totalLanded += row.totalLandedCost || (row.value + duty + vat)
@@ -162,7 +175,7 @@ export const BatchImport: React.FC = () => {
       },
       {
         shipments: 0,
-        declaredValue: 0,
+        taxableValuePhp: 0,
         totalDuty: 0,
         totalVat: 0,
         totalLanded: 0,
@@ -330,20 +343,20 @@ export const BatchImport: React.FC = () => {
         )}
         <div className="summary-grid">
           <div className="summary-item">
-            <label>Declared Value</label>
-            <strong>{totals.declaredValue.toFixed(2)}</strong>
+            <label>Taxable Value (PHP)</label>
+            <strong>{formatCurrency(totals.taxableValuePhp)}</strong>
           </div>
           <div className="summary-item">
-            <label>Total Duty</label>
-            <strong>{totals.totalDuty.toFixed(2)}</strong>
+            <label>Total Duty (PHP)</label>
+            <strong>{formatCurrency(totals.totalDuty)}</strong>
           </div>
           <div className="summary-item">
-            <label>Total VAT</label>
-            <strong>{totals.totalVat.toFixed(2)}</strong>
+            <label>Total VAT (PHP)</label>
+            <strong>{formatCurrency(totals.totalVat)}</strong>
           </div>
           <div className="summary-item">
-            <label>Total Landed</label>
-            <strong>{totals.totalLanded.toFixed(2)}</strong>
+            <label>Total Landed (PHP)</label>
+            <strong>{formatCurrency(totals.totalLanded)}</strong>
           </div>
         </div>
 
@@ -352,10 +365,10 @@ export const BatchImport: React.FC = () => {
             <thead>
               <tr>
                 <th>HS Code</th>
-                <th>Value</th>
-                <th>Duty</th>
-                <th>VAT</th>
-                <th>Total</th>
+                <th>FOB Input</th>
+                <th>Duty (PHP)</th>
+                <th>VAT (PHP)</th>
+                <th>Total Landed (PHP)</th>
               </tr>
             </thead>
             <tbody>
@@ -374,10 +387,10 @@ export const BatchImport: React.FC = () => {
                 return (
                   <tr key={`${row.hsCode}-result-${index}`}>
                     <td>{row.hsCode}</td>
-                    <td>{row.value.toFixed(2)}</td>
-                    <td>{duty.toFixed(2)}</td>
-                    <td>{vat.toFixed(2)}</td>
-                    <td>{total.toFixed(2)}</td>
+                    <td>{formatCurrency(row.value, row.currency)}</td>
+                    <td>{formatCurrency(duty)}</td>
+                    <td>{formatCurrency(vat)}</td>
+                    <td>{formatCurrency(total)}</td>
                   </tr>
                 )
               })}
