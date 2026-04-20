@@ -6,19 +6,54 @@ import './Calculator.css'
 
 interface CalculationPayload {
   value: number
+  freight: number
+  insurance: number
   hsCode: string
   originCountry: string
   destinationPort: string
   currency: string
+  containerSize: 'none' | '20ft' | '40ft'
+  arrastreWharfage: number
+  doxStampOthers: number
+  declarationType: 'consumption' | 'warehousing' | 'transit'
+}
+
+const TRANSIT_CHARGE_PHP = 1000
+const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
+const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
+const VAT_RATE = 0.12
+
+const getContainerSecurityFeeUsd = (containerSize: CalculationPayload['containerSize']): number => {
+  if (containerSize === '40ft') return 10
+  if (containerSize === '20ft') return 5
+  return 0
+}
+
+const getBrokerageFeePhp = (taxableValuePhp: number): number =>
+  ((taxableValuePhp - 200000) * 0.00125) + 5300
+
+const getImportProcessingChargePhp = (dutiableValuePhp: number): number => {
+  if (dutiableValuePhp <= 25000) return 250
+  if (dutiableValuePhp <= 50000) return 500
+  if (dutiableValuePhp <= 250000) return 750
+  if (dutiableValuePhp <= 500000) return 1000
+  if (dutiableValuePhp <= 750000) return 1500
+  return 2000
 }
 
 export const Calculator: React.FC = () => {
   const [formData, setFormData] = useState<CalculationPayload>({
     value: 0,
+    freight: 0,
+    insurance: 0,
     hsCode: '',
     originCountry: '',
     destinationPort: 'MNL', // Manila by default
     currency: 'USD',
+    containerSize: '20ft',
+    arrastreWharfage: 0,
+    doxStampOthers: 0,
+    declarationType: 'consumption',
   })
 
   const [results, setResults] = useState<any>(null)
@@ -138,13 +173,13 @@ export const Calculator: React.FC = () => {
     try {
       const canonicalHsCode = resolvedCode.code
       setFormData((prev) => ({ ...prev, hsCode: canonicalHsCode }))
-      let calculationValue = formData.value
+      let taxableValuePhp = formData.value + formData.freight + formData.insurance
       let fxRateToPhp = 1
       const inputCurrency = formData.currency.toUpperCase()
 
       if (inputCurrency !== 'PHP') {
         const conversionResult = await appApi.convertCurrency({
-          amount: formData.value,
+          amount: formData.value + formData.freight + formData.insurance,
           fromCurrency: inputCurrency,
           toCurrency: 'PHP',
         })
@@ -153,13 +188,13 @@ export const Calculator: React.FC = () => {
           throw new Error(conversionResult.error || 'Currency conversion failed')
         }
 
-        calculationValue = conversionResult.data.convertedAmount
+        taxableValuePhp = conversionResult.data.convertedAmount
         fxRateToPhp = conversionResult.data.rate
       }
 
       // Calculate duty
       const dutyResult = await appApi.calculateDuty({
-        value: calculationValue,
+        value: taxableValuePhp,
         hsCode: canonicalHsCode,
         originCountry: formData.originCountry,
       })
@@ -176,34 +211,19 @@ export const Calculator: React.FC = () => {
 
       const dutyAmount = dutyData.amount
       const surchargeAmount = dutyData.surcharge || 0
-      const dutiableValue = calculationValue + dutyAmount + surchargeAmount
-
-      // Calculate VAT
-      const vatResult = await appApi.calculateVAT({
-        dutiableValue,
-        hsCode: canonicalHsCode,
-      })
-
-      if (!vatResult.success) {
-        throw new Error(vatResult.error)
-      }
-
-      if (!vatResult.data) {
-        throw new Error('VAT calculation returned no data')
-      }
-
-      const vatData = vatResult.data
 
       // Get compliance requirements
       const complianceResult = await appApi.getComplianceRequirements({
         hsCode: canonicalHsCode,
-        value: calculationValue,
+        value: taxableValuePhp,
         destination: formData.destinationPort,
       })
 
       const complianceData =
-        complianceResult.success && 'data' in complianceResult && complianceResult.data
-          ? complianceResult.data
+        typeof complianceResult === 'object' &&
+        complianceResult !== null &&
+        'data' in complianceResult
+          ? complianceResult.data ?? null
           : null
 
       const convertFromPhp = (amount: number): number => {
@@ -216,8 +236,48 @@ export const Calculator: React.FC = () => {
 
       const convertedDutyAmount = convertFromPhp(dutyAmount)
       const convertedSurchargeAmount = convertFromPhp(surchargeAmount)
-      const convertedVatAmount = convertFromPhp(vatData.amount || 0)
-      const convertedTotal = convertFromPhp(dutiableValue + (vatData.amount || 0))
+      const brokerageFeePhp = getBrokerageFeePhp(taxableValuePhp)
+      const arrastreWharfagePhp = formData.arrastreWharfage
+      const doxStampOthersPhp = formData.doxStampOthers
+      const csfUsd = getContainerSecurityFeeUsd(formData.containerSize)
+      let csfPhp = 0
+
+      if (csfUsd > 0) {
+        const csfConversion = await appApi.convertCurrency({
+          amount: csfUsd,
+          fromCurrency: 'USD',
+          toCurrency: 'PHP',
+        })
+
+        if (!csfConversion.success || !csfConversion.data) {
+          throw new Error(csfConversion.error || 'CSF conversion failed')
+        }
+
+        csfPhp = csfConversion.data.convertedAmount
+      }
+
+      const transitChargePhp = formData.declarationType === 'transit' ? TRANSIT_CHARGE_PHP : 0
+      const ipcPhp = formData.declarationType === 'transit' ? 250 : getImportProcessingChargePhp(taxableValuePhp)
+      const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
+      const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
+      const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp
+      const vatBasePhp =
+        taxableValuePhp +
+        dutyAmount +
+        surchargeAmount +
+        brokerageFeePhp +
+        arrastreWharfagePhp +
+        doxStampOthersPhp +
+        totalGlobalFeesPhp
+      const vatAmountPhp = vatBasePhp * VAT_RATE
+      const totalTaxAndFeesPhp = dutyAmount + vatAmountPhp + totalGlobalFeesPhp
+      const convertedVatAmount = convertFromPhp(vatAmountPhp)
+      const convertedTotal = convertFromPhp(vatBasePhp + vatAmountPhp)
+      const convertedTaxableValue = convertFromPhp(taxableValuePhp)
+      const convertedBrokerageFee = convertFromPhp(brokerageFeePhp)
+      const convertedArrastreWharfage = convertFromPhp(arrastreWharfagePhp)
+      const convertedDoxStampOthers = convertFromPhp(doxStampOthersPhp)
+      const convertedVatBase = convertFromPhp(vatBasePhp)
 
       setResults({
         duty: {
@@ -226,10 +286,36 @@ export const Calculator: React.FC = () => {
           surcharge: convertedSurchargeAmount,
         },
         vat: {
-          ...vatData,
+          rate: VAT_RATE * 100,
           amount: convertedVatAmount,
         },
         compliance: complianceData,
+        costBase: {
+          fob: formData.value,
+          freight: formData.freight,
+          insurance: formData.insurance,
+          taxableValue: convertedTaxableValue,
+          brokerageFee: convertedBrokerageFee,
+          arrastreWharfage: convertedArrastreWharfage,
+          doxStampOthers: convertedDoxStampOthers,
+          vatBase: convertedVatBase,
+        },
+        breakdown: {
+          itemTaxes: {
+            cud: convertedDutyAmount,
+            vat: convertedVatAmount,
+            totalItemTax: convertedDutyAmount + convertedVatAmount,
+          },
+          globalFees: {
+            transitCharge: convertFromPhp(transitChargePhp),
+            ipc: convertFromPhp(ipcPhp),
+            csf: convertFromPhp(csfPhp),
+            cds: convertFromPhp(cdsPhp),
+            irs: convertFromPhp(irsPhp),
+            totalGlobalTax: convertFromPhp(totalGlobalFeesPhp),
+          },
+          totalTaxAndFees: convertFromPhp(totalTaxAndFeesPhp),
+        },
         totalLandedCost: convertedTotal,
         calculationCurrency: 'PHP',
         fx: {
@@ -271,7 +357,7 @@ export const Calculator: React.FC = () => {
 
             <div className="form-row">
               <div className="form-group">
-                <label htmlFor="value">Product Value</label>
+                <label htmlFor="value">FOB Value</label>
                 <input
                   id="value"
                   type="number"
@@ -329,6 +415,44 @@ export const Calculator: React.FC = () => {
 
             <div className="form-row">
               <div className="form-group">
+                <label htmlFor="freight">Freight</label>
+                <input
+                  id="freight"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.freight}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      freight: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="insurance">Insurance</label>
+                <input
+                  id="insurance"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.insurance}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      insurance: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
                 <label htmlFor="origin">Origin Country</label>
                 <input
                   id="origin"
@@ -363,6 +487,82 @@ export const Calculator: React.FC = () => {
                   <option value="ILOILO">Iloilo (ILOILO)</option>
                   <option value="SUBIC">Subic (SUBIC)</option>
                 </select>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="declaration-type">Declaration Type</label>
+                <select
+                  id="declaration-type"
+                  value={formData.declarationType}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      declarationType: e.target.value as 'consumption' | 'warehousing' | 'transit',
+                    }))
+                  }
+                >
+                  <option value="consumption">Consumption</option>
+                  <option value="warehousing">Warehousing</option>
+                  <option value="transit">Transit</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="container-size">Container Size</label>
+                <select
+                  id="container-size"
+                  value={formData.containerSize}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      containerSize: e.target.value as 'none' | '20ft' | '40ft',
+                    }))
+                  }
+                >
+                  <option value="none">None / Loose Cargo</option>
+                  <option value="20ft">20-foot Container</option>
+                  <option value="40ft">40-foot Container</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="arrastre-wharfage">Arrastre / Wharfage (PHP)</label>
+                <input
+                  id="arrastre-wharfage"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.arrastreWharfage}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      arrastreWharfage: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  placeholder="Given amount for shipment"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="dox-stamp-others">Dox Stamp & Others (PHP)</label>
+                <input
+                  id="dox-stamp-others"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.doxStampOthers}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      doxStampOthers: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  placeholder="Given amount for shipment"
+                />
               </div>
             </div>
 

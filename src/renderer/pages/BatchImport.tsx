@@ -5,8 +5,13 @@ import './BatchImport.css'
 type ShipmentRow = {
   hsCode: string
   value: number
+  freight: number
+  insurance: number
   originCountry: string
   currency: string
+  containerSize: 'none' | '20ft' | '40ft'
+  arrastreWharfage: number
+  doxStampOthers: number
 }
 
 type BatchResultRow = ShipmentRow & {
@@ -26,6 +31,7 @@ type BatchResultRow = ShipmentRow & {
     source?: 'cache' | 'live' | 'fallback' | 'identity'
     timestamp?: string
   }
+  totalLandedCost?: number
 }
 
 const DEFAULT_CURRENCY = 'USD'
@@ -58,18 +64,28 @@ const parseCsvText = (input: string): ShipmentRow[] => {
 
     const hsCode = parts[0]
     const value = Number(parts[1])
-    const originCountry = (parts[2] || '').toUpperCase()
-    const currency = (parts[3] || DEFAULT_CURRENCY).toUpperCase()
+    const freight = Number(parts[2] || 0)
+    const insurance = Number(parts[3] || 0)
+    const originCountry = (parts[4] || '').toUpperCase()
+    const currency = (parts[5] || DEFAULT_CURRENCY).toUpperCase()
+    const containerSize = (parts[6] || '20ft').toLowerCase() as ShipmentRow['containerSize']
+    const arrastreWharfage = Number(parts[7] || 0)
+    const doxStampOthers = Number(parts[8] || 0)
 
-    if (!hsCode || Number.isNaN(value) || value <= 0 || !originCountry) {
+    if (!hsCode || Number.isNaN(value) || value <= 0 || Number.isNaN(freight) || Number.isNaN(insurance) || !originCountry || Number.isNaN(arrastreWharfage) || Number.isNaN(doxStampOthers)) {
       continue
     }
 
     rows.push({
       hsCode,
       value,
+      freight,
+      insurance,
       originCountry,
       currency,
+      containerSize: containerSize === '40ft' || containerSize === '20ft' || containerSize === 'none' ? containerSize : '20ft',
+      arrastreWharfage,
+      doxStampOthers,
     })
   }
 
@@ -80,8 +96,13 @@ const toCsv = (rows: BatchResultRow[]): string => {
   const header = [
     'hsCode',
     'value',
+    'freight',
+    'insurance',
     'originCountry',
     'currency',
+    'containerSize',
+    'arrastreWharfage',
+    'doxStampOthers',
     'dutyAmount',
     'dutyRate',
     'vatAmount',
@@ -92,13 +113,18 @@ const toCsv = (rows: BatchResultRow[]): string => {
   const lines = rows.map((row) => {
     const dutyAmount = row.duty?.amount || 0
     const vatAmount = row.vat?.amount || 0
-    const total = row.value + dutyAmount + vatAmount
+    const total = row.totalLandedCost || (row.value + dutyAmount + vatAmount)
 
     return [
       row.hsCode,
       row.value.toFixed(2),
+      row.freight.toFixed(2),
+      row.insurance.toFixed(2),
       row.originCountry,
       row.currency,
+      row.containerSize,
+      row.arrastreWharfage.toFixed(2),
+      row.doxStampOthers.toFixed(2),
       dutyAmount.toFixed(2),
       (row.duty?.rate || 0).toFixed(2),
       vatAmount.toFixed(2),
@@ -126,7 +152,7 @@ export const BatchImport: React.FC = () => {
         acc.declaredValue += row.value
         acc.totalDuty += duty
         acc.totalVat += vat
-        acc.totalLanded += row.value + duty + vat
+        acc.totalLanded += row.totalLandedCost || (row.value + duty + vat)
         return acc
       },
       {
@@ -151,7 +177,7 @@ export const BatchImport: React.FC = () => {
     if (parsed.length === 0) {
       setShipments([])
       setResults([])
-      setError('No valid rows found. Expected columns: hsCode,value,originCountry,currency(optional).')
+      setError('No valid rows found. Expected columns: hsCode,value,freight,insurance,originCountry,currency(optional),containerSize(optional),arrastreWharfage(optional),doxStampOthers(optional).')
       return
     }
 
@@ -223,14 +249,14 @@ export const BatchImport: React.FC = () => {
       <div className="batch-layout">
         <section className="batch-panel">
           <h2>Input CSV</h2>
-          <p className="hint">Use header: hsCode,value,originCountry,currency</p>
+          <p className="hint">Use header: hsCode,value,freight,insurance,originCountry,currency,containerSize,arrastreWharfage,doxStampOthers</p>
 
           <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
 
           <textarea
             value={rawCsv}
             onChange={(event) => setRawCsv(event.target.value)}
-            placeholder="hsCode,value,originCountry,currency\n8471.30,1000,CHN,USD\n8517.62,2500,USA,USD"
+            placeholder="hsCode,value,freight,insurance,originCountry,currency,containerSize,arrastreWharfage,doxStampOthers\n8471.30,1000,100,25,CHN,USD,20ft,4500,265\n8517.62,2500,200,30,USA,USD,40ft,6000,300"
           />
 
           <div className="actions">
@@ -255,15 +281,18 @@ export const BatchImport: React.FC = () => {
               <thead>
                 <tr>
                   <th>HS Code</th>
-                  <th>Value</th>
+                  <th>FOB</th>
+                  <th>Freight</th>
+                  <th>Insurance</th>
                   <th>Origin</th>
                   <th>Currency</th>
+                  <th>Container</th>
                 </tr>
               </thead>
               <tbody>
                 {shipments.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="empty-cell">
+                    <td colSpan={6} className="empty-cell">
                       Parse CSV to preview rows.
                     </td>
                   </tr>
@@ -272,8 +301,11 @@ export const BatchImport: React.FC = () => {
                   <tr key={`${row.hsCode}-${index}`}>
                     <td>{row.hsCode}</td>
                     <td>{row.value.toFixed(2)}</td>
+                    <td>{row.freight.toFixed(2)}</td>
+                    <td>{row.insurance.toFixed(2)}</td>
                     <td>{row.originCountry}</td>
                     <td>{row.currency}</td>
+                    <td>{row.containerSize}</td>
                   </tr>
                 ))}
               </tbody>
@@ -330,7 +362,7 @@ export const BatchImport: React.FC = () => {
               {results.map((row, index) => {
                 const duty = row.duty?.amount || 0
                 const vat = row.vat?.amount || 0
-                const total = row.value + duty + vat
+                const total = row.totalLandedCost || (row.value + duty + vat)
 
                 return (
                   <tr key={`${row.hsCode}-result-${index}`}>

@@ -22,6 +22,28 @@ const __dirname = path.dirname(__filename)
 const rendererDistPath = path.resolve(__dirname, '../renderer')
 
 const regulatorySources = new Set<RegulatorySource>(['boc', 'bir', 'tariff-commission'])
+const TRANSIT_CHARGE_PHP = 1000
+const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
+const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
+const VAT_RATE = 0.12
+
+const getImportProcessingChargePhp = (dutiableValuePhp: number): number => {
+  if (dutiableValuePhp <= 25000) return 250
+  if (dutiableValuePhp <= 50000) return 500
+  if (dutiableValuePhp <= 250000) return 750
+  if (dutiableValuePhp <= 500000) return 1000
+  if (dutiableValuePhp <= 750000) return 1500
+  return 2000
+}
+
+const getContainerSecurityFeeUsd = (containerSize: string): number => {
+  if (containerSize === '40ft') return 10
+  if (containerSize === '20ft') return 5
+  return 0
+}
+
+const getBrokerageFeePhp = (taxableValuePhp: number): number =>
+  ((taxableValuePhp - 200000) * 0.00125) + 5300
 
 const sendError = (response: express.Response, statusCode: number, error: unknown) => {
   response.status(statusCode).json({
@@ -122,6 +144,10 @@ app.post('/api/calculate/batch', async (request, response) => {
         throw new Error('Each shipment must include a valid numeric value')
       }
 
+      if (!Number.isFinite(Number(shipment?.freight ?? 0)) || !Number.isFinite(Number(shipment?.insurance ?? 0))) {
+        throw new Error('Each shipment must include valid freight and insurance values')
+      }
+
       if (typeof shipment?.hsCode !== 'string' || !shipment.hsCode.trim()) {
         throw new Error('Each shipment must include an hsCode')
       }
@@ -132,11 +158,26 @@ app.post('/api/calculate/batch', async (request, response) => {
       }
 
       const shipmentCurrency = String(shipment.currency || 'USD').trim().toUpperCase()
-      const conversionResult = await currencyConverter.convert(Number(shipment.value), shipmentCurrency, 'PHP')
-      const valueInPhp = shipmentCurrency === 'PHP' ? Number(shipment.value) : conversionResult.convertedAmount
+      const taxableInputAmount = Number(shipment.value) + Number(shipment.freight || 0) + Number(shipment.insurance || 0)
+      const conversionResult = await currencyConverter.convert(taxableInputAmount, shipmentCurrency, 'PHP')
+      const valueInPhp = shipmentCurrency === 'PHP' ? taxableInputAmount : conversionResult.convertedAmount
       const dutyResult = await tariffCalculator.calculateDuty(valueInPhp, resolvedCode.code, String(shipment.originCountry || ''))
-      const dutiableValue = valueInPhp + dutyResult.amount + dutyResult.surcharge
-      const vatResult = await tariffCalculator.calculateVAT(dutiableValue, resolvedCode.code)
+      const brokerageFeePhp = getBrokerageFeePhp(valueInPhp)
+      const csfUsd = getContainerSecurityFeeUsd(String(shipment.containerSize || '20ft').toLowerCase())
+      let csfPhp = 0
+
+      if (csfUsd > 0) {
+        const csfConversionResult = await currencyConverter.convert(csfUsd, 'USD', 'PHP')
+        csfPhp = csfConversionResult.convertedAmount
+      }
+
+      const transitChargePhp = 0
+      const ipcPhp = getImportProcessingChargePhp(valueInPhp)
+      const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
+      const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
+      const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp
+      const vatBasePhp = valueInPhp + dutyResult.amount + dutyResult.surcharge + brokerageFeePhp + Number(shipment.arrastreWharfage || 0) + Number(shipment.doxStampOthers || 0) + totalGlobalFeesPhp
+      const vatAmountPhp = vatBasePhp * VAT_RATE
       const complianceResult = await complianceChecker.getRequirements(resolvedCode.code, valueInPhp, 'MNL')
       const convertFromPhp = (amount: number) => (shipmentCurrency === 'PHP' ? amount : amount / conversionResult.rate)
 
@@ -150,12 +191,34 @@ app.post('/api/calculate/batch', async (request, response) => {
           notes: dutyResult.notes,
         },
         vat: {
-          amount: convertFromPhp(vatResult.amount),
-          rate: vatResult.rate,
-          notes: vatResult.notes,
+          amount: convertFromPhp(vatAmountPhp),
+          rate: VAT_RATE * 100,
         },
         compliance: complianceResult,
-        totalLandedCost: convertFromPhp(dutiableValue + vatResult.amount),
+        costBase: {
+          taxableValue: convertFromPhp(valueInPhp),
+          brokerageFee: convertFromPhp(brokerageFeePhp),
+          arrastreWharfage: convertFromPhp(Number(shipment.arrastreWharfage || 0)),
+          doxStampOthers: convertFromPhp(Number(shipment.doxStampOthers || 0)),
+          vatBase: convertFromPhp(vatBasePhp),
+        },
+        breakdown: {
+          itemTaxes: {
+            cud: convertFromPhp(dutyResult.amount),
+            vat: convertFromPhp(vatAmountPhp),
+            totalItemTax: convertFromPhp(dutyResult.amount + vatAmountPhp),
+          },
+          globalFees: {
+            transitCharge: convertFromPhp(transitChargePhp),
+            ipc: convertFromPhp(ipcPhp),
+            csf: convertFromPhp(csfPhp),
+            cds: convertFromPhp(cdsPhp),
+            irs: convertFromPhp(irsPhp),
+            totalGlobalTax: convertFromPhp(totalGlobalFeesPhp),
+          },
+          totalTaxAndFees: convertFromPhp(dutyResult.amount + vatAmountPhp + totalGlobalFeesPhp),
+        },
+        totalLandedCost: convertFromPhp(vatBasePhp + vatAmountPhp),
         fx: {
           applied: shipmentCurrency !== 'PHP',
           rateToPhp: conversionResult.rate,

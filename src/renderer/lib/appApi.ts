@@ -50,8 +50,13 @@ type ComplianceRuleRow = {
 type ShipmentRow = {
   hsCode: string
   value: number
+  freight: number
+  insurance: number
   originCountry: string
   currency: string
+  containerSize: 'none' | '20ft' | '40ft'
+  arrastreWharfage: number
+  doxStampOthers: number
 }
 
 type ImportPreviewRow = {
@@ -147,6 +152,28 @@ const fallbackRates: Record<string, number> = {
   GBP: 0.79,
   INR: 83.12,
 }
+
+const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
+const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
+const VAT_RATE = 0.12
+
+const getImportProcessingChargePhp = (dutiableValuePhp: number): number => {
+  if (dutiableValuePhp <= 25000) return 250
+  if (dutiableValuePhp <= 50000) return 500
+  if (dutiableValuePhp <= 250000) return 750
+  if (dutiableValuePhp <= 500000) return 1000
+  if (dutiableValuePhp <= 750000) return 1500
+  return 2000
+}
+
+const getContainerSecurityFeeUsd = (containerSize: ShipmentRow['containerSize']): number => {
+  if (containerSize === '40ft') return 10
+  if (containerSize === '20ft') return 5
+  return 0
+}
+
+const getBrokerageFeePhp = (taxableValuePhp: number): number =>
+  ((taxableValuePhp - 200000) * 0.00125) + 5300
 
 const importJobs: Array<Record<string, unknown>> = []
 const pendingReviewRows: Record<number, Array<Record<string, unknown>>> = {}
@@ -329,14 +356,35 @@ const buildDocumentMarkup = (payload: { formData: Record<string, unknown>; resul
         <h2>Shipment Details</h2>
         <table>
           <tr><th>HS Code</th><td>${escapeHtml(formData.hsCode)}</td></tr>
-          <tr><th>Declared Value</th><td>${escapeHtml(formData.value)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>FOB Value</th><td>${escapeHtml(formData.value)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Freight</th><td>${escapeHtml(formData.freight || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Insurance</th><td>${escapeHtml(formData.insurance || 0)} ${escapeHtml(formData.currency)}</td></tr>
           <tr><th>Origin Country</th><td>${escapeHtml(formData.originCountry || 'N/A')}</td></tr>
           <tr><th>Destination Port</th><td>${escapeHtml(formData.destinationPort)}</td></tr>
+          <tr><th>Declaration Type</th><td>${escapeHtml(formData.declarationType || 'consumption')}</td></tr>
+          <tr><th>Container Size</th><td>${escapeHtml(formData.containerSize || 'none')}</td></tr>
+          <tr><th>Arrastre / Wharfage</th><td>${escapeHtml(formData.arrastreWharfage || 0)} PHP</td></tr>
+          <tr><th>Dox Stamp & Others</th><td>${escapeHtml(formData.doxStampOthers || 0)} PHP</td></tr>
         </table>
       </section>
       <section>
         <h2>Calculation Summary</h2>
         <table>
+          <tr><th>Taxable Value PH</th><td>${escapeHtml(results.costBase?.taxableValue || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Brokerage Fee</th><td>${escapeHtml(results.costBase?.brokerageFee || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Arrastre / Wharfage</th><td>${escapeHtml(results.costBase?.arrastreWharfage || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Dox Stamp & Others</th><td>${escapeHtml(results.costBase?.doxStampOthers || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>VAT Base / TLC</th><td>${escapeHtml(results.costBase?.vatBase || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>CUD</th><td>${escapeHtml(results.duty?.amount || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>VAT</th><td>${escapeHtml(results.vat?.amount || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Total Item Tax</th><td>${escapeHtml(results.breakdown?.itemTaxes?.totalItemTax || ((results.duty?.amount || 0) + (results.vat?.amount || 0)))} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>TC</th><td>${escapeHtml(results.breakdown?.globalFees?.transitCharge || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>IPC</th><td>${escapeHtml(results.breakdown?.globalFees?.ipc || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>CSF</th><td>${escapeHtml(results.breakdown?.globalFees?.csf || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>CDS</th><td>${escapeHtml(results.breakdown?.globalFees?.cds || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>IRS</th><td>${escapeHtml(results.breakdown?.globalFees?.irs || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Total Global Tax</th><td>${escapeHtml(results.breakdown?.globalFees?.totalGlobalTax || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Total Tax and Fees</th><td>${escapeHtml(results.breakdown?.totalTaxAndFees || 0)} ${escapeHtml(formData.currency)}</td></tr>
           <tr><th>Duty Rate</th><td>${escapeHtml(results.duty?.rate || 0)}%</td></tr>
           <tr><th>Duty Amount</th><td>${escapeHtml(results.duty?.amount || 0)} ${escapeHtml(formData.currency)}</td></tr>
           <tr><th>Surcharge</th><td>${escapeHtml(results.duty?.surcharge || 0)} ${escapeHtml(formData.currency)}</td></tr>
@@ -673,18 +721,37 @@ export const appApi = {
       const results = []
       for (const shipment of shipments) {
         const shipmentCurrency = shipment.currency.toUpperCase()
-        const conversionResult = await getCurrencyConversion(shipment.value, shipmentCurrency, 'PHP')
+        const taxableInputAmount = shipment.value + shipment.freight + shipment.insurance
+        const conversionResult = await getCurrencyConversion(taxableInputAmount, shipmentCurrency, 'PHP')
         if (!conversionResult.success || !conversionResult.data) {
           throw new Error(conversionResult.error || 'Batch currency conversion failed')
         }
 
         const converted = conversionResult.data
-        const valueInPhp = shipmentCurrency === 'PHP' ? shipment.value : converted.convertedAmount
+        const valueInPhp = shipmentCurrency === 'PHP' ? taxableInputAmount : converted.convertedAmount
         const tariffRow = findCurrentTariff(shipment.hsCode)
         const dutyAmount = valueInPhp * (tariffRow?.duty_rate || 0)
         const surchargeAmount = valueInPhp * (tariffRow?.surcharge_rate || 0)
-        const dutiableValue = valueInPhp + dutyAmount + surchargeAmount
-        const vatAmount = dutiableValue * (tariffRow?.vat_rate || 0.12)
+        const brokerageFeePhp = getBrokerageFeePhp(valueInPhp)
+        const csfUsd = getContainerSecurityFeeUsd(shipment.containerSize)
+        let csfPhp = 0
+
+        if (csfUsd > 0) {
+          const csfConversion = await getCurrencyConversion(csfUsd, 'USD', 'PHP')
+          if (!csfConversion.success || !csfConversion.data) {
+            throw new Error(csfConversion.error || 'CSF conversion failed')
+          }
+
+          csfPhp = csfConversion.data.convertedAmount
+        }
+
+        const transitChargePhp = 0
+        const ipcPhp = getImportProcessingChargePhp(valueInPhp)
+        const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
+        const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
+        const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp
+        const vatBasePhp = valueInPhp + dutyAmount + surchargeAmount + brokerageFeePhp + shipment.arrastreWharfage + shipment.doxStampOthers + totalGlobalFeesPhp
+        const vatAmount = vatBasePhp * VAT_RATE
         const convertFromPhp = (amount: number) => (shipmentCurrency === 'PHP' ? amount : amount / converted.rate)
 
         results.push({
@@ -696,9 +763,32 @@ export const appApi = {
           },
           vat: {
             amount: convertFromPhp(vatAmount),
-            rate: (tariffRow?.vat_rate || 0.12) * 100,
+            rate: VAT_RATE * 100,
           },
-          totalLandedCost: convertFromPhp(dutiableValue + vatAmount),
+          costBase: {
+            taxableValue: convertFromPhp(valueInPhp),
+            brokerageFee: convertFromPhp(brokerageFeePhp),
+            arrastreWharfage: convertFromPhp(shipment.arrastreWharfage),
+            doxStampOthers: convertFromPhp(shipment.doxStampOthers),
+            vatBase: convertFromPhp(vatBasePhp),
+          },
+          breakdown: {
+            itemTaxes: {
+              cud: convertFromPhp(dutyAmount),
+              vat: convertFromPhp(vatAmount),
+              totalItemTax: convertFromPhp(dutyAmount + vatAmount),
+            },
+            globalFees: {
+              transitCharge: convertFromPhp(transitChargePhp),
+              ipc: convertFromPhp(ipcPhp),
+              csf: convertFromPhp(csfPhp),
+              cds: convertFromPhp(cdsPhp),
+              irs: convertFromPhp(irsPhp),
+              totalGlobalTax: convertFromPhp(totalGlobalFeesPhp),
+            },
+            totalTaxAndFees: convertFromPhp(dutyAmount + vatAmount + totalGlobalFeesPhp),
+          },
+          totalLandedCost: convertFromPhp(vatBasePhp + vatAmount),
           fx: {
             applied: shipmentCurrency !== 'PHP',
             rateToPhp: converted.rate,
