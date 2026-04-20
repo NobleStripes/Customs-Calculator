@@ -23,7 +23,7 @@ The project is in an active build-out phase: core calculation and operator workf
 
 **Architecture:**
 - **`src/renderer/`** - React single-page interface used by operators for calculator, browser, and batch workflows.
-- **`src/renderer/lib/appApi.ts`** - Browser-facing application API that powers calculations, search, conversion, export, and calls the Express proxy for website fetching.
+- **`src/renderer/lib/appApi.ts`** - Browser-facing application API that powers calculations, search, server-backed currency conversion, export, and calls the Express proxy for website fetching.
 - **`src/server/`** - Express server for health checks, regulated website fetch proxy routes, and production static hosting.
 - **`src/backend/`** - Shared Node-side services used by the Express API, including regulatory website fetch/discovery logic.
 
@@ -35,7 +35,7 @@ The project is in an active build-out phase: core calculation and operator workf
 - [x] Duty and VAT computation engine (effective-date aware tariff lookup)
 - [x] VAT taxable base calculation includes surcharge
 - [x] Multi-currency calculator flow (converts to PHP for computation, then back to display currency)
-- [x] Currency conversion flow with fallback FX behavior in website mode
+- [x] Currency conversion flow with live, cached, and fallback FX behavior in website mode
 - [x] HS code autocomplete search by code and description
 - [x] HS code search ranking and normalization (supports code searches with/without dots)
 - [x] HS code keyboard navigation (Arrow Up/Down, Enter, Escape)
@@ -88,6 +88,7 @@ Use this quick-start when running locally for website development.
    - Open `http://127.0.0.1:5173` in your browser for the app UI.
    - Vite will proxy browser `/api/*` requests to the Express server at `http://127.0.0.1:8787`.
    - You can check the backend directly at `http://127.0.0.1:8787/api/health`.
+   - Currency conversion is available through `http://127.0.0.1:8787/api/currency/convert?amount=1&from=USD&to=PHP`.
 
 4. **Run the built app**
    ```bash
@@ -98,6 +99,7 @@ Use this quick-start when running locally for website development.
    Web access after build:
    - Open `http://127.0.0.1:8787` in your browser for the production-style app.
    - The API is served from the same origin, for example `http://127.0.0.1:8787/api/health`.
+   - Currency conversion is served from the same origin, for example `http://127.0.0.1:8787/api/currency/convert?amount=1&from=USD&to=PHP`.
 
 ## Detailed Technical Notes
 
@@ -377,6 +379,7 @@ The active website uses `src/renderer/lib/appApi.ts` as the browser-facing API l
 - `getImportJobs` - Get recent import job placeholders
 - `getPendingReviewRows` - Get pending review placeholders
 - `generateCalculationDocument` - Generate browser download report
+- `convertCurrency` now uses the Express backend first and falls back locally only when the server path is unavailable
 
 **Website Fetching:**
 - `fetchWebsiteContent` - Calls the Express proxy to fetch and sanitize approved website content
@@ -387,6 +390,8 @@ The active website uses `src/renderer/lib/appApi.ts` as the browser-facing API l
 The Express server in `src/server/index.ts` exposes a small same-origin API for the browser app:
 
 - `GET /api/health` - Health check
+- `GET /api/currency/convert?amount=...&from=USD&to=PHP` - Converts one amount and returns rate source metadata
+- `GET /api/currency/rate?from=USD&to=PHP` - Returns the current rate and source metadata without converting an amount
 - `GET /api/fetch-website-content?url=...&query=...` - Fetches a single approved page and returns sanitized content
 - `GET /api/fetch-regulatory-updates?source=boc|bir|tariff-commission&query=...` - Discovers and fetches recent regulatory pages
 

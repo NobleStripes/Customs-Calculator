@@ -18,6 +18,14 @@ type BatchResultRow = ShipmentRow & {
     amount?: number
     rate?: number
   }
+  fx?: {
+    applied?: boolean
+    rateToPhp?: number
+    inputCurrency?: string
+    baseCurrency?: string
+    source?: 'cache' | 'live' | 'fallback' | 'identity'
+    timestamp?: string
+  }
 }
 
 const DEFAULT_CURRENCY = 'USD'
@@ -130,6 +138,11 @@ export const BatchImport: React.FC = () => {
       }
     )
   }, [results])
+
+  const fallbackRateCount = useMemo(
+    () => results.filter((row) => row.fx?.source === 'fallback').length,
+    [results]
+  )
 
   const handleParse = () => {
     setError(null)
@@ -271,6 +284,11 @@ export const BatchImport: React.FC = () => {
 
       <section className="batch-panel results">
         <h2>Batch Results ({results.length})</h2>
+        {fallbackRateCount > 0 && (
+          <div className="error-message">
+            {fallbackRateCount} shipment{fallbackRateCount === 1 ? '' : 's'} used fallback exchange rates because live or cached rates were unavailable.
+          </div>
+        )}
         <div className="summary-grid">
           <div className="summary-item">
             <label>Declared Value</label>

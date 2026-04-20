@@ -7,6 +7,10 @@ const CACHE_DURATION = 24 * 60 * 60 * 1000 // 24 hours in milliseconds
 export class CurrencyConverter {
   private db = getDatabase()
 
+  private normalizeCurrencyCode(currency: string): string {
+    return currency.trim().toUpperCase()
+  }
+
   /**
    * Convert currency
    */
@@ -20,10 +24,10 @@ export class CurrencyConverter {
     timestamp: string
   }> {
     try {
-      const from = fromCurrency.trim().toUpperCase()
-      const to = toCurrency.trim().toUpperCase()
+      const from = this.normalizeCurrencyCode(fromCurrency)
+      const to = this.normalizeCurrencyCode(toCurrency)
 
-      if (fromCurrency === toCurrency) {
+      if (from === to) {
         return {
           originalAmount: amount,
           originalCurrency: from,
@@ -51,6 +55,36 @@ export class CurrencyConverter {
     } catch (error) {
       console.error('Error converting currency:', error)
       throw new Error(`Failed to convert currency: ${String(error)}`)
+    }
+  }
+
+  async getRate(fromCurrency: string, toCurrency: string): Promise<{
+    fromCurrency: string
+    toCurrency: string
+    rate: number
+    source: 'cache' | 'live' | 'fallback' | 'identity'
+    timestamp: string
+  }> {
+    const from = this.normalizeCurrencyCode(fromCurrency)
+    const to = this.normalizeCurrencyCode(toCurrency)
+
+    if (from === to) {
+      return {
+        fromCurrency: from,
+        toCurrency: to,
+        rate: 1,
+        source: 'identity',
+        timestamp: new Date().toISOString(),
+      }
+    }
+
+    const { rate, source } = await this.getExchangeRate(from, to)
+    return {
+      fromCurrency: from,
+      toCurrency: to,
+      rate,
+      source,
+      timestamp: new Date().toISOString(),
     }
   }
 
@@ -90,7 +124,11 @@ export class CurrencyConverter {
 
             // Update cache
             this.db.run(
-              'INSERT OR REPLACE INTO exchange_rates (currency_pair, rate) VALUES (?, ?)',
+              `INSERT INTO exchange_rates (currency_pair, rate, last_updated)
+               VALUES (?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(currency_pair) DO UPDATE SET
+                 rate = excluded.rate,
+                 last_updated = CURRENT_TIMESTAMP`,
               [pair, rate],
               (err) => {
                 if (err) {
@@ -158,7 +196,8 @@ export class CurrencyConverter {
    */
   async getConversionMatrix(baseCurrency: string = 'USD'): Promise<Record<string, number>> {
     try {
-      const response = await axios.get(`${EXCHANGE_RATES_API}/${baseCurrency}`, {
+      const normalizedBaseCurrency = this.normalizeCurrencyCode(baseCurrency)
+      const response = await axios.get(`${EXCHANGE_RATES_API}/${normalizedBaseCurrency}`, {
         timeout: 5000,
       })
 

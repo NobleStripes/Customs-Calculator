@@ -1,12 +1,13 @@
 import sqlite3 from 'sqlite3'
+import os from 'os'
 import path from 'path'
-import { app } from 'electron'
 import { existsSync, mkdirSync } from 'fs'
 
 let db: sqlite3.Database | null = null
 
 export const getDbPath = (): string => {
-  const dbDir = path.join(app.getPath('userData'), 'customs-calculator')
+  const baseDataDir = process.env.APPDATA || path.join(os.homedir(), '.customs-calculator')
+  const dbDir = path.join(baseDataDir, 'customs-calculator')
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true })
   }

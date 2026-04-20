@@ -274,6 +274,9 @@ export const Calculator: React.FC = () => {
                         {fxPreview.source ? ` (${fxPreview.source})` : ''}
                       </span>
                     )}
+                    {!fxLoading && fxPreview?.source === 'fallback' && (
+                      <span> Using offline fallback rates because live or cached rates were unavailable.</span>
+                    )}
                     {!fxLoading && !fxPreview && (
                       <span>Exchange rate unavailable. Fallback rates may be used.</span>
                     )}

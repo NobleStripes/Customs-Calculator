@@ -13,6 +13,16 @@ type VATResult = {
   notes?: string
 }
 
+type CurrencyConversionResult = {
+  originalAmount: number
+  originalCurrency: string
+  convertedAmount: number
+  targetCurrency: string
+  rate: number
+  source: 'cache' | 'live' | 'fallback' | 'identity'
+  timestamp: string
+}
+
 type HSCodeRow = {
   code: string
   description: string
@@ -243,37 +253,6 @@ const getRequirements = (hsCode: string, value: number): {
   }
 }
 
-const convertCurrencyAmount = (amount: number, fromCurrency: string, toCurrency: string) => {
-  const from = fromCurrency.trim().toUpperCase()
-  const to = toCurrency.trim().toUpperCase()
-
-  if (from === to) {
-    return {
-      originalAmount: amount,
-      originalCurrency: from,
-      convertedAmount: amount,
-      targetCurrency: to,
-      rate: 1,
-      source: 'identity',
-      timestamp: new Date().toISOString(),
-    }
-  }
-
-  const fromRate = fallbackRates[from] || 1
-  const toRate = fallbackRates[to] || 1
-  const rate = toRate / fromRate
-
-  return {
-    originalAmount: amount,
-    originalCurrency: from,
-    convertedAmount: amount * rate,
-    targetCurrency: to,
-    rate,
-    source: 'fallback',
-    timestamp: new Date().toISOString(),
-  }
-}
-
 const browserDownload = (content: string, fileName: string, contentType: string): string => {
   const blob = new Blob([content], { type: contentType })
   const url = URL.createObjectURL(blob)
@@ -315,6 +294,60 @@ const callApi = async <T>(path: string): ApiResponse<T> => {
       success: false,
       error: error instanceof Error ? error.message : String(error),
     }
+  }
+}
+
+const convertCurrencyLocally = (amount: number, fromCurrency: string, toCurrency: string): CurrencyConversionResult => {
+  const from = fromCurrency.trim().toUpperCase()
+  const to = toCurrency.trim().toUpperCase()
+
+  if (from === to) {
+    return {
+      originalAmount: amount,
+      originalCurrency: from,
+      convertedAmount: amount,
+      targetCurrency: to,
+      rate: 1,
+      source: 'identity',
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  const fromRate = fallbackRates[from] || 1
+  const toRate = fallbackRates[to] || 1
+  const rate = toRate / fromRate
+
+  return {
+    originalAmount: amount,
+    originalCurrency: from,
+    convertedAmount: amount * rate,
+    targetCurrency: to,
+    rate,
+    source: 'fallback',
+    timestamp: new Date().toISOString(),
+  }
+}
+
+const convertCurrencyRemote = async (amount: number, fromCurrency: string, toCurrency: string) => {
+  const params = new URLSearchParams({
+    amount: String(amount),
+    from: fromCurrency.trim().toUpperCase(),
+    to: toCurrency.trim().toUpperCase(),
+  })
+
+  return callApi<CurrencyConversionResult>(`/api/currency/convert?${params.toString()}`)
+}
+
+const getCurrencyConversion = async (amount: number, fromCurrency: string, toCurrency: string): ApiResponse<CurrencyConversionResult> => {
+  const remoteResult = await convertCurrencyRemote(amount, fromCurrency, toCurrency)
+  if (remoteResult.success && remoteResult.data) {
+    return remoteResult
+  }
+
+  return {
+    success: true,
+    data: convertCurrencyLocally(amount, fromCurrency, toCurrency),
+    error: remoteResult.error,
   }
 }
 
@@ -423,14 +456,19 @@ export const appApi = {
     amount: number
     fromCurrency: string
     toCurrency: string
-  }) => makeSuccess(convertCurrencyAmount(payload.amount, payload.fromCurrency, payload.toCurrency)),
+  }) => getCurrencyConversion(payload.amount, payload.fromCurrency, payload.toCurrency),
 
   batchCalculate: async (shipments: ShipmentRow[]) => {
     try {
       const results = []
       for (const shipment of shipments) {
         const shipmentCurrency = shipment.currency.toUpperCase()
-        const converted = convertCurrencyAmount(shipment.value, shipmentCurrency, 'PHP')
+        const conversionResult = await getCurrencyConversion(shipment.value, shipmentCurrency, 'PHP')
+        if (!conversionResult.success || !conversionResult.data) {
+          throw new Error(conversionResult.error || 'Batch currency conversion failed')
+        }
+
+        const converted = conversionResult.data
         const valueInPhp = shipmentCurrency === 'PHP' ? shipment.value : converted.convertedAmount
         const tariffRow = findCurrentTariff(shipment.hsCode)
         const dutyAmount = valueInPhp * (tariffRow?.duty_rate || 0)
@@ -456,6 +494,8 @@ export const appApi = {
             rateToPhp: converted.rate,
             inputCurrency: shipmentCurrency,
             baseCurrency: 'PHP',
+            source: converted.source,
+            timestamp: converted.timestamp,
           },
         })
       }

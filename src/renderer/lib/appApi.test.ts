@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { hsCodeLookup } from './appApi'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { appApi, hsCodeLookup } from './appApi'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('hsCodeLookup', () => {
   it('returns ranked lookup results for partial chapter input', () => {
@@ -32,5 +36,49 @@ describe('hsCodeLookup', () => {
     const resolved = hsCodeLookup.resolveKnownHSCode('9999.99')
 
     expect(resolved).toBeNull()
+  })
+})
+
+describe('appApi.convertCurrency', () => {
+  it('uses the server currency endpoint when available', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          originalAmount: 1,
+          originalCurrency: 'USD',
+          convertedAmount: 56.2,
+          targetCurrency: 'PHP',
+          rate: 56.2,
+          source: 'live',
+          timestamp: '2026-04-20T00:00:00.000Z',
+        },
+      }),
+    } as Response)
+
+    const result = await appApi.convertCurrency({
+      amount: 1,
+      fromCurrency: 'USD',
+      toCurrency: 'PHP',
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.data?.source).toBe('live')
+    expect(result.data?.rate).toBe(56.2)
+  })
+
+  it('falls back locally when the server currency endpoint is unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.convertCurrency({
+      amount: 1,
+      fromCurrency: 'USD',
+      toCurrency: 'PHP',
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.data?.source).toBe('fallback')
+    expect(result.data?.rate).toBe(56)
   })
 })

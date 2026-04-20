@@ -1,10 +1,13 @@
 import express from 'express'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { initializeDatabase } from '../backend/db/database'
+import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
 
 const app = express()
 const websiteFetcher = new WebsiteFetcherService()
+const currencyConverter = new CurrencyConverter()
 const port = Number(process.env.PORT || 8787)
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -29,6 +32,49 @@ app.get('/api/health', (_request, response) => {
       service: 'customs-calculator-api',
     },
   })
+})
+
+app.get('/api/currency/convert', async (request, response) => {
+  const { amount, from, to } = request.query
+  const parsedAmount = Number(amount)
+
+  if (!Number.isFinite(parsedAmount)) {
+    return sendError(response, 400, 'Query parameter "amount" must be a valid number')
+  }
+
+  if (typeof from !== 'string' || !from.trim()) {
+    return sendError(response, 400, 'Query parameter "from" is required')
+  }
+
+  if (typeof to !== 'string' || !to.trim()) {
+    return sendError(response, 400, 'Query parameter "to" is required')
+  }
+
+  try {
+    const result = await currencyConverter.convert(parsedAmount, from, to)
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/currency/rate', async (request, response) => {
+  const { from, to } = request.query
+
+  if (typeof from !== 'string' || !from.trim()) {
+    return sendError(response, 400, 'Query parameter "from" is required')
+  }
+
+  if (typeof to !== 'string' || !to.trim()) {
+    return sendError(response, 400, 'Query parameter "to" is required')
+  }
+
+  try {
+    const result = await currencyConverter.getRate(from, to)
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
 })
 
 app.get('/api/fetch-website-content', async (request, response) => {
@@ -75,6 +121,16 @@ app.get('*', (_request, response) => {
   response.sendFile(path.join(rendererDistPath, 'index.html'))
 })
 
-app.listen(port, () => {
-  console.log(`Customs Calculator server listening on http://127.0.0.1:${port}`)
+const startServer = async () => {
+  await initializeDatabase()
+  currencyConverter.clearOldCache()
+
+  app.listen(port, () => {
+    console.log(`Customs Calculator server listening on http://127.0.0.1:${port}`)
+  })
+}
+
+startServer().catch((error) => {
+  console.error('Failed to start Customs Calculator server:', error)
+  process.exit(1)
 })

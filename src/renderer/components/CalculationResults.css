@@ -63,6 +63,13 @@
   opacity: 0.95;
 }
 
+.result-card .detail.fx-warning {
+  margin-top: 8px;
+  color: #ffe7a8;
+  opacity: 1;
+  font-weight: 600;
+}
+
 .compliance-section {
   background-color: #e8f5e9;
   border-left: 4px solid #4caf50;

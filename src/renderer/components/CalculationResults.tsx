@@ -68,7 +68,12 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           {results.fx?.applied && (
             <p className="detail fx-note">
               FX applied: 1 {results.fx.inputCurrency} = {formatNumber(results.fx.rateToPhp)} PHP
+              {results.fx.source ? ` (${results.fx.source})` : ''}
+              {results.fx.timestamp ? ` as of ${new Date(results.fx.timestamp).toLocaleString()}` : ''}
             </p>
+          )}
+          {results.fx?.source === 'fallback' && (
+            <p className="detail fx-warning">Live or cached exchange rates were unavailable, so fallback rates were used.</p>
           )}
         </div>
 
