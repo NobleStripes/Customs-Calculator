@@ -72,6 +72,10 @@
   background-color: #ecf0f1;
 }
 
+.suggestion-item.active {
+  background-color: #e8edff;
+}
+
 .suggestion-item.no-results {
   cursor: default;
   color: #7f8c8d;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { HSCodeSearch } from '../components/HSCodeSearch'
 import { CalculationResults } from '../components/CalculationResults'
 import './Calculator.css'
@@ -23,6 +23,57 @@ export const Calculator: React.FC = () => {
   const [results, setResults] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fxPreview, setFxPreview] = useState<{
+    inputCurrency: string
+    rateToPhp: number
+    source?: string
+  } | null>(null)
+  const [fxLoading, setFxLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadFxPreview = async () => {
+      const inputCurrency = formData.currency.toUpperCase()
+
+      if (inputCurrency === 'PHP') {
+        setFxPreview(null)
+        return
+      }
+
+      setFxLoading(true)
+      try {
+        const result = await window.electronAPI.convertCurrency({
+          amount: 1,
+          fromCurrency: inputCurrency,
+          toCurrency: 'PHP',
+        })
+
+        if (!cancelled && result.success && result.data) {
+          setFxPreview({
+            inputCurrency,
+            rateToPhp: result.data.rate,
+            source: result.data.source,
+          })
+        }
+      } catch (fxError) {
+        if (!cancelled) {
+          setFxPreview(null)
+          console.error('Failed to load FX preview:', fxError)
+        }
+      } finally {
+        if (!cancelled) {
+          setFxLoading(false)
+        }
+      }
+    }
+
+    loadFxPreview()
+
+    return () => {
+      cancelled = true
+    }
+  }, [formData.currency])
 
   const handleHSCodeSelect = (code: string) => {
     setFormData((prev) => ({ ...prev, hsCode: code }))
@@ -188,6 +239,20 @@ export const Calculator: React.FC = () => {
                   <option value="SGD">SGD</option>
                   <option value="JPY">JPY</option>
                 </select>
+                {formData.currency.toUpperCase() !== 'PHP' && (
+                  <div className="fx-preview">
+                    {fxLoading && <span>Loading exchange rate...</span>}
+                    {!fxLoading && fxPreview && (
+                      <span>
+                        Indicative FX: 1 {fxPreview.inputCurrency} = {fxPreview.rateToPhp.toFixed(4)} PHP
+                        {fxPreview.source ? ` (${fxPreview.source})` : ''}
+                      </span>
+                    )}
+                    {!fxLoading && !fxPreview && (
+                      <span>Exchange rate unavailable. Fallback rates may be used.</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
