@@ -69,6 +69,11 @@ const hsCodes: HSCodeRow[] = [
   { code: '6204.62', description: "Women's suits of synthetic fibers", category: 'Textiles' },
   { code: '6203.42', description: "Men's suits of synthetic fibers", category: 'Textiles' },
   { code: '8704.21', description: 'Trucks, gross vehicle weight not exceeding 5 tonnes', category: 'Vehicles' },
+  { code: '8421.23', description: 'Oil or petrol-filters for internal combustion engines', category: 'Vehicles' },
+  { code: '8511.10', description: 'Spark plugs for spark-ignition or compression-ignition engines', category: 'Vehicles' },
+  { code: '8708.30', description: 'Brakes and servo-brakes; parts thereof, for motor vehicles', category: 'Vehicles' },
+  { code: '8708.80', description: 'Suspension shock absorbers for motor vehicles', category: 'Vehicles' },
+  { code: '8708.99', description: 'Other parts and accessories of motor vehicles', category: 'Vehicles' },
   { code: '0207.14', description: 'Chicken meat, frozen', category: 'Food' },
   { code: '0406.10', description: 'Fresh cheese (unripened)', category: 'Food' },
   { code: '8544.30', description: 'Insulated electric conductors', category: 'Electronics' },
@@ -82,6 +87,11 @@ const tariffRates: TariffRateRow[] = [
   { hs_code: '6204.62', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
   { hs_code: '6203.42', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
   { hs_code: '8704.21', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8421.23', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8511.10', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8708.30', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8708.80', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8708.99', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
   { hs_code: '0207.14', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
   { hs_code: '0406.10', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
   { hs_code: '8544.30', duty_rate: 0.08, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
@@ -110,6 +120,13 @@ const complianceRules: ComplianceRuleRow[] = [
     required_documents: 'Commercial Invoice, Bill of Lading, Certificate of Origin',
     restrictions: 'Subject to Rules of Origin - must meet COO requirements',
     special_conditions: 'Possible safeguard duties may apply',
+  },
+  {
+    hs_code_range: '8421.23',
+    category: 'Vehicles',
+    required_documents: 'Commercial Invoice, Bill of Lading, Certificate of Origin',
+    restrictions: 'None',
+    special_conditions: 'Verify compatibility with declared vehicle model when applicable',
   },
   {
     hs_code_range: '0207.14',
@@ -339,12 +356,16 @@ const makeSuccess = <T>(data: T) => Promise.resolve({ success: true, data })
 const makeError = (error: unknown) => Promise.resolve({ success: false, error: String(error) })
 const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 
-const callApi = async <T>(path: string): ApiResponse<T> => {
+const callApi = async <T>(path: string, init?: RequestInit): ApiResponse<T> => {
   try {
     const response = await fetch(`${apiBase}${path}`, {
+      method: init?.method || 'GET',
       headers: {
         Accept: 'application/json',
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init?.headers || {}),
       },
+      body: init?.body,
     })
 
     const payload = (await response.json()) as { success?: boolean; data?: T; error?: string }
@@ -367,6 +388,12 @@ const callApi = async <T>(path: string): ApiResponse<T> => {
     }
   }
 }
+
+const postApi = async <T>(path: string, payload: unknown): ApiResponse<T> =>
+  callApi<T>(path, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 
 const convertCurrencyLocally = (amount: number, fromCurrency: string, toCurrency: string): CurrencyConversionResult => {
   const from = fromCurrency.trim().toUpperCase()
@@ -422,6 +449,72 @@ const getCurrencyConversion = async (amount: number, fromCurrency: string, toCur
   }
 }
 
+const resolveHSCodeRemote = async (code: string): ApiResponse<HSCodeRow | null> => {
+  const params = new URLSearchParams({ code: code.trim().toUpperCase() })
+  return callApi<HSCodeRow | null>(`/api/hs-codes/resolve?${params.toString()}`)
+}
+
+const searchHSCodesRemote = async (query: string): ApiResponse<HSCodeRow[]> => {
+  const params = new URLSearchParams({ query: query.trim() })
+  return callApi<HSCodeRow[]>(`/api/hs-codes/search?${params.toString()}`)
+}
+
+const getTariffCatalogRemote = async (payload: { query?: string; category?: string; limit?: number }) => {
+  const params = new URLSearchParams()
+
+  if (payload.query?.trim()) {
+    params.set('query', payload.query.trim())
+  }
+
+  if (payload.category?.trim()) {
+    params.set('category', payload.category.trim())
+  }
+
+  if (typeof payload.limit === 'number') {
+    params.set('limit', String(payload.limit))
+  }
+
+  return callApi<Array<{
+    hsCode: string
+    description: string
+    category: string
+    dutyRate: number
+    vatRate: number
+    surchargeRate: number
+    effectiveDate: string
+  }>>(`/api/tariff-catalog?${params.toString()}`)
+}
+
+const getTariffCategoriesRemote = async (): ApiResponse<string[]> => callApi<string[]>('/api/tariff-categories')
+
+const calculateDutyRemote = async (payload: {
+  value: number
+  hsCode: string
+  originCountry: string
+}) => postApi<DutyResult>('/api/calculate/duty', payload)
+
+const calculateVatRemote = async (payload: { dutiableValue: number; hsCode: string }) =>
+  postApi<VATResult>('/api/calculate/vat', payload)
+
+const getComplianceRequirementsRemote = async (payload: {
+  hsCode: string
+  value: number
+  destination: string
+}) => postApi<{ requiredDocuments: string[]; restrictions: string[]; warnings: string[] }>('/api/compliance/requirements', payload)
+
+const batchCalculateRemote = async (shipments: ShipmentRow[]) =>
+  postApi<Array<Record<string, unknown>>>('/api/calculate/batch', { shipments })
+
+const previewHSCatalogImportRemote = async (payload: { csvText?: string; contentBase64?: string; fileName?: string; rows?: Record<string, unknown>[] }) =>
+  postApi('/api/import/hs-codes/preview', payload)
+
+const importHSCatalogRemote = async (payload: Record<string, unknown>) => postApi('/api/import/hs-codes', payload)
+
+const getImportJobsRemote = async () => callApi<Array<Record<string, unknown>>>('/api/import-jobs')
+
+const getPendingReviewRowsRemote = async (payload: { importJobId: number }) =>
+  callApi<Array<Record<string, unknown>>>(`/api/import-jobs/${payload.importJobId}/pending-review`)
+
 export const appApi = {
   initDB: (): ApiResponse<undefined> => makeSuccess(undefined),
 
@@ -430,6 +523,11 @@ export const appApi = {
     hsCode: string
     originCountry: string
   }): ApiResponse<DutyResult> => {
+    const remoteResult = await calculateDutyRemote(payload)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
     try {
       const row = findCurrentTariff(payload.hsCode)
       const dutyRate = row?.duty_rate || 0
@@ -446,6 +544,11 @@ export const appApi = {
   },
 
   calculateVAT: async (payload: { dutiableValue: number; hsCode: string }): ApiResponse<VATResult> => {
+    const remoteResult = await calculateVatRemote(payload)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
     try {
       const row = findCurrentTariff(payload.hsCode)
       const vatRate = row?.vat_rate || 0.12
@@ -459,13 +562,34 @@ export const appApi = {
     }
   },
 
-  searchHSCodes: async (query: string): ApiResponse<HSCodeRow[]> => makeSuccess(searchHSRows(query)),
+  resolveHSCode: async (code: string): ApiResponse<HSCodeRow | null> => {
+    const remoteResult = await resolveHSCodeRemote(code)
+    if (remoteResult.success) {
+      return remoteResult
+    }
+
+    return makeSuccess(resolveKnownHSCode(code))
+  },
+
+  searchHSCodes: async (query: string): ApiResponse<HSCodeRow[]> => {
+    const remoteResult = await searchHSCodesRemote(query)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
+    return makeSuccess(searchHSRows(query))
+  },
 
   getTariffCatalog: async (payload: {
     query?: string
     category?: string
     limit?: number
   }) => {
+    const remoteResult = await getTariffCatalogRemote(payload || {})
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
     try {
       const searchTerm = payload?.query?.trim().toUpperCase() || ''
       const selectedCategory = payload?.category || 'All'
@@ -507,6 +631,11 @@ export const appApi = {
   },
 
   getTariffCategories: async (): ApiResponse<string[]> => {
+    const remoteResult = await getTariffCategoriesRemote()
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
     const categories = [...new Set(hsCodes.map((row) => row.category))].sort((left, right) => left.localeCompare(right))
     return makeSuccess(categories)
   },
@@ -516,6 +645,11 @@ export const appApi = {
     value: number
     destination: string
   }) => {
+    const remoteResult = await getComplianceRequirementsRemote(payload)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
     try {
       return makeSuccess(getRequirements(payload.hsCode, payload.value))
     } catch (error) {
@@ -530,6 +664,11 @@ export const appApi = {
   }) => getCurrencyConversion(payload.amount, payload.fromCurrency, payload.toCurrency),
 
   batchCalculate: async (shipments: ShipmentRow[]) => {
+    const remoteResult = await batchCalculateRemote(shipments)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
     try {
       const results = []
       for (const shipment of shipments) {
@@ -578,6 +717,11 @@ export const appApi = {
   },
 
   previewTariffImport: async (payload: { csvText?: string; rows?: Record<string, unknown>[] }) => {
+    const remoteResult = await previewHSCatalogImportRemote(payload)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
     try {
       const rows = payload.rows || []
       const previewRows: ImportPreviewRow[] = rows.map((row, index) => ({
@@ -598,6 +742,11 @@ export const appApi = {
   },
 
   importTariffData: async (payload: Record<string, unknown>) => {
+    const remoteResult = await importHSCatalogRemote(payload)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
     const importJobId = importJobs.length + 1
     const job = {
       id: importJobId,
@@ -623,9 +772,23 @@ export const appApi = {
     })
   },
 
-  getImportJobs: async () => makeSuccess(importJobs),
+  getImportJobs: async () => {
+    const remoteResult = await getImportJobsRemote()
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
 
-  getPendingReviewRows: async (payload: { importJobId: number }) => makeSuccess(pendingReviewRows[payload.importJobId] || []),
+    return makeSuccess(importJobs)
+  },
+
+  getPendingReviewRows: async (payload: { importJobId: number }) => {
+    const remoteResult = await getPendingReviewRowsRemote(payload)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
+    return makeSuccess(pendingReviewRows[payload.importJobId] || [])
+  },
 
   fetchWebsiteContent: async (payload: { url: string; query?: string }) => {
     const params = new URLSearchParams({ url: payload.url })

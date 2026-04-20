@@ -1,5 +1,44 @@
 import sqlite3 from 'sqlite3'
+import * as XLSX from 'xlsx'
 import { getDatabase } from '../db/database'
+
+type TabularImportPayload = {
+  csvText?: string
+  contentBase64?: string
+  fileName?: string
+  rows?: Record<string, unknown>[]
+}
+
+export interface HSCatalogImportRow {
+  hsCode: string
+  description: string
+  category?: string
+}
+
+export interface HSCatalogImportPreviewRow {
+  rowNumber: number
+  raw: HSCatalogImportRow
+  normalized?: {
+    hsCode: string
+    description: string
+    category: string
+  }
+  errors: string[]
+}
+
+export interface HSCatalogImportPreviewResult {
+  totalRows: number
+  validRows: number
+  invalidRows: number
+  rows: HSCatalogImportPreviewRow[]
+}
+
+export interface HSCatalogImportRequest {
+  sourceName: string
+  sourceType?: string
+  sourceReference?: string
+  rows: HSCatalogImportRow[]
+}
 
 export interface TariffImportRow {
   hsCode: string
@@ -59,6 +98,34 @@ export interface TariffImportSummary {
 }
 
 const DEFAULT_THRESHOLD = 85
+
+const normalizeHeaderKey = (value: string): string => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
+
+const getSheetRows = (workbook: XLSX.WorkBook): Record<string, unknown>[] => {
+  const firstSheetName = workbook.SheetNames[0]
+  if (!firstSheetName) {
+    return []
+  }
+
+  const sheet = workbook.Sheets[firstSheetName]
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: '',
+    raw: false,
+  })
+}
+
+const getFieldValue = (row: Record<string, unknown>, aliases: string[]): string => {
+  const normalizedEntries = Object.entries(row).map(([key, value]) => [normalizeHeaderKey(key), value] as const)
+
+  for (const alias of aliases) {
+    const match = normalizedEntries.find(([key]) => key === alias)
+    if (match && match[1] !== undefined && match[1] !== null) {
+      return String(match[1]).trim()
+    }
+  }
+
+  return ''
+}
 
 const run = (sql: string, params: Array<string | number | null> = []): Promise<{ lastID: number; changes: number }> => {
   const db = getDatabase()
@@ -202,6 +269,34 @@ const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPrevi
   }
 }
 
+const validateHSCatalogRow = (row: HSCatalogImportRow, rowNumber: number): HSCatalogImportPreviewRow => {
+  const errors: string[] = []
+  const hsCode = normalizeHsCode(row.hsCode || '')
+  const description = String(row.description || '').trim()
+  const category = String(row.category || 'Imported').trim() || 'Imported'
+
+  if (!hsCode) {
+    errors.push('HS code is required')
+  }
+
+  if (!description) {
+    errors.push('Description is required')
+  }
+
+  return {
+    rowNumber,
+    raw: row,
+    normalized: errors.length
+      ? undefined
+      : {
+          hsCode,
+          description,
+          category,
+        },
+    errors,
+  }
+}
+
 const updateImportJobStatus = async (
   jobId: number,
   status: 'completed' | 'completed_with_errors' | 'failed',
@@ -226,41 +321,51 @@ const updateImportJobStatus = async (
 }
 
 export class TariffDataIngestionService {
-  parseCsvText(input: string): TariffImportRow[] {
-    const lines = input
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-
-    if (lines.length === 0) {
-      return []
+  private readTabularRows(payload: TabularImportPayload): Record<string, unknown>[] {
+    if (Array.isArray(payload.rows)) {
+      return payload.rows
     }
 
-    const firstRowParts = lines[0].split(',').map((part) => part.trim().toLowerCase())
-    const hasHeader =
-      firstRowParts.includes('hscode') ||
-      firstRowParts.includes('hs_code') ||
-      firstRowParts.includes('dutyrate') ||
-      firstRowParts.includes('duty_rate')
+    if (payload.contentBase64) {
+      const workbook = XLSX.read(payload.contentBase64, { type: 'base64' })
+      return getSheetRows(workbook)
+    }
 
-    const dataLines = hasHeader ? lines.slice(1) : lines
+    if (payload.csvText) {
+      const workbook = XLSX.read(payload.csvText, { type: 'string' })
+      return getSheetRows(workbook)
+    }
 
-    return dataLines.map((line) => {
-      const parts = line.split(',').map((part) => part.trim())
+    return []
+  }
 
-      return {
-        hsCode: parts[0] || '',
-        description: parts[1] || undefined,
-        category: parts[2] || undefined,
-        dutyRate: parts[3] || '',
-        vatRate: parts[4] || undefined,
-        surchargeRate: parts[5] || undefined,
-        effectiveDate: parts[6] || undefined,
-        endDate: parts[7] || undefined,
-        notes: parts[8] || undefined,
-        confidenceScore: parts[9] ? Number(parts[9]) : undefined,
-      }
-    })
+  parseCsvText(input: string): TariffImportRow[] {
+    const rows = this.readTabularRows({ csvText: input })
+
+    return rows.map((row) => ({
+      hsCode: getFieldValue(row, ['hscode', 'hscode', 'hscode', 'hs_code', 'code']),
+      description: getFieldValue(row, ['description', 'goodsdescription', 'productdescription']) || undefined,
+      category: getFieldValue(row, ['category', 'section', 'chapterdescription']) || undefined,
+      dutyRate: getFieldValue(row, ['dutyrate', 'dutyratepercent', 'duty_rate', 'duty']) || '',
+      vatRate: getFieldValue(row, ['vatrate', 'vat_rate', 'vat']) || undefined,
+      surchargeRate: getFieldValue(row, ['surchargerate', 'surcharge_rate', 'surcharge']) || undefined,
+      effectiveDate: getFieldValue(row, ['effectivedate', 'effective_date']) || undefined,
+      endDate: getFieldValue(row, ['enddate', 'end_date']) || undefined,
+      notes: getFieldValue(row, ['notes', 'remark', 'remarks']) || undefined,
+      confidenceScore: getFieldValue(row, ['confidencescore', 'confidence_score'])
+        ? Number(getFieldValue(row, ['confidencescore', 'confidence_score']))
+        : undefined,
+    }))
+  }
+
+  parseHSCatalogRows(payload: TabularImportPayload): HSCatalogImportRow[] {
+    const rows = this.readTabularRows(payload)
+
+    return rows.map((row) => ({
+      hsCode: getFieldValue(row, ['hscode', 'hs_code', 'code', 'commoditycode', 'commodity_code', 'tariffcode', 'tariff_code']),
+      description: getFieldValue(row, ['description', 'goodsdescription', 'productdescription', 'commoditydescription', 'commodity_description']),
+      category: getFieldValue(row, ['category', 'section', 'chapterdescription', 'chapter_description']) || undefined,
+    }))
   }
 
   previewRows(rows: TariffImportRow[]): TariffImportPreviewResult {
@@ -272,6 +377,101 @@ export class TariffDataIngestionService {
       validRows,
       invalidRows: rows.length - validRows,
       rows: parsedRows,
+    }
+  }
+
+  previewHSCatalogRows(rows: HSCatalogImportRow[]): HSCatalogImportPreviewResult {
+    const parsedRows = rows.map((row, idx) => validateHSCatalogRow(row, idx + 1))
+    const validRows = parsedRows.filter((row) => row.errors.length === 0).length
+
+    return {
+      totalRows: rows.length,
+      validRows,
+      invalidRows: rows.length - validRows,
+      rows: parsedRows,
+    }
+  }
+
+  async importHSCatalog(request: HSCatalogImportRequest): Promise<TariffImportSummary> {
+    const preview = this.previewHSCatalogRows(request.rows)
+
+    const sourceInsert = await run(
+      `
+        INSERT INTO tariff_sources (source_name, source_type, source_reference, status, fetched_at)
+        VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP)
+      `,
+      [request.sourceName, request.sourceType || 'hs-catalog', request.sourceReference || null]
+    )
+    const sourceId = sourceInsert.lastID
+
+    const jobInsert = await run(
+      `
+        INSERT INTO import_jobs (source_id, status, total_rows)
+        VALUES (?, 'running', ?)
+      `,
+      [sourceId, preview.totalRows]
+    )
+    const importJobId = jobInsert.lastID
+
+    let importedRows = 0
+    let pendingReviewRows = 0
+    let errorRows = 0
+
+    try {
+      for (const row of preview.rows) {
+        if (!row.normalized) {
+          errorRows += 1
+          await run(
+            `
+              INSERT INTO extracted_rows_review
+              (source_id, import_job_id, row_number, raw_payload, normalized_payload, confidence_score, review_status, review_notes)
+              VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            `,
+            [
+              sourceId,
+              importJobId,
+              row.rowNumber,
+              JSON.stringify(row.raw),
+              null,
+              0,
+              row.errors.join('; '),
+            ]
+          )
+          continue
+        }
+
+        await run(
+          `
+            INSERT INTO hs_codes (code, description, category)
+            VALUES (?, ?, ?)
+            ON CONFLICT(code) DO UPDATE SET
+              description = excluded.description,
+              category = excluded.category
+          `,
+          [row.normalized.hsCode, row.normalized.description, row.normalized.category]
+        )
+
+        importedRows += 1
+      }
+
+      const finalStatus: TariffImportSummary['status'] =
+        errorRows > 0 ? 'completed_with_errors' : 'completed'
+
+      await run('UPDATE tariff_sources SET imported_at = CURRENT_TIMESTAMP WHERE id = ?', [sourceId])
+      await updateImportJobStatus(importJobId, finalStatus, importedRows, pendingReviewRows, errorRows)
+
+      return {
+        sourceId,
+        importJobId,
+        totalRows: preview.totalRows,
+        importedRows,
+        pendingReviewRows,
+        errorRows,
+        status: finalStatus,
+      }
+    } catch (error) {
+      await updateImportJobStatus(importJobId, 'failed', importedRows, pendingReviewRows, errorRows + 1, String(error))
+      throw error
     }
   }
 

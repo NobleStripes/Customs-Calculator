@@ -341,6 +341,11 @@ const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
       { hs_code: '6204.62', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
       { hs_code: '6203.42', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
       { hs_code: '8704.21', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8421.23', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8511.10', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.30', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.80', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.99', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
       { hs_code: '0207.14', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0 },
       { hs_code: '0406.10', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
       { hs_code: '8544.30', duty_rate: 0.08, vat_rate: 0.12, surcharge_rate: 0 },
@@ -395,6 +400,13 @@ const insertComplianceRules = (database: sqlite3.Database): Promise<void> => {
         special_conditions: 'Possible safeguard duties may apply',
       },
       {
+        hs_code_range: '8421.23',
+        category: 'Vehicles',
+        required_documents: 'Commercial Invoice, Bill of Lading, Certificate of Origin',
+        restrictions: 'None',
+        special_conditions: 'Verify compatibility with declared vehicle model when applicable',
+      },
+      {
         hs_code_range: '0207.14',
         category: 'Food',
         required_documents: 'Commercial Invoice, Bill of Lading, Health Certificate, BOC Permit',
@@ -427,45 +439,32 @@ const insertComplianceRules = (database: sqlite3.Database): Promise<void> => {
 export const seedInitialData = async (): Promise<void> => {
   const database = getDatabase()
 
-  // Check if data already exists
-  return new Promise((resolve, reject) => {
-    database.get('SELECT COUNT(*) as count FROM hs_codes', async (err: Error | null, row: any) => {
-      if (err) {
-        console.error('Error checking database:', err)
-        reject(err)
-        return
-      }
+  try {
+    const hsCodesData = [
+      { code: '8471.30', description: 'Automatic data processing machines, portable', category: 'Electronics' },
+      { code: '8517.62', description: 'Cellular telephones for mobile networks', category: 'Electronics' },
+      { code: '6204.62', description: "Women's suits of synthetic fibers", category: 'Textiles' },
+      { code: '6203.42', description: "Men's suits of synthetic fibers", category: 'Textiles' },
+      { code: '8704.21', description: 'Trucks, gross vehicle weight not exceeding 5 tonnes', category: 'Vehicles' },
+      { code: '8421.23', description: 'Oil or petrol-filters for internal combustion engines', category: 'Vehicles' },
+      { code: '8511.10', description: 'Spark plugs for spark-ignition or compression-ignition engines', category: 'Vehicles' },
+      { code: '8708.30', description: 'Brakes and servo-brakes; parts thereof, for motor vehicles', category: 'Vehicles' },
+      { code: '8708.80', description: 'Suspension shock absorbers for motor vehicles', category: 'Vehicles' },
+      { code: '8708.99', description: 'Other parts and accessories of motor vehicles', category: 'Vehicles' },
+      { code: '0207.14', description: 'Chicken meat, frozen', category: 'Food' },
+      { code: '0406.10', description: 'Fresh cheese (unripened)', category: 'Food' },
+      { code: '8544.30', description: 'Insulated electric conductors', category: 'Electronics' },
+      { code: '7326.90', description: 'Steel articles, miscellaneous', category: 'Steel' },
+      { code: '4418.90', description: 'Wood articles, miscellaneous', category: 'Wood' },
+    ]
 
-      if (row?.count > 0) {
-        console.log('Database already seeded')
-        resolve()
-        return
-      }
+    await insertHSCodes(database, hsCodesData)
+    await insertTariffRates(database)
+    await insertComplianceRules(database)
 
-      try {
-        const hsCodesData = [
-          { code: '8471.30', description: 'Automatic data processing machines, portable', category: 'Electronics' },
-          { code: '8517.62', description: 'Cellular telephones for mobile networks', category: 'Electronics' },
-          { code: '6204.62', description: "Women's suits of synthetic fibers", category: 'Textiles' },
-          { code: '6203.42', description: "Men's suits of synthetic fibers", category: 'Textiles' },
-          { code: '8704.21', description: 'Trucks, gross vehicle weight not exceeding 5 tonnes', category: 'Vehicles' },
-          { code: '0207.14', description: 'Chicken meat, frozen', category: 'Food' },
-          { code: '0406.10', description: 'Fresh cheese (unripened)', category: 'Food' },
-          { code: '8544.30', description: 'Insulated electric conductors', category: 'Electronics' },
-          { code: '7326.90', description: 'Steel articles, miscellaneous', category: 'Steel' },
-          { code: '4418.90', description: 'Wood articles, miscellaneous', category: 'Wood' },
-        ]
-
-        await insertHSCodes(database, hsCodesData)
-        await insertTariffRates(database)
-        await insertComplianceRules(database)
-
-        console.log('Initial data seeded successfully')
-        resolve()
-      } catch (error) {
-        console.error('Data seeding error:', error)
-        reject(error)
-      }
-    })
-  })
+    console.log('Seed data synchronization completed')
+  } catch (error) {
+    console.error('Data seeding error:', error)
+    throw error
+  }
 }

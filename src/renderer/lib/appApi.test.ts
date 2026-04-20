@@ -32,6 +32,13 @@ describe('hsCodeLookup', () => {
     expect(results[0]?.code).toBe('8471.30')
   })
 
+  it('finds common vehicle parts such as oil filters by description', () => {
+    const results = hsCodeLookup.searchHSRows('oil filter')
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results[0]?.code).toBe('8421.23')
+  })
+
   it('returns null for unknown typed codes', () => {
     const resolved = hsCodeLookup.resolveKnownHSCode('9999.99')
 
@@ -80,5 +87,127 @@ describe('appApi.convertCurrency', () => {
     expect(result.success).toBe(true)
     expect(result.data?.source).toBe('fallback')
     expect(result.data?.rate).toBe(56)
+  })
+})
+
+describe('appApi backend-first calculation', () => {
+  it('uses the server duty calculation endpoint when available', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          rate: 7,
+          amount: 70,
+          surcharge: 0,
+          notes: 'server result',
+        },
+      }),
+    } as Response)
+
+    const result = await appApi.calculateDuty({
+      value: 1000,
+      hsCode: '8421.23',
+      originCountry: 'JPN',
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.data?.amount).toBe(70)
+    expect(result.data?.rate).toBe(7)
+  })
+})
+
+describe('appApi HS lookup', () => {
+  it('uses the server HS search endpoint when available', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: [
+          {
+            code: '9999.10',
+            description: 'Server-provided catalog row',
+            category: 'Test',
+          },
+        ],
+      }),
+    } as Response)
+
+    const result = await appApi.searchHSCodes('server row')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.[0]?.code).toBe('9999.10')
+  })
+
+  it('falls back to the local HS lookup when server search is unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.searchHSCodes('oil filter')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.[0]?.code).toBe('8421.23')
+  })
+
+  it('resolves typed HS codes through the server when available', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          code: '8471.30',
+          description: 'Automatic data processing machines, portable',
+          category: 'Electronics',
+        },
+      }),
+    } as Response)
+
+    const result = await appApi.resolveHSCode('847130')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.code).toBe('8471.30')
+  })
+
+  it('uses the server HS import preview endpoint when available', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          totalRows: 1,
+          validRows: 1,
+          invalidRows: 0,
+          rows: [
+            {
+              rowNumber: 1,
+              raw: {
+                hsCode: '8421.23',
+                description: 'Oil filter',
+                category: 'Vehicles',
+              },
+              normalized: {
+                hsCode: '8421.23',
+                description: 'Oil filter',
+                category: 'Vehicles',
+              },
+              errors: [],
+            },
+          ],
+        },
+      }),
+    } as Response)
+
+    const result = await appApi.previewTariffImport({
+      rows: [
+        {
+          hsCode: '8421.23',
+          description: 'Oil filter',
+          category: 'Vehicles',
+        },
+      ],
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.data?.totalRows).toBe(1)
+    expect(result.data?.validRows).toBe(1)
   })
 })

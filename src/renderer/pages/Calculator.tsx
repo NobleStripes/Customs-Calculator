@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { HSCodeSearch } from '../components/HSCodeSearch'
 import { CalculationResults } from '../components/CalculationResults'
-import { appApi, hsCodeLookup } from '../lib/appApi'
+import { appApi } from '../lib/appApi'
 import './Calculator.css'
 
 interface CalculationPayload {
@@ -77,29 +77,53 @@ export const Calculator: React.FC = () => {
     }
   }, [formData.currency])
 
-  const handleHSCodeSelect = (code: string) => {
-    setFormData((prev) => ({ ...prev, hsCode: code }))
+  useEffect(() => {
+    let cancelled = false
+    const normalizedInput = formData.hsCode.trim()
+    const compactInput = normalizedInput.replace(/\./g, '')
 
-    if (!code.trim()) {
+    if (!normalizedInput) {
       setHsCodeValidationMessage(null)
       return
     }
 
-    const resolvedCode = hsCodeLookup.resolveKnownHSCode(code)
-    setHsCodeValidationMessage(
-      resolvedCode
-        ? null
-        : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
-    )
+    if (compactInput.length < 4) {
+      setHsCodeValidationMessage(null)
+      return
+    }
+
+    const validateHandle = setTimeout(async () => {
+      const result = await appApi.resolveHSCode(normalizedInput)
+
+      if (cancelled) {
+        return
+      }
+
+      setHsCodeValidationMessage(
+        result.success && result.data
+          ? null
+          : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
+      )
+    }, 250)
+
+    return () => {
+      cancelled = true
+      clearTimeout(validateHandle)
+    }
+  }, [formData.hsCode])
+
+  const handleHSCodeSelect = (code: string) => {
+    setFormData((prev) => ({ ...prev, hsCode: code }))
   }
 
   const handleCalculate = async () => {
-    const resolvedCode = hsCodeLookup.resolveKnownHSCode(formData.hsCode)
-
     if (!formData.hsCode || formData.value <= 0) {
       setError('Please enter a valid HS code and product value')
       return
     }
+
+    const resolvedResult = await appApi.resolveHSCode(formData.hsCode)
+    const resolvedCode = resolvedResult.success ? resolvedResult.data : null
 
     if (!resolvedCode) {
       setError('Typed HS code does not resolve to a known tariff code. Choose a suggestion or enter a full valid HS code before calculating.')
@@ -113,6 +137,7 @@ export const Calculator: React.FC = () => {
 
     try {
       const canonicalHsCode = resolvedCode.code
+      setFormData((prev) => ({ ...prev, hsCode: canonicalHsCode }))
       let calculationValue = formData.value
       let fxRateToPhp = 1
       const inputCurrency = formData.currency.toUpperCase()
@@ -143,8 +168,14 @@ export const Calculator: React.FC = () => {
         throw new Error(dutyResult.error)
       }
 
-      const dutyAmount = dutyResult.data.amount
-      const surchargeAmount = dutyResult.data.surcharge || 0
+      if (!dutyResult.data) {
+        throw new Error('Duty calculation returned no data')
+      }
+
+      const dutyData = dutyResult.data
+
+      const dutyAmount = dutyData.amount
+      const surchargeAmount = dutyData.surcharge || 0
       const dutiableValue = calculationValue + dutyAmount + surchargeAmount
 
       // Calculate VAT
@@ -157,12 +188,23 @@ export const Calculator: React.FC = () => {
         throw new Error(vatResult.error)
       }
 
+      if (!vatResult.data) {
+        throw new Error('VAT calculation returned no data')
+      }
+
+      const vatData = vatResult.data
+
       // Get compliance requirements
       const complianceResult = await appApi.getComplianceRequirements({
         hsCode: canonicalHsCode,
         value: calculationValue,
         destination: formData.destinationPort,
       })
+
+      const complianceData =
+        complianceResult.success && 'data' in complianceResult && complianceResult.data
+          ? complianceResult.data
+          : null
 
       const convertFromPhp = (amount: number): number => {
         if (inputCurrency === 'PHP') {
@@ -174,20 +216,20 @@ export const Calculator: React.FC = () => {
 
       const convertedDutyAmount = convertFromPhp(dutyAmount)
       const convertedSurchargeAmount = convertFromPhp(surchargeAmount)
-      const convertedVatAmount = convertFromPhp(vatResult.data.amount || 0)
-      const convertedTotal = convertFromPhp(dutiableValue + (vatResult.data.amount || 0))
+      const convertedVatAmount = convertFromPhp(vatData.amount || 0)
+      const convertedTotal = convertFromPhp(dutiableValue + (vatData.amount || 0))
 
       setResults({
         duty: {
-          ...dutyResult.data,
+          ...dutyData,
           amount: convertedDutyAmount,
           surcharge: convertedSurchargeAmount,
         },
         vat: {
-          ...vatResult.data,
+          ...vatData,
           amount: convertedVatAmount,
         },
-        compliance: complianceResult.success ? complianceResult.data : null,
+        compliance: complianceData,
         totalLandedCost: convertedTotal,
         calculationCurrency: 'PHP',
         fx: {
@@ -299,7 +341,7 @@ export const Calculator: React.FC = () => {
                     }))
                   }
                   placeholder="e.g., CHN, USA"
-                  maxLength="3"
+                  maxLength={3}
                 />
               </div>
 

@@ -5,9 +5,9 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 ## Quick Summary
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
-- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs.
+- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with backend SQLite-backed tariff resolution.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
-- Data platform foundation in place: source import jobs, review queue, and audit tables are implemented.
+- Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
 - Current focus: admin data-management UI and automated Customs/BIR source adapters.
 
 ## Project Overview
@@ -25,7 +25,7 @@ The project is in an active build-out phase: core calculation and operator workf
 - **`src/renderer/`** - React single-page interface used by operators for calculator, browser, and batch workflows.
 - **`src/renderer/lib/appApi.ts`** - Browser-facing application API that powers calculations, search, server-backed currency conversion, export, and calls the Express proxy for website fetching.
 - **`src/server/`** - Express server for health checks, regulated website fetch proxy routes, and production static hosting.
-- **`src/backend/`** - Shared Node-side services used by the Express API, including regulatory website fetch/discovery logic.
+- **`src/backend/`** - Shared Node-side services used by the Express API, including regulatory website fetch/discovery logic, tariff calculation, compliance checks, and HS catalog ingestion.
 
 ## Features
 
@@ -33,6 +33,7 @@ The project is in an active build-out phase: core calculation and operator workf
 - [x] React + TypeScript website scaffold
 - [x] Browser-side seeded data model for HS codes, tariff rates, compliance rules, and fallback FX rates
 - [x] Duty and VAT computation engine (effective-date aware tariff lookup)
+- [x] Backend-first duty, VAT, and compliance calculation against the SQLite tariff catalog
 - [x] VAT taxable base calculation includes surcharge
 - [x] Multi-currency calculator flow (converts to PHP for computation, then back to display currency)
 - [x] Currency conversion flow with live, cached, and fallback FX behavior in website mode
@@ -44,6 +45,7 @@ The project is in an active build-out phase: core calculation and operator workf
 - [x] Batch Import page with CSV parse, preview, calculate, and export
 - [x] Tariff Browser page with search and category filtering
 - [x] Browser report export for calculation output
+- [x] HS catalog import pipeline for CSV/XLS sources into `hs_codes`
 - [x] Tariff data ingestion workflow stubbed in the website UI for future admin wiring
 
 ### In Progress

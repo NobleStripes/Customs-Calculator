@@ -30,31 +30,58 @@ export class TariffCalculator {
     return value.trim().toUpperCase()
   }
 
-  private getCurrentTariffRateRow(
-    hsCode: string,
-    fields: string
-  ): Promise<any | null> {
+  private resolveCanonicalHSCode(hsCode: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const normalizedHSCode = this.normalizeHSCode(hsCode)
+      const compactHSCode = normalizedHSCode.replace(/\./g, '')
       const sql = `
-        SELECT ${fields}
-        FROM tariff_rates
-        WHERE hs_code = ?
-          AND effective_date <= date('now')
-          AND (end_date IS NULL OR end_date > date('now'))
-          AND (import_status = 'approved' OR import_status IS NULL)
-        ORDER BY effective_date DESC
+        SELECT code
+        FROM hs_codes
+        WHERE UPPER(code) = ?
+          OR REPLACE(UPPER(code), '.', '') = ?
+        ORDER BY CASE WHEN UPPER(code) = ? THEN 0 ELSE 1 END
         LIMIT 1
       `
 
-      this.db.get(sql, [normalizedHSCode], (err, row: any) => {
+      this.db.get(sql, [normalizedHSCode, compactHSCode, normalizedHSCode], (err, row: any) => {
         if (err) {
           reject(err)
           return
         }
 
-        resolve(row || null)
+        resolve(row?.code || normalizedHSCode)
       })
+    })
+  }
+
+  private getCurrentTariffRateRow(
+    hsCode: string,
+    fields: string
+  ): Promise<any | null> {
+    return new Promise((resolve, reject) => {
+      this.resolveCanonicalHSCode(hsCode)
+        .then((normalizedHSCode) => {
+          const sql = `
+            SELECT ${fields}
+            FROM tariff_rates
+            WHERE hs_code = ?
+              AND effective_date <= date('now')
+              AND (end_date IS NULL OR end_date > date('now'))
+              AND (import_status = 'approved' OR import_status IS NULL)
+            ORDER BY effective_date DESC
+            LIMIT 1
+          `
+
+          this.db.get(sql, [normalizedHSCode], (err, row: any) => {
+            if (err) {
+              reject(err)
+              return
+            }
+
+            resolve(row || null)
+          })
+        })
+        .catch(reject)
     })
   }
 
@@ -174,9 +201,16 @@ export class TariffCalculator {
   getHSCodeDetails(code: string): Promise<{ code: string; description: string; category: string } | null> {
     return new Promise((resolve, reject) => {
       const normalizedCode = this.normalizeHSCode(code)
-      const sql = 'SELECT code, description, category FROM hs_codes WHERE code = ? LIMIT 1'
+      const compactCode = normalizedCode.replace(/\./g, '')
+      const sql = `
+        SELECT code, description, category
+        FROM hs_codes
+        WHERE UPPER(code) = ? OR REPLACE(UPPER(code), '.', '') = ?
+        ORDER BY CASE WHEN UPPER(code) = ? THEN 0 ELSE 1 END
+        LIMIT 1
+      `
 
-      this.db.get(sql, [normalizedCode], (err, row: any) => {
+      this.db.get(sql, [normalizedCode, compactCode, normalizedCode], (err, row: any) => {
         if (err) {
           console.error('Error fetching HS code details:', err)
           reject(new Error(`Failed to fetch HS code details: ${err.message}`))
