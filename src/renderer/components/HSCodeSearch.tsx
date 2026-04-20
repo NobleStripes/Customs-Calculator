@@ -54,6 +54,17 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
     return () => clearTimeout(timer)
   }, [query])
 
+  const resolveBestMatch = (value: string): HSCodeSuggestion | undefined => {
+    const normalizedValue = value.trim().toUpperCase()
+    const compactValue = normalizedValue.replace(/\./g, '')
+
+    return suggestions.find((item) => {
+      const normalizedCode = item.code.toUpperCase()
+      const compactCode = normalizedCode.replace(/\./g, '')
+      return normalizedCode === normalizedValue || compactCode === compactValue
+    })
+  }
+
   const handleSelect = (code: string) => {
     setQuery(code)
     onSelect(code)
@@ -82,7 +93,15 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
       if (activeIndex >= 0 && activeIndex < suggestions.length) {
         event.preventDefault()
         handleSelect(suggestions[activeIndex].code)
+        return
       }
+
+      const bestMatch = resolveBestMatch(query)
+      if (bestMatch) {
+        event.preventDefault()
+        handleSelect(bestMatch.code)
+      }
+
       return
     }
 
@@ -98,10 +117,20 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
         <input
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            const nextValue = e.target.value
+            setQuery(nextValue)
+            onSelect(nextValue.trim().toUpperCase())
+          }}
           onFocus={() => setIsOpen(true)}
           onBlur={() => {
             setTimeout(() => {
+              const bestMatch = resolveBestMatch(query)
+              if (bestMatch) {
+                handleSelect(bestMatch.code)
+                return
+              }
+
               setIsOpen(false)
               setActiveIndex(-1)
             }, 120)

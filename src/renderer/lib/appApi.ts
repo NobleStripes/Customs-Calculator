@@ -124,7 +124,27 @@ const fallbackRates: Record<string, number> = {
 const importJobs: Array<Record<string, unknown>> = []
 const pendingReviewRows: Record<number, Array<Record<string, unknown>>> = {}
 
-const normalizeHSCode = (value: string): string => value.trim().toUpperCase()
+const normalizeHSCode = (value: string): string => {
+  const normalizedValue = value.trim().toUpperCase()
+  const compactValue = normalizedValue.replace(/\./g, '')
+
+  const exactMatch = hsCodes.find((row) => row.code.toUpperCase() === normalizedValue)
+  if (exactMatch) {
+    return exactMatch.code
+  }
+
+  const compactMatch = hsCodes.find((row) => row.code.replace(/\./g, '').toUpperCase() === compactValue)
+  if (compactMatch) {
+    return compactMatch.code
+  }
+
+  return normalizedValue
+}
+
+const resolveKnownHSCode = (value: string): HSCodeRow | null => {
+  const normalizedCode = normalizeHSCode(value)
+  return hsCodes.find((row) => row.code === normalizedCode) || null
+}
 
 const findCurrentTariff = (hsCode: string): TariffRateRow | undefined => {
   const normalizedCode = normalizeHSCode(hsCode)
@@ -136,6 +156,7 @@ const findCurrentTariff = (hsCode: string): TariffRateRow | undefined => {
 const searchHSRows = (query: string): HSCodeRow[] => {
   const normalizedQuery = query.trim().toUpperCase()
   const compactQuery = normalizedQuery.replace(/\./g, '')
+  const queryTerms = normalizedQuery.split(/\s+/).filter(Boolean)
 
   if (!normalizedQuery) {
     return []
@@ -149,7 +170,8 @@ const searchHSRows = (query: string): HSCodeRow[] => {
       return (
         normalizedCode.includes(normalizedQuery) ||
         compactCode.includes(compactQuery) ||
-        normalizedDescription.includes(normalizedQuery)
+        normalizedDescription.includes(normalizedQuery) ||
+        queryTerms.every((term) => normalizedDescription.includes(term))
       )
     })
     .sort((left, right) => {
@@ -362,9 +384,12 @@ export const appApi = {
         })
         .filter((row): row is NonNullable<typeof row> => Boolean(row))
         .filter((row) => {
+          const compactSearchTerm = searchTerm.replace(/\./g, '')
+          const compactRowCode = row.hsCode.toUpperCase().replace(/\./g, '')
           const matchesQuery =
             !searchTerm ||
             row.hsCode.toUpperCase().includes(searchTerm) ||
+            compactRowCode.includes(compactSearchTerm) ||
             row.description.toUpperCase().includes(searchTerm)
           const matchesCategory = selectedCategory === 'All' || row.category === selectedCategory
           return matchesQuery && matchesCategory
@@ -522,3 +547,9 @@ export const appApi = {
 }
 
 export type AppApi = typeof appApi
+
+export const hsCodeLookup = {
+  normalizeHSCode,
+  resolveKnownHSCode,
+  searchHSRows,
+}

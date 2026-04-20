@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { HSCodeSearch } from '../components/HSCodeSearch'
 import { CalculationResults } from '../components/CalculationResults'
-import { appApi } from '../lib/appApi'
+import { appApi, hsCodeLookup } from '../lib/appApi'
 import './Calculator.css'
 
 interface CalculationPayload {
@@ -30,6 +30,7 @@ export const Calculator: React.FC = () => {
     source?: string
   } | null>(null)
   const [fxLoading, setFxLoading] = useState(false)
+  const [hsCodeValidationMessage, setHsCodeValidationMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -78,18 +79,40 @@ export const Calculator: React.FC = () => {
 
   const handleHSCodeSelect = (code: string) => {
     setFormData((prev) => ({ ...prev, hsCode: code }))
+
+    if (!code.trim()) {
+      setHsCodeValidationMessage(null)
+      return
+    }
+
+    const resolvedCode = hsCodeLookup.resolveKnownHSCode(code)
+    setHsCodeValidationMessage(
+      resolvedCode
+        ? null
+        : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
+    )
   }
 
   const handleCalculate = async () => {
+    const resolvedCode = hsCodeLookup.resolveKnownHSCode(formData.hsCode)
+
     if (!formData.hsCode || formData.value <= 0) {
       setError('Please enter a valid HS code and product value')
       return
     }
 
+    if (!resolvedCode) {
+      setError('Typed HS code does not resolve to a known tariff code. Choose a suggestion or enter a full valid HS code before calculating.')
+      setHsCodeValidationMessage('Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.')
+      return
+    }
+
     setLoading(true)
     setError(null)
+    setHsCodeValidationMessage(null)
 
     try {
+      const canonicalHsCode = resolvedCode.code
       let calculationValue = formData.value
       let fxRateToPhp = 1
       const inputCurrency = formData.currency.toUpperCase()
@@ -112,7 +135,7 @@ export const Calculator: React.FC = () => {
       // Calculate duty
       const dutyResult = await appApi.calculateDuty({
         value: calculationValue,
-        hsCode: formData.hsCode,
+        hsCode: canonicalHsCode,
         originCountry: formData.originCountry,
       })
 
@@ -127,7 +150,7 @@ export const Calculator: React.FC = () => {
       // Calculate VAT
       const vatResult = await appApi.calculateVAT({
         dutiableValue,
-        hsCode: formData.hsCode,
+        hsCode: canonicalHsCode,
       })
 
       if (!vatResult.success) {
@@ -136,7 +159,7 @@ export const Calculator: React.FC = () => {
 
       // Get compliance requirements
       const complianceResult = await appApi.getComplianceRequirements({
-        hsCode: formData.hsCode,
+        hsCode: canonicalHsCode,
         value: calculationValue,
         destination: formData.destinationPort,
       })
@@ -199,6 +222,9 @@ export const Calculator: React.FC = () => {
                 onSelect={handleHSCodeSelect}
                 selectedCode={formData.hsCode}
               />
+              {hsCodeValidationMessage && (
+                <p className="field-validation-message">{hsCodeValidationMessage}</p>
+              )}
             </div>
 
             <div className="form-row">
