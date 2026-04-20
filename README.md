@@ -84,11 +84,20 @@ Use this quick-start when running locally for website development.
    ```
    Starts both the Express API server and the Vite dev server.
 
+   Web access during development:
+   - Open `http://127.0.0.1:5173` in your browser for the app UI.
+   - Vite will proxy browser `/api/*` requests to the Express server at `http://127.0.0.1:8787`.
+   - You can check the backend directly at `http://127.0.0.1:8787/api/health`.
+
 4. **Run the built app**
    ```bash
    npm start
    ```
    Builds should be created first with `npm run build`; `npm start` then runs the Express server and serves both the API and the static frontend.
+
+   Web access after build:
+   - Open `http://127.0.0.1:8787` in your browser for the production-style app.
+   - The API is served from the same origin, for example `http://127.0.0.1:8787/api/health`.
 
 ## Detailed Technical Notes
 
@@ -382,6 +391,11 @@ The Express server in `src/server/index.ts` exposes a small same-origin API for 
 - `GET /api/fetch-regulatory-updates?source=boc|bir|tariff-commission&query=...` - Discovers and fetches recent regulatory pages
 
 In development, Vite proxies `/api/*` requests to `http://127.0.0.1:8787`. In production, the Express server serves both the API and the built frontend.
+
+Browser access summary:
+- Development UI: `http://127.0.0.1:5173`
+- Development API target: `http://127.0.0.1:8787`
+- Production-style local app: `http://127.0.0.1:8787`
 
 ## Development Guide
 
