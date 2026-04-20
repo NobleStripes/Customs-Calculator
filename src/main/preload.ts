@@ -66,6 +66,21 @@ export const electronAPI = {
   getPendingReviewRows: (payload: { importJobId: number }) =>
     ipcRenderer.invoke('get-pending-review-rows', payload),
 
+  // Website fetching
+  fetchWebsiteContent: (payload: {
+    url: string
+    query?: string
+    timeoutMs?: number
+    maxTextLength?: number
+    allowedHosts?: string[]
+    allowNonGovernmentHosts?: boolean
+  }) => ipcRenderer.invoke('fetch-website-content', payload),
+
+  fetchRegulatoryUpdates: (payload: {
+    source: 'boc' | 'bir' | 'tariff-commission'
+    query?: string
+  }) => ipcRenderer.invoke('fetch-regulatory-updates', payload),
+
   // Documents
   generateCalculationDocument: (payload: {
     formData: any

@@ -5,6 +5,7 @@ import { ComplianceChecker } from '../backend/services/complianceChecker'
 import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { DocumentGenerator } from '../backend/services/documentGenerator'
 import { TariffDataIngestionService } from '../backend/services/tariffDataIngestion'
+import { WebsiteFetcherService } from '../backend/services/websiteFetcher'
 import path from 'path'
 
 export const registerIPCHandlers = () => {
@@ -248,6 +249,41 @@ export const registerIPCHandlers = () => {
       return { success: true, data: rows }
     } catch (error) {
       console.error('Pending review row fetch failed:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Website fetching for regulatory sources
+  ipcMain.handle('fetch-website-content', async (_event, payload) => {
+    try {
+      const fetcher = new WebsiteFetcherService()
+      const result = await fetcher.fetchWebsite({
+        url: payload?.url,
+        query: payload?.query,
+        timeoutMs: payload?.timeoutMs,
+        maxTextLength: payload?.maxTextLength,
+        allowedHosts: payload?.allowedHosts,
+        allowNonGovernmentHosts: Boolean(payload?.allowNonGovernmentHosts),
+      })
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('Website fetch failed:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('fetch-regulatory-updates', async (_event, payload) => {
+    try {
+      const fetcher = new WebsiteFetcherService()
+      const source = payload?.source === 'bir'
+        ? 'bir'
+        : payload?.source === 'tariff-commission'
+          ? 'tariff-commission'
+          : 'boc'
+      const result = await fetcher.fetchRegulatoryUpdates(source, payload?.query)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('Regulatory update fetch failed:', error)
       return { success: false, error: String(error) }
     }
   })

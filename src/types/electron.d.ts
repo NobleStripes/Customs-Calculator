@@ -49,6 +49,18 @@ export interface ElectronAPI {
   getPendingReviewRows: (payload: {
     importJobId: number
   }) => Promise<{ success: boolean; data?: any; error?: string }>
+  fetchWebsiteContent: (payload: {
+    url: string
+    query?: string
+    timeoutMs?: number
+    maxTextLength?: number
+    allowedHosts?: string[]
+    allowNonGovernmentHosts?: boolean
+  }) => Promise<{ success: boolean; data?: any; error?: string }>
+  fetchRegulatoryUpdates: (payload: {
+    source: 'boc' | 'bir' | 'tariff-commission'
+    query?: string
+  }) => Promise<{ success: boolean; data?: any; error?: string }>
   generateCalculationDocument: (payload: {
     formData: any
     results: any
