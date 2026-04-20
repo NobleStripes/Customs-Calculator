@@ -64,6 +64,11 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <p className="detail">
             FOB Value: {formatCurrency(formData.value, formData.currency)}
           </p>
+          {results.fx?.applied && (
+            <p className="detail fx-note">
+              FX applied: 1 {results.fx.inputCurrency} = {formatNumber(results.fx.rateToPhp)} PHP
+            </p>
+          )}
         </div>
 
         <div className="result-card">
@@ -140,6 +145,11 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
         )}
 
       <div className="results-summary">
+        {results.fx?.applied && (
+          <p className="fx-banner">
+            Calculations were performed in PHP for tariff accuracy and converted back to {formData.currency} for display.
+          </p>
+        )}
         <p>
           <strong>Tariff Calculation Details:</strong>
         </p>
@@ -147,9 +157,10 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <li>Product Value: {formatCurrency(formData.value, formData.currency)}</li>
           <li>Duty Rate: {formatNumber(results.duty?.rate || 0)}%</li>
           <li>Duty Amount: {formatCurrency(results.duty?.amount || 0, formData.currency)}</li>
+          <li>Surcharge: {formatCurrency(results.duty?.surcharge || 0, formData.currency)}</li>
           <li>
             Taxable Base: {formatCurrency(
-              formData.value + (results.duty?.amount || 0),
+              formData.value + (results.duty?.amount || 0) + (results.duty?.surcharge || 0),
               formData.currency
             )}
           </li>

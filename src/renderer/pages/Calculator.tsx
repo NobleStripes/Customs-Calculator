@@ -39,10 +39,28 @@ export const Calculator: React.FC = () => {
 
     try {
       const electronAPI = (window as any).electronAPI
+      let calculationValue = formData.value
+      let fxRateToPhp = 1
+      const inputCurrency = formData.currency.toUpperCase()
+
+      if (inputCurrency !== 'PHP') {
+        const conversionResult = await electronAPI.convertCurrency({
+          amount: formData.value,
+          fromCurrency: inputCurrency,
+          toCurrency: 'PHP',
+        })
+
+        if (!conversionResult.success || !conversionResult.data) {
+          throw new Error(conversionResult.error || 'Currency conversion failed')
+        }
+
+        calculationValue = conversionResult.data.convertedAmount
+        fxRateToPhp = conversionResult.data.rate
+      }
 
       // Calculate duty
       const dutyResult = await electronAPI.calculateDuty({
-        value: formData.value,
+        value: calculationValue,
         hsCode: formData.hsCode,
         originCountry: formData.originCountry,
       })
@@ -52,10 +70,12 @@ export const Calculator: React.FC = () => {
       }
 
       const dutyAmount = dutyResult.data.amount
+      const surchargeAmount = dutyResult.data.surcharge || 0
+      const dutiableValue = calculationValue + dutyAmount + surchargeAmount
 
       // Calculate VAT
       const vatResult = await electronAPI.calculateVAT({
-        dutiableValue: formData.value + dutyAmount,
+        dutiableValue,
         hsCode: formData.hsCode,
       })
 
@@ -66,16 +86,42 @@ export const Calculator: React.FC = () => {
       // Get compliance requirements
       const complianceResult = await electronAPI.getComplianceRequirements({
         hsCode: formData.hsCode,
-        value: formData.value,
+        value: calculationValue,
         destination: formData.destinationPort,
       })
 
+      const convertFromPhp = (amount: number): number => {
+        if (inputCurrency === 'PHP') {
+          return amount
+        }
+
+        return amount / fxRateToPhp
+      }
+
+      const convertedDutyAmount = convertFromPhp(dutyAmount)
+      const convertedSurchargeAmount = convertFromPhp(surchargeAmount)
+      const convertedVatAmount = convertFromPhp(vatResult.data.amount || 0)
+      const convertedTotal = convertFromPhp(dutiableValue + (vatResult.data.amount || 0))
+
       setResults({
-        ...dutyResult.data,
-        vat: vatResult.data,
+        duty: {
+          ...dutyResult.data,
+          amount: convertedDutyAmount,
+          surcharge: convertedSurchargeAmount,
+        },
+        vat: {
+          ...vatResult.data,
+          amount: convertedVatAmount,
+        },
         compliance: complianceResult.success ? complianceResult.data : null,
-        totalLandedCost:
-          formData.value + dutyAmount + (vatResult.data.amount || 0),
+        totalLandedCost: convertedTotal,
+        calculationCurrency: 'PHP',
+        fx: {
+          applied: inputCurrency !== 'PHP',
+          rateToPhp: fxRateToPhp,
+          inputCurrency,
+          baseCurrency: 'PHP',
+        },
       })
     } catch (err) {
       setError(String(err))

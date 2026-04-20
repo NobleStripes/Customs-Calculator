@@ -46,6 +46,26 @@ export const electronAPI = {
   batchCalculate: (shipments: any[]) =>
     ipcRenderer.invoke('batch-calculate', shipments),
 
+  // Tariff data management
+  previewTariffImport: (payload: { csvText?: string; rows?: any[] }) =>
+    ipcRenderer.invoke('preview-tariff-import', payload),
+
+  importTariffData: (payload: {
+    sourceName?: string
+    sourceType?: string
+    sourceReference?: string
+    csvText?: string
+    rows?: any[]
+    autoApproveThreshold?: number
+    forceApprove?: boolean
+  }) => ipcRenderer.invoke('import-tariff-data', payload),
+
+  getImportJobs: (payload?: { limit?: number }) =>
+    ipcRenderer.invoke('get-import-jobs', payload),
+
+  getPendingReviewRows: (payload: { importJobId: number }) =>
+    ipcRenderer.invoke('get-pending-review-rows', payload),
+
   // Documents
   generateCalculationDocument: (payload: {
     formData: any

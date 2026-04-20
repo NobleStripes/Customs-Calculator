@@ -16,7 +16,7 @@ export const getDbPath = (): string => {
 export const getDatabase = (): sqlite3.Database => {
   if (!db) {
     const dbPath = getDbPath()
-    db = new sqlite3.Database(dbPath, (err) => {
+    db = new sqlite3.Database(dbPath, (err: Error | null) => {
       if (err) console.error('Database connection error:', err)
       else console.log('Connected to SQLite database')
     })
@@ -42,8 +42,13 @@ const schema = [
     effective_date DATE NOT NULL,
     end_date DATE,
     notes TEXT,
+    source_id INTEGER,
+    confidence_score INTEGER NOT NULL DEFAULT 100,
+    import_status TEXT NOT NULL DEFAULT 'approved',
+    last_modified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (hs_code) REFERENCES hs_codes(code)
+    FOREIGN KEY (hs_code) REFERENCES hs_codes(code),
+    FOREIGN KEY (source_id) REFERENCES tariff_sources(id)
   )`,
 
   `CREATE TABLE IF NOT EXISTS compliance_rules (
@@ -53,7 +58,72 @@ const schema = [
     required_documents TEXT,
     restrictions TEXT,
     special_conditions TEXT,
+    source_id INTEGER,
+    effective_date DATE,
+    end_date DATE,
+    confidence_score INTEGER NOT NULL DEFAULT 100,
+    import_status TEXT NOT NULL DEFAULT 'approved',
+    last_modified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS tariff_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_name TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_reference TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    imported_at DATETIME,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS import_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    imported_rows INTEGER NOT NULL DEFAULT 0,
+    pending_review_rows INTEGER NOT NULL DEFAULT 0,
+    error_rows INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME,
+    FOREIGN KEY (source_id) REFERENCES tariff_sources(id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS rate_change_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hs_code TEXT NOT NULL,
+    old_duty_rate REAL,
+    new_duty_rate REAL,
+    old_vat_rate REAL,
+    new_vat_rate REAL,
+    old_surcharge_rate REAL,
+    new_surcharge_rate REAL,
+    reason TEXT,
+    source_id INTEGER,
+    import_job_id INTEGER,
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES tariff_sources(id),
+    FOREIGN KEY (import_job_id) REFERENCES import_jobs(id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS extracted_rows_review (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    import_job_id INTEGER NOT NULL,
+    row_number INTEGER,
+    raw_payload TEXT NOT NULL,
+    normalized_payload TEXT,
+    confidence_score INTEGER NOT NULL,
+    review_status TEXT NOT NULL DEFAULT 'pending',
+    review_notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at DATETIME,
+    FOREIGN KEY (source_id) REFERENCES tariff_sources(id),
+    FOREIGN KEY (import_job_id) REFERENCES import_jobs(id)
   )`,
 
   `CREATE TABLE IF NOT EXISTS calculation_history (
@@ -76,8 +146,17 @@ const schema = [
 
   `CREATE INDEX IF NOT EXISTS idx_hs_codes_category ON hs_codes(category)`,
   `CREATE INDEX IF NOT EXISTS idx_tariff_rates_hs_code ON tariff_rates(hs_code)`,
+  `CREATE INDEX IF NOT EXISTS idx_tariff_rates_effective_date ON tariff_rates(effective_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_tariff_rates_import_status ON tariff_rates(import_status)`,
+  `CREATE INDEX IF NOT EXISTS idx_tariff_rates_source_id ON tariff_rates(source_id)`,
   `CREATE INDEX IF NOT EXISTS idx_compliance_rules_hs_code ON compliance_rules(hs_code_range)`,
   `CREATE INDEX IF NOT EXISTS idx_calculation_history_hs_code ON calculation_history(hs_code)`,
+  `CREATE INDEX IF NOT EXISTS idx_tariff_sources_type ON tariff_sources(source_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_import_jobs_started_at ON import_jobs(started_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_review_queue_status ON extracted_rows_review(review_status)`,
+  `CREATE INDEX IF NOT EXISTS idx_review_queue_job_id ON extracted_rows_review(import_job_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_rate_change_audit_hs_code ON rate_change_audit(hs_code)`,
 ]
 
 export const initializeDatabase = (): Promise<void> => {
@@ -94,7 +173,7 @@ export const initializeDatabase = (): Promise<void> => {
         return
       }
 
-      database.run(schema[completed], (err) => {
+      database.run(schema[completed], (err: Error | null) => {
         if (err) {
           console.error('Database initialization error:', err)
           reject(err)
@@ -111,7 +190,7 @@ export const initializeDatabase = (): Promise<void> => {
 
 const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
   return new Promise((resolve, reject) => {
-    database.all("PRAGMA table_info('tariff_rates')", (err, rows: any[]) => {
+    database.all("PRAGMA table_info('tariff_rates')", (err: Error | null, rows: any[]) => {
       if (err) {
         reject(err)
         return
@@ -128,6 +207,80 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
         migrationStatements.push('ALTER TABLE tariff_rates ADD COLUMN notes TEXT')
       }
 
+      if (!existingColumns.has('source_id')) {
+        migrationStatements.push('ALTER TABLE tariff_rates ADD COLUMN source_id INTEGER')
+      }
+
+      if (!existingColumns.has('confidence_score')) {
+        migrationStatements.push('ALTER TABLE tariff_rates ADD COLUMN confidence_score INTEGER NOT NULL DEFAULT 100')
+      }
+
+      if (!existingColumns.has('import_status')) {
+        migrationStatements.push("ALTER TABLE tariff_rates ADD COLUMN import_status TEXT NOT NULL DEFAULT 'approved'")
+      }
+
+      if (!existingColumns.has('last_modified_at')) {
+        migrationStatements.push('ALTER TABLE tariff_rates ADD COLUMN last_modified_at DATETIME')
+      }
+
+      if (migrationStatements.length === 0) {
+        ensureComplianceRulesSchemaCompatibility(database).then(resolve).catch(reject)
+        return
+      }
+
+      let completed = 0
+      migrationStatements.forEach((statement) => {
+        database.run(statement, (migrationErr: Error | null) => {
+          if (migrationErr) {
+            reject(migrationErr)
+            return
+          }
+
+          completed += 1
+          if (completed === migrationStatements.length) {
+            ensureComplianceRulesSchemaCompatibility(database).then(resolve).catch(reject)
+          }
+        })
+      })
+    })
+  })
+}
+
+const ensureComplianceRulesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    database.all("PRAGMA table_info('compliance_rules')", (err: Error | null, rows: any[]) => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      const existingColumns = new Set((rows || []).map((row) => row.name))
+      const migrationStatements: string[] = []
+
+      if (!existingColumns.has('source_id')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN source_id INTEGER')
+      }
+
+      if (!existingColumns.has('effective_date')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN effective_date DATE')
+      }
+
+      if (!existingColumns.has('end_date')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN end_date DATE')
+      }
+
+      if (!existingColumns.has('confidence_score')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN confidence_score INTEGER NOT NULL DEFAULT 100')
+      }
+
+      if (!existingColumns.has('import_status')) {
+        migrationStatements.push("ALTER TABLE compliance_rules ADD COLUMN import_status TEXT NOT NULL DEFAULT 'approved'")
+      }
+
+      if (!existingColumns.has('last_modified_at')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN last_modified_at DATETIME')
+      }
+
       if (migrationStatements.length === 0) {
         resolve()
         return
@@ -135,7 +288,7 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
 
       let completed = 0
       migrationStatements.forEach((statement) => {
-        database.run(statement, (migrationErr) => {
+        database.run(statement, (migrationErr: Error | null) => {
           if (migrationErr) {
             reject(migrationErr)
             return
@@ -275,7 +428,7 @@ export const seedInitialData = async (): Promise<void> => {
 
   // Check if data already exists
   return new Promise((resolve, reject) => {
-    database.get('SELECT COUNT(*) as count FROM hs_codes', async (err, row: any) => {
+    database.get('SELECT COUNT(*) as count FROM hs_codes', async (err: Error | null, row: any) => {
       if (err) {
         console.error('Error checking database:', err)
         reject(err)

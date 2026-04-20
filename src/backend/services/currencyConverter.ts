@@ -16,31 +16,36 @@ export class CurrencyConverter {
     convertedAmount: number
     targetCurrency: string
     rate: number
+    source: 'cache' | 'live' | 'fallback' | 'identity'
     timestamp: string
   }> {
     try {
+      const from = fromCurrency.trim().toUpperCase()
+      const to = toCurrency.trim().toUpperCase()
+
       if (fromCurrency === toCurrency) {
         return {
           originalAmount: amount,
-          originalCurrency: fromCurrency,
+          originalCurrency: from,
           convertedAmount: amount,
-          targetCurrency: toCurrency,
+          targetCurrency: to,
           rate: 1,
+          source: 'identity',
           timestamp: new Date().toISOString(),
         }
       }
 
-      const pair = `${fromCurrency}_${toCurrency}`
-      const rate = await this.getExchangeRate(fromCurrency, toCurrency)
+      const { rate, source } = await this.getExchangeRate(from, to)
 
       const convertedAmount = amount * rate
 
       return {
         originalAmount: amount,
-        originalCurrency: fromCurrency,
+        originalCurrency: from,
         convertedAmount,
-        targetCurrency: toCurrency,
+        targetCurrency: to,
         rate,
+        source,
         timestamp: new Date().toISOString(),
       }
     } catch (error) {
@@ -52,7 +57,10 @@ export class CurrencyConverter {
   /**
    * Get exchange rate with caching
    */
-  private async getExchangeRate(fromCurrency: string, toCurrency: string): Promise<number> {
+  private async getExchangeRate(fromCurrency: string, toCurrency: string): Promise<{
+    rate: number
+    source: 'cache' | 'live' | 'fallback'
+  }> {
     return new Promise(async (resolve, reject) => {
       const pair = `${fromCurrency}_${toCurrency}`
 
@@ -61,17 +69,24 @@ export class CurrencyConverter {
         'SELECT rate, last_updated FROM exchange_rates WHERE currency_pair = ?',
         [pair],
         async (err, row: any) => {
+          if (err) {
+            reject(err)
+            return
+          }
+
           if (row) {
             const cacheAge = Date.now() - new Date(row.last_updated).getTime()
             if (cacheAge < CACHE_DURATION) {
-              resolve(row.rate)
+              resolve({ rate: row.rate, source: 'cache' })
               return
             }
           }
 
           // Fetch from API
           try {
-            const rate = await this.fetchExchangeRate(fromCurrency, toCurrency)
+            const liveRate = await this.fetchExchangeRate(fromCurrency, toCurrency)
+            const rate = liveRate ?? this.getFallbackRate(fromCurrency, toCurrency)
+            const source: 'live' | 'fallback' = liveRate ? 'live' : 'fallback'
 
             // Update cache
             this.db.run(
@@ -84,10 +99,10 @@ export class CurrencyConverter {
               }
             )
 
-            resolve(rate)
+            resolve({ rate, source })
           } catch (error) {
             console.error('Error getting exchange rate:', error)
-            resolve(1) // Fallback
+            resolve({ rate: this.getFallbackRate(fromCurrency, toCurrency), source: 'fallback' })
           }
         }
       )
@@ -97,7 +112,7 @@ export class CurrencyConverter {
   /**
    * Fetch exchange rate from external API
    */
-  private async fetchExchangeRate(fromCurrency: string, toCurrency: string): Promise<number> {
+  private async fetchExchangeRate(fromCurrency: string, toCurrency: string): Promise<number | null> {
     try {
       const response = await axios.get(`${EXCHANGE_RATES_API}/${fromCurrency}`, {
         timeout: 5000,
@@ -112,8 +127,7 @@ export class CurrencyConverter {
       return rate
     } catch (error) {
       console.error('Error fetching from exchange rate API:', error)
-      // Return fallback rates
-      return this.getFallbackRate(fromCurrency, toCurrency)
+      return null
     }
   }
 

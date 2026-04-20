@@ -26,26 +26,45 @@ export interface TariffCatalogRow {
 export class TariffCalculator {
   private db = getDatabase()
 
-  /**
-   * Calculate import duty for a product
-   */
-  calculateDuty(value: number, hsCode: string, _originCountry: string): Promise<DutyResult> {
+  private normalizeHSCode(value: string): string {
+    return value.trim().toUpperCase()
+  }
+
+  private getCurrentTariffRateRow(
+    hsCode: string,
+    fields: string
+  ): Promise<any | null> {
     return new Promise((resolve, reject) => {
+      const normalizedHSCode = this.normalizeHSCode(hsCode)
       const sql = `
-        SELECT duty_rate, surcharge_rate, notes
+        SELECT ${fields}
         FROM tariff_rates
-        WHERE hs_code = ? AND effective_date <= date('now')
-        AND (end_date IS NULL OR end_date > date('now'))
+        WHERE hs_code = ?
+          AND effective_date <= date('now')
+          AND (end_date IS NULL OR end_date > date('now'))
+          AND (import_status = 'approved' OR import_status IS NULL)
         ORDER BY effective_date DESC
         LIMIT 1
       `
 
-      this.db.get(sql, [hsCode], (err, row: any) => {
+      this.db.get(sql, [normalizedHSCode], (err, row: any) => {
         if (err) {
-          console.error('Error calculating duty:', err)
-          reject(new Error(`Failed to calculate duty: ${err.message}`))
+          reject(err)
           return
         }
+
+        resolve(row || null)
+      })
+    })
+  }
+
+  /**
+   * Calculate import duty for a product
+   */
+  calculateDuty(value: number, hsCode: string, _originCountry: string): Promise<DutyResult> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes')
 
         const dutyRate = row?.duty_rate || 0
         const surchargeRate = row?.surcharge_rate || 0
@@ -56,10 +75,13 @@ export class TariffCalculator {
         resolve({
           rate: dutyRate * 100,
           amount: dutyAmount,
-          surcharge: surcharge,
+          surcharge,
           notes: row?.notes || '',
         })
-      })
+      } catch (err: any) {
+        console.error('Error calculating duty:', err)
+        reject(new Error(`Failed to calculate duty: ${err.message}`))
+      }
     })
   }
 
@@ -67,25 +89,10 @@ export class TariffCalculator {
    * Calculate VAT on dutiable value
    */
   calculateVAT(dutiableValue: number, hsCode: string): Promise<VATResult> {
-    return new Promise((resolve, reject) => {
-      const sql = `
-        SELECT vat_rate, notes
-        FROM tariff_rates
-        WHERE hs_code = ? AND effective_date <= date('now')
-        AND (end_date IS NULL OR end_date > date('now'))
-        ORDER BY effective_date DESC
-        LIMIT 1
-      `
-
-      this.db.get(sql, [hsCode], (err, row: any) => {
-        if (err) {
-          console.error('Error calculating VAT:', err)
-          reject(new Error(`Failed to calculate VAT: ${err.message}`))
-          return
-        }
-
+    return new Promise(async (resolve, reject) => {
+      try {
+        const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes')
         const vatRate = row?.vat_rate || 0.12
-
         const vatAmount = dutiableValue * vatRate
 
         resolve({
@@ -93,7 +100,10 @@ export class TariffCalculator {
           amount: vatAmount,
           notes: row?.notes || '',
         })
-      })
+      } catch (err: any) {
+        console.error('Error calculating VAT:', err)
+        reject(new Error(`Failed to calculate VAT: ${err.message}`))
+      }
     })
   }
 
@@ -102,17 +112,44 @@ export class TariffCalculator {
    */
   searchHSCodes(query: string): Promise<Array<{ code: string; description: string; category: string }>> {
     return new Promise((resolve, reject) => {
-      const searchQuery = `%${query.toUpperCase()}%`
+      const normalizedQuery = query.trim().toUpperCase()
+      const compactQuery = normalizedQuery.replace(/\./g, '')
+
+      if (!normalizedQuery) {
+        resolve([])
+        return
+      }
+
+      const searchQuery = `%${normalizedQuery}%`
+      const compactSearchQuery = `%${compactQuery}%`
+      const startsWithQuery = `${normalizedQuery}%`
+      const compactStartsWithQuery = `${compactQuery}%`
 
       const sql = `
-        SELECT code, description, category
+        SELECT
+          code,
+          description,
+          category,
+          CASE
+            WHEN REPLACE(code, '.', '') = ? THEN 0
+            WHEN code = ? THEN 1
+            WHEN code LIKE ? THEN 2
+            WHEN REPLACE(code, '.', '') LIKE ? THEN 3
+            WHEN UPPER(description) LIKE ? THEN 4
+            ELSE 5
+          END AS rank
         FROM hs_codes
-        WHERE code LIKE ? OR description LIKE ?
-        ORDER BY code
+        WHERE UPPER(code) LIKE ?
+          OR REPLACE(UPPER(code), '.', '') LIKE ?
+          OR UPPER(description) LIKE ?
+        ORDER BY rank, code
         LIMIT 20
       `
 
-      this.db.all(sql, [searchQuery, searchQuery], (err, rows: any) => {
+      this.db.all(
+        sql,
+        [compactQuery, normalizedQuery, startsWithQuery, compactStartsWithQuery, searchQuery, searchQuery, compactSearchQuery, searchQuery],
+        (err, rows: any) => {
         if (err) {
           console.error('Error searching HS codes:', err)
           reject(new Error(`Failed to search HS codes: ${err.message}`))
@@ -126,7 +163,8 @@ export class TariffCalculator {
             category: r.category,
           })) || []
         )
-      })
+      }
+      )
     })
   }
 
@@ -135,9 +173,10 @@ export class TariffCalculator {
    */
   getHSCodeDetails(code: string): Promise<{ code: string; description: string; category: string } | null> {
     return new Promise((resolve, reject) => {
+      const normalizedCode = this.normalizeHSCode(code)
       const sql = 'SELECT code, description, category FROM hs_codes WHERE code = ? LIMIT 1'
 
-      this.db.get(sql, [code], (err, row: any) => {
+      this.db.get(sql, [normalizedCode], (err, row: any) => {
         if (err) {
           console.error('Error fetching HS code details:', err)
           reject(new Error(`Failed to fetch HS code details: ${err.message}`))

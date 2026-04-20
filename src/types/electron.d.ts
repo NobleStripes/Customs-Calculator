@@ -30,6 +30,25 @@ export interface ElectronAPI {
     toCurrency: string
   }) => Promise<{ success: boolean; data?: any; error?: string }>
   batchCalculate: (shipments: any[]) => Promise<{ success: boolean; data?: any; error?: string }>
+  previewTariffImport: (payload: {
+    csvText?: string
+    rows?: any[]
+  }) => Promise<{ success: boolean; data?: any; error?: string }>
+  importTariffData: (payload: {
+    sourceName?: string
+    sourceType?: string
+    sourceReference?: string
+    csvText?: string
+    rows?: any[]
+    autoApproveThreshold?: number
+    forceApprove?: boolean
+  }) => Promise<{ success: boolean; data?: any; error?: string }>
+  getImportJobs: (payload?: {
+    limit?: number
+  }) => Promise<{ success: boolean; data?: any; error?: string }>
+  getPendingReviewRows: (payload: {
+    importJobId: number
+  }) => Promise<{ success: boolean; data?: any; error?: string }>
   generateCalculationDocument: (payload: {
     formData: any
     results: any

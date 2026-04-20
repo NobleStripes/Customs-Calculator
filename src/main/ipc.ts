@@ -4,6 +4,7 @@ import { TariffCalculator } from '../backend/services/tariffCalculator'
 import { ComplianceChecker } from '../backend/services/complianceChecker'
 import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { DocumentGenerator } from '../backend/services/documentGenerator'
+import { TariffDataIngestionService } from '../backend/services/tariffDataIngestion'
 import path from 'path'
 
 export const registerIPCHandlers = () => {
@@ -122,26 +123,131 @@ export const registerIPCHandlers = () => {
   ipcMain.handle('batch-calculate', async (_event, shipments) => {
     try {
       const calculator = new TariffCalculator()
+      const converter = new CurrencyConverter()
       const results = []
 
       for (const shipment of shipments) {
+        const shipmentCurrency = (shipment.currency || 'USD').toUpperCase()
+        let valueInPhp = shipment.value
+        let fxRateToPhp = 1
+
+        if (shipmentCurrency !== 'PHP') {
+          const conversionResult = await converter.convert(
+            shipment.value,
+            shipmentCurrency,
+            'PHP'
+          )
+          valueInPhp = conversionResult.convertedAmount
+          fxRateToPhp = conversionResult.rate
+        }
+
         const duty = await calculator.calculateDuty(
-          shipment.value,
+          valueInPhp,
           shipment.hsCode,
           shipment.originCountry
         )
-        const vat = await calculator.calculateVAT(shipment.value + duty.amount, shipment.hsCode)
+        const dutiableValue = valueInPhp + duty.amount + duty.surcharge
+        const vat = await calculator.calculateVAT(dutiableValue, shipment.hsCode)
+
+        const convertFromPhp = (amount: number): number => {
+          if (shipmentCurrency === 'PHP') {
+            return amount
+          }
+
+          return amount / fxRateToPhp
+        }
 
         results.push({
           ...shipment,
-          duty,
-          vat,
+          duty: {
+            ...duty,
+            amount: convertFromPhp(duty.amount),
+            surcharge: convertFromPhp(duty.surcharge),
+          },
+          vat: {
+            ...vat,
+            amount: convertFromPhp(vat.amount),
+          },
+          totalLandedCost: convertFromPhp(dutiableValue + vat.amount),
+          calculationCurrency: 'PHP',
+          fx: {
+            applied: shipmentCurrency !== 'PHP',
+            rateToPhp: fxRateToPhp,
+            inputCurrency: shipmentCurrency,
+            baseCurrency: 'PHP',
+          },
         })
       }
 
       return { success: true, data: results }
     } catch (error) {
       console.error('Batch calculation failed:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Tariff data import preview
+  ipcMain.handle('preview-tariff-import', async (_event, payload) => {
+    try {
+      const ingestion = new TariffDataIngestionService()
+
+      const rows = Array.isArray(payload?.rows)
+        ? payload.rows
+        : ingestion.parseCsvText(payload?.csvText || '')
+
+      const preview = ingestion.previewRows(rows)
+      return { success: true, data: preview }
+    } catch (error) {
+      console.error('Tariff import preview failed:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Tariff data import execution
+  ipcMain.handle('import-tariff-data', async (_event, payload) => {
+    try {
+      const ingestion = new TariffDataIngestionService()
+
+      const rows = Array.isArray(payload?.rows)
+        ? payload.rows
+        : ingestion.parseCsvText(payload?.csvText || '')
+
+      const summary = await ingestion.importRows({
+        sourceName: payload?.sourceName || 'Manual import',
+        sourceType: payload?.sourceType || 'manual',
+        sourceReference: payload?.sourceReference,
+        rows,
+        autoApproveThreshold: payload?.autoApproveThreshold,
+        forceApprove: Boolean(payload?.forceApprove),
+      })
+
+      return { success: true, data: summary }
+    } catch (error) {
+      console.error('Tariff data import failed:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Import jobs list
+  ipcMain.handle('get-import-jobs', async (_event, payload) => {
+    try {
+      const ingestion = new TariffDataIngestionService()
+      const jobs = await ingestion.getImportJobs(payload?.limit || 20)
+      return { success: true, data: jobs }
+    } catch (error) {
+      console.error('Import job fetch failed:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Pending review rows by import job
+  ipcMain.handle('get-pending-review-rows', async (_event, payload) => {
+    try {
+      const ingestion = new TariffDataIngestionService()
+      const rows = await ingestion.getPendingReviewRows(payload?.importJobId)
+      return { success: true, data: rows }
+    } catch (error) {
+      console.error('Pending review row fetch failed:', error)
       return { success: false, error: String(error) }
     }
   })
