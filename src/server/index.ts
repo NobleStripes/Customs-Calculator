@@ -3,11 +3,13 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { initializeDatabase } from '../backend/db/database'
 import { CurrencyConverter } from '../backend/services/currencyConverter'
+import { DocumentGenerator } from '../backend/services/documentGenerator'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
 
 const app = express()
 const websiteFetcher = new WebsiteFetcherService()
 const currencyConverter = new CurrencyConverter()
+const documentGenerator = new DocumentGenerator()
 const port = Number(process.env.PORT || 8787)
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -110,6 +112,28 @@ app.get('/api/fetch-regulatory-updates', async (request, response) => {
     )
 
     return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.post('/api/export/calculation-document/pdf', async (request, response) => {
+  const payload = request.body
+
+  if (!payload?.formData || !payload?.results) {
+    return sendError(response, 400, 'Request body must include formData and results')
+  }
+
+  try {
+    const pdfBuffer = await documentGenerator.generateCalculationReportBuffer({
+      formData: payload.formData,
+      results: payload.results,
+      generatedAt: new Date().toISOString(),
+    })
+
+    response.setHeader('Content-Type', 'application/pdf')
+    response.setHeader('Content-Disposition', 'attachment; filename="customs-calculation-report.pdf"')
+    return response.send(pdfBuffer)
   } catch (error) {
     return sendError(response, 502, error)
   }

@@ -13,6 +13,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
 }) => {
   const [exporting, setExporting] = useState(false)
   const [exportMessage, setExportMessage] = useState<string | null>(null)
+  const [exportFormat, setExportFormat] = useState<'pdf' | 'word' | 'excel'>('pdf')
 
   const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', {
@@ -30,7 +31,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
     }).format(num)
   }
 
-  const handleExportPdf = async () => {
+  const handleExportDocument = async () => {
     setExportMessage(null)
     setExporting(true)
 
@@ -38,6 +39,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
       const response = await appApi.generateCalculationDocument({
         formData,
         results,
+        format: exportFormat,
       })
 
       if (!response.success || !response.data?.path) {
@@ -179,9 +181,21 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
       </div>
 
       <div className="results-actions">
-        <button className="btn-export" onClick={handleExportPdf} disabled={exporting}>
-          {exporting ? 'Generating PDF...' : 'Export PDF Report'}
-        </button>
+        <div className="export-controls">
+          <select
+            value={exportFormat}
+            onChange={(event) => setExportFormat(event.target.value as 'pdf' | 'word' | 'excel')}
+            disabled={exporting}
+            className="export-format-select"
+          >
+            <option value="pdf">PDF</option>
+            <option value="word">Word (.doc)</option>
+            <option value="excel">Excel (.xls)</option>
+          </select>
+          <button className="btn-export" onClick={handleExportDocument} disabled={exporting}>
+            {exporting ? `Generating ${exportFormat.toUpperCase()}...` : `Export ${exportFormat.toUpperCase()} Report`}
+          </button>
+        </div>
         {exportMessage && <p className="export-message">{exportMessage}</p>}
       </div>
     </div>

@@ -185,6 +185,21 @@
   padding: 12px;
 }
 
+.export-controls {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.export-format-select {
+  padding: 10px 12px;
+  border: 1px solid #bdc3c7;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background-color: #fff;
+}
+
 .btn-export {
   width: 100%;
   padding: 10px 14px;
@@ -210,6 +225,10 @@
 
 @media (max-width: 768px) {
   .results-section {
+    grid-template-columns: 1fr;
+  }
+
+  .export-controls {
     grid-template-columns: 1fr;
   }
 

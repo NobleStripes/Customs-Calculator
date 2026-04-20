@@ -255,6 +255,10 @@ const getRequirements = (hsCode: string, value: number): {
 
 const browserDownload = (content: string, fileName: string, contentType: string): string => {
   const blob = new Blob([content], { type: contentType })
+  return downloadBlob(blob, fileName)
+}
+
+const downloadBlob = (blob: Blob, fileName: string): string => {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -262,6 +266,73 @@ const browserDownload = (content: string, fileName: string, contentType: string)
   anchor.click()
   URL.revokeObjectURL(url)
   return `Downloaded ${fileName} in browser`
+}
+
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const buildDocumentMarkup = (payload: { formData: Record<string, unknown>; results: Record<string, any> }) => {
+  const formData = payload.formData
+  const results = payload.results
+  const requiredDocuments = results.compliance?.requiredDocuments || results.compliance?.requirements || []
+  const restrictions = results.compliance?.restrictions || []
+  const warnings = results.compliance?.warnings || []
+
+  const listMarkup = (title: string, items: string[]) => `
+    <section>
+      <h2>${escapeHtml(title)}</h2>
+      <ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+    </section>
+  `
+
+  return `<!doctype html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>Customs Calculation Report</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+        h1 { margin-bottom: 8px; }
+        h2 { margin-top: 24px; margin-bottom: 8px; font-size: 18px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; }
+        th { background: #f3f4f6; }
+        .meta { color: #6b7280; margin-bottom: 20px; }
+      </style>
+    </head>
+    <body>
+      <h1>Philippines Customs Calculation Report</h1>
+      <p class="meta">Generated: ${escapeHtml(new Date().toISOString())}</p>
+      <section>
+        <h2>Shipment Details</h2>
+        <table>
+          <tr><th>HS Code</th><td>${escapeHtml(formData.hsCode)}</td></tr>
+          <tr><th>Declared Value</th><td>${escapeHtml(formData.value)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Origin Country</th><td>${escapeHtml(formData.originCountry || 'N/A')}</td></tr>
+          <tr><th>Destination Port</th><td>${escapeHtml(formData.destinationPort)}</td></tr>
+        </table>
+      </section>
+      <section>
+        <h2>Calculation Summary</h2>
+        <table>
+          <tr><th>Duty Rate</th><td>${escapeHtml(results.duty?.rate || 0)}%</td></tr>
+          <tr><th>Duty Amount</th><td>${escapeHtml(results.duty?.amount || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Surcharge</th><td>${escapeHtml(results.duty?.surcharge || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>VAT Rate</th><td>${escapeHtml(results.vat?.rate || 0)}%</td></tr>
+          <tr><th>VAT Amount</th><td>${escapeHtml(results.vat?.amount || 0)} ${escapeHtml(formData.currency)}</td></tr>
+          <tr><th>Total Landed Cost</th><td>${escapeHtml(results.totalLandedCost)} ${escapeHtml(formData.currency)}</td></tr>
+        </table>
+      </section>
+      ${requiredDocuments.length ? listMarkup('Required Documents', requiredDocuments) : ''}
+      ${restrictions.length ? listMarkup('Restrictions', restrictions) : ''}
+      ${warnings.length ? listMarkup('Warnings', warnings) : ''}
+    </body>
+  </html>`
 }
 
 const makeSuccess = <T>(data: T) => Promise.resolve({ success: true, data })
@@ -574,11 +645,38 @@ export const appApi = {
     return callApi(`/api/fetch-regulatory-updates?${params.toString()}`)
   },
 
-  generateCalculationDocument: async (payload: { formData: Record<string, unknown>; results: Record<string, unknown> }) => {
+  generateCalculationDocument: async (payload: { formData: Record<string, unknown>; results: Record<string, any>; format: 'pdf' | 'word' | 'excel' }) => {
     try {
-      const fileName = `customs-calculation-${todayDate}.html`
-      const content = `<!doctype html><html><head><meta charset="utf-8"><title>Customs Calculation Report</title></head><body><h1>Customs Calculation Report</h1><pre>${JSON.stringify(payload, null, 2)}</pre></body></html>`
-      const path = browserDownload(content, fileName, 'text/html;charset=utf-8;')
+      const baseFileName = `customs-calculation-${todayDate}`
+
+      if (payload.format === 'pdf') {
+        const response = await fetch(`${apiBase}/api/export/calculation-document/pdf`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/pdf',
+          },
+          body: JSON.stringify({
+            formData: payload.formData,
+            results: payload.results,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(`Unable to generate PDF export (${response.status})`)
+        }
+
+        const blob = await response.blob()
+        const path = downloadBlob(blob, `${baseFileName}.pdf`)
+        return makeSuccess({ path })
+      }
+
+      const content = buildDocumentMarkup(payload)
+      const fileExtension = payload.format === 'word' ? 'doc' : 'xls'
+      const mimeType = payload.format === 'word'
+        ? 'application/msword;charset=utf-8;'
+        : 'application/vnd.ms-excel;charset=utf-8;'
+      const path = browserDownload(content, `${baseFileName}.${fileExtension}`, mimeType)
       return makeSuccess({ path })
     } catch (error) {
       return makeError(error)
