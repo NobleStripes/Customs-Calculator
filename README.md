@@ -1,6 +1,6 @@
 # Philippines Customs Calculator
 
-Customs-Calculator is a desktop application for Philippine import costing and compliance pre-checks, built with Electron, React, and SQLite. The current release supports HS code search with ranked suggestions, duty and VAT computation (including surcharge-aware taxable base), multi-currency workflows (with PHP as the computation base), batch shipment processing, tariff browsing, compliance checks, and PDF report export. It is designed for SMEs, brokers, and operations teams that need consistent landed-cost estimates before final confirmation against official Bureau of Customs and BIR issuances.
+Customs-Calculator is a browser-based tool for Philippine import costing and compliance pre-checks, built with React and TypeScript. The current website release supports HS code search with ranked suggestions, duty and VAT computation including surcharge-aware taxable base, multi-currency workflows with PHP as the computation base, batch shipment processing, tariff browsing, compliance checks, and browser-based report export. It is designed for SMEs, brokers, and operations teams that need consistent landed-cost estimates before final confirmation against official Bureau of Customs and BIR issuances.
 
 ## Quick Summary
 
@@ -16,27 +16,25 @@ The project is in an active build-out phase: core calculation and operator workf
 
 **Tech Stack:**
 - **Frontend:** React 18 with TypeScript
-- **Desktop:** Electron 28
-- **Backend:** Node.js services (embedded in Electron main process)
-- **Database:** SQLite3
-- **Build Tools:** Vite, esbuild
+- **Runtime:** Browser SPA
+- **Data Layer:** In-browser seeded app API for current workflows
+- **Build Tools:** Vite
 - **Styling:** CSS3 with modern features
 
 **Architecture:**
-- **`src/main/`** - Electron app lifecycle, IPC registration, and secure desktop integration.
 - **`src/renderer/`** - React single-page interface used by operators for calculator, browser, and batch workflows.
-- **`src/backend/`** - Domain services for tariff calculation, compliance, currency conversion, document export, and ingestion logic.
-- **`src/backend/db/`** - SQLite schema bootstrap, compatibility migrations, and initial seed data.
+- **`src/renderer/lib/appApi.ts`** - Browser-native application API that currently powers calculations, search, conversion, export, and seeded reference data.
+- **`src/backend/`** - Legacy Node-side services retained as a reference for the next server-side phase, including ingestion and website-fetch adapters.
 
 ## Features
 
 ### Completed
-- [x] Project scaffolding with Electron + React + TypeScript
-- [x] SQLite database with HS code, tariff, compliance, exchange rate, and history tables
+- [x] React + TypeScript website scaffold
+- [x] Browser-side seeded data model for HS codes, tariff rates, compliance rules, and fallback FX rates
 - [x] Duty and VAT computation engine (effective-date aware tariff lookup)
 - [x] VAT taxable base calculation includes surcharge
 - [x] Multi-currency calculator flow (converts to PHP for computation, then back to display currency)
-- [x] Currency conversion service with cache/live/fallback behavior
+- [x] Currency conversion flow with fallback FX behavior in website mode
 - [x] HS code autocomplete search by code and description
 - [x] HS code search ranking and normalization (supports code searches with/without dots)
 - [x] HS code keyboard navigation (Arrow Up/Down, Enter, Escape)
@@ -44,13 +42,12 @@ The project is in an active build-out phase: core calculation and operator workf
 - [x] Calculator page with real-time results and FX context display
 - [x] Batch Import page with CSV parse, preview, calculate, and export
 - [x] Tariff Browser page with search and category filtering
-- [x] IPC layer for secure main-renderer communication
-- [x] PDF report generation for calculation output
-- [x] Tariff data ingestion backend foundation (preview/import jobs/review queue/audit via IPC)
+- [x] Browser report export for calculation output
+- [x] Tariff data ingestion workflow stubbed in the website UI for future admin wiring
 
 ### In Progress
 - [ ] Data management/admin UI for tariff source imports and review queue
-- [ ] Automated Customs/BIR source adapters (HTML/CSV/PDF ingestion)
+- [ ] Server-side Customs/BIR/Tariff Commission source adapters (HTML/CSV/PDF ingestion)
 - [ ] Tariff source governance views (import status, confidence, and rate change audit)
 
 ### Planned
@@ -61,7 +58,7 @@ The project is in an active build-out phase: core calculation and operator workf
 
 ## Setup Instructions
 
-Use this quick-start when running locally for development or packaging.
+Use this quick-start when running locally for website development.
 
 ### Prerequisites
 - Node.js 18+ (https://nodejs.org/)
@@ -79,22 +76,17 @@ Use this quick-start when running locally for development or packaging.
    npm run build
    ```
 
-3. **Run development mode (hot reload for main and renderer)**
+3. **Run development mode**
    ```bash
    npm run dev
    ```
-   Starts both the Electron main process bundle watcher and the React dev server.
+   Starts the Vite dev server.
 
-4. **Run the built app (production mode)**
+4. **Preview the built app**
    ```bash
    npm start
    ```
-
-5. **Package as a desktop executable**
-   ```bash
-   npm run dist
-   ```
-   Build artifacts are generated in the `release/` directory.
+   Serves the production build locally using `vite preview`.
 
 ## Detailed Technical Notes
 
@@ -105,17 +97,13 @@ The sections below are intended for contributors and maintainers.
 ```
 customs-calculator/
 ├── src/
-│   ├── main/                      # Electron main process
-│   │   ├── index.ts               # App entry point
-│   │   ├── ipc.ts                 # IPC handlers (main ↔ renderer)
-│   │   ├── preload.ts             # Preload script for secure context
-│   │   └── utils.ts               # Utility functions
-│   │
 │   ├── renderer/                  # React frontend
 │   │   ├── App.tsx                # Main app component
 │   │   ├── index.tsx              # React entry point
 │   │   ├── index.css              # Global styles
 │   │   ├── App.css                # App layout styles
+│   │   ├── lib/
+│   │   │   └── appApi.ts          # Browser-native app API and seeded data
 │   │   ├── pages/                 # Page components
 │   │   │   ├── Calculator.tsx
 │   │   │   ├── BatchImport.tsx
@@ -125,7 +113,7 @@ customs-calculator/
 │   │       ├── HSCodeSearch.tsx
 │   │       └── CalculationResults.tsx
 │   │
-│   ├── backend/                   # Backend services
+│   ├── backend/                   # Legacy server-side services retained for future web backend work
 │   │   ├── db/
 │   │   │   └── database.ts        # Database setup and seeding
 │   │   └── services/
@@ -140,7 +128,6 @@ customs-calculator/
 ├── package.json                   # Dependencies and scripts
 ├── tsconfig.json                  # TypeScript configuration
 ├── vite.config.ts                 # Vite configuration
-├── electron-builder.json5         # Electron packaging config
 └── README.md                      # This file
 ```
 
@@ -356,38 +343,33 @@ Notes:
 - Destination port is required for compliance checks and reporting context.
 - If tariff lookup fails at runtime, the service returns a handled error instead of silently producing a partial result.
 
-## IPC Communication (Electron)
+## Browser App API
 
-The app uses Electron's IPC for secure communication between main and renderer processes:
+The active website uses a browser-native app API in `src/renderer/lib/appApi.ts` instead of Electron IPC.
 
-### Available IPC Handlers
+### Available App Methods
 
-**Database & Initialization:**
-- `init-db` - Initialize and seed database
+**Initialization:**
+- `initDB` - Initialize seeded browser data
 
-**Calculations:**
-- `calculate-duty` - Calculate import duty
-- `calculate-vat` - Calculate VAT
-- `search-hs-codes` - Search for HS codes
-- `get-tariff-catalog` - Get tariff rows for browser view
-- `get-tariff-categories` - Get available tariff categories
-- `get-compliance-requirements` - Get compliance info
-- `convert-currency` - Currency conversion
-- `batch-calculate` - Bulk calculations
-- `preview-tariff-import` - Validate and preview tariff source rows
-- `import-tariff-data` - Execute tariff source import
-- `get-import-jobs` - Get recent import job statuses
-- `get-pending-review-rows` - Get rows queued for manual review
-- `generate-calculation-document` - Generate PDF report
+**Calculations and Reference Data:**
+- `calculateDuty` - Calculate import duty
+- `calculateVAT` - Calculate VAT
+- `searchHSCodes` - Search for HS codes
+- `getTariffCatalog` - Get tariff rows for browser view
+- `getTariffCategories` - Get available tariff categories
+- `getComplianceRequirements` - Get compliance info
+- `convertCurrency` - Currency conversion
+- `batchCalculate` - Bulk calculations
+- `previewTariffImport` - Validate and preview source rows
+- `importTariffData` - Placeholder import execution response for current web mode
+- `getImportJobs` - Get recent import job placeholders
+- `getPendingReviewRows` - Get pending review placeholders
+- `generateCalculationDocument` - Generate browser download report
 
-**Usage from React:**
-```typescript
-const result = await (window as any).electronAPI.calculateDuty({
-  value: 1000,
-  hsCode: '8471.30',
-  originCountry: 'CHN',
-})
-```
+**Website Fetching:**
+- `fetchWebsiteContent` - Returns a clear server-side-required error in current website mode
+- `fetchRegulatoryUpdates` - Returns a clear server-side-required error in current website mode
 
 ## Development Guide
 
@@ -402,7 +384,7 @@ const result = await (window as any).electronAPI.calculateDuty({
    ```typescript
    { hs_code: '1234.56', duty_rate: 0.10, vat_rate: 0.12 }
    ```
-4. Rebuild and restart app
+4. Refresh the browser app
 
 ### Adding New Compliance Rules
 
@@ -454,32 +436,12 @@ npm run lint
 npm run format
 ```
 
-## Packaging
-
-### Windows (.exe, .msi)
-```bash
-npm run dist
-```
-Creates installer in `release/` directory.
-
-### macOS (.dmg, .zip)
-Building on macOS:
-```bash
-npm run dist
-```
-
-### Linux (.AppImage, .deb)
-Building on Linux:
-```bash
-npm run dist
-```
-
 ## Known Issues & Limitations
 
-1. **Exchange Rates:** Live rates depend on internet availability; the app falls back to static rates when unavailable.
-2. **Database Size:** Current SQLite setup supports ~100,000 HS codes. For larger datasets, consider migration to PostgreSQL.
-3. **Performance:** Search across very large HS code tables may degrade beyond ~500,000 entries; indexing is implemented but may need further tuning.
-4. **Ingestion UI:** Import/review backend workflow is implemented, but full admin UI for source operations is still in progress.
+1. **Exchange Rates:** Current website mode uses fallback FX data; live-rate refresh is part of the future server-side phase.
+2. **Regulatory Fetching:** Customs/BIR/Tariff Commission website fetching still requires a real server-side endpoint in web mode.
+3. **Seeded Data Scope:** The current browser dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage.
+4. **Admin Tooling:** Import/review workflow UI and server-backed source governance are still in progress.
 
 ## Future Enhancements
 
@@ -504,14 +466,14 @@ MIT
 ## Changelog
 
 ### v0.1.0 (Current)
-- Electron + React + TypeScript desktop scaffold
-- SQLite schema, compatibility migrations, and seed data
+- Website-first React + TypeScript runtime
+- Seeded browser app API for calculation workflows
 - Duty and VAT engine with surcharge-aware taxable base
-- Currency conversion with cache/live/fallback behavior
+- Currency conversion with fallback behavior in web mode
 - Ranked HS code search with keyboard navigation support
 - Calculator, Batch Import, and Tariff Browser pages
-- Compliance checks and PDF report export
-- Tariff ingestion backend foundation (preview/import jobs/review queue/audit) with IPC handlers
+- Compliance checks and browser report export
+- Legacy backend ingestion foundation retained for future server-side integration
 
 ---
 

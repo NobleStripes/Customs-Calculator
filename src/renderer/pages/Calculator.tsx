@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { HSCodeSearch } from '../components/HSCodeSearch'
 import { CalculationResults } from '../components/CalculationResults'
+import { appApi } from '../lib/appApi'
 import './Calculator.css'
 
 interface CalculationPayload {
@@ -43,7 +44,7 @@ export const Calculator: React.FC = () => {
 
       setFxLoading(true)
       try {
-        const result = await window.electronAPI.convertCurrency({
+        const result = await appApi.convertCurrency({
           amount: 1,
           fromCurrency: inputCurrency,
           toCurrency: 'PHP',
@@ -89,13 +90,12 @@ export const Calculator: React.FC = () => {
     setError(null)
 
     try {
-      const electronAPI = (window as any).electronAPI
       let calculationValue = formData.value
       let fxRateToPhp = 1
       const inputCurrency = formData.currency.toUpperCase()
 
       if (inputCurrency !== 'PHP') {
-        const conversionResult = await electronAPI.convertCurrency({
+        const conversionResult = await appApi.convertCurrency({
           amount: formData.value,
           fromCurrency: inputCurrency,
           toCurrency: 'PHP',
@@ -110,7 +110,7 @@ export const Calculator: React.FC = () => {
       }
 
       // Calculate duty
-      const dutyResult = await electronAPI.calculateDuty({
+      const dutyResult = await appApi.calculateDuty({
         value: calculationValue,
         hsCode: formData.hsCode,
         originCountry: formData.originCountry,
@@ -125,7 +125,7 @@ export const Calculator: React.FC = () => {
       const dutiableValue = calculationValue + dutyAmount + surchargeAmount
 
       // Calculate VAT
-      const vatResult = await electronAPI.calculateVAT({
+      const vatResult = await appApi.calculateVAT({
         dutiableValue,
         hsCode: formData.hsCode,
       })
@@ -135,7 +135,7 @@ export const Calculator: React.FC = () => {
       }
 
       // Get compliance requirements
-      const complianceResult = await electronAPI.getComplianceRequirements({
+      const complianceResult = await appApi.getComplianceRequirements({
         hsCode: formData.hsCode,
         value: calculationValue,
         destination: formData.destinationPort,

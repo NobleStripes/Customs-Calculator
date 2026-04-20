@@ -3,6 +3,7 @@ import { Calculator } from './pages/Calculator'
 import { BatchImport } from './pages/BatchImport'
 import { TariffBrowser } from './pages/TariffBrowser'
 import { Sidebar } from './components/Sidebar'
+import { appApi } from './lib/appApi'
 import './App.css'
 
 function App() {
@@ -13,7 +14,7 @@ function App() {
   useEffect(() => {
     const initApp = async () => {
       try {
-        const result = await (window as any).electronAPI.initDB()
+        const result = await appApi.initDB()
         if (result.success) {
           setInitialized(true)
         } else {

@@ -27,12 +27,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@renderer/*": ["src/renderer/*"],
-      "@main/*": ["src/main/*"],
-      "@backend/*": ["src/backend/*"],
-      "@db/*": ["src/db/*"]
+      "@renderer/*": ["src/renderer/*"]
     }
   },
-  "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["src/renderer", "vite.config.ts"]
 }

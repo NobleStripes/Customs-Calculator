@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { appApi } from '../lib/appApi'
 import './TariffBrowser.css'
 
 type TariffRow = {
@@ -26,7 +27,7 @@ export const TariffBrowser: React.FC = () => {
 
   const fetchCategories = async () => {
     try {
-      const response = await window.electronAPI.getTariffCategories()
+      const response = await appApi.getTariffCategories()
       if (response.success && Array.isArray(response.data)) {
         setCategories(['All', ...response.data])
       }
@@ -40,7 +41,7 @@ export const TariffBrowser: React.FC = () => {
     setError(null)
 
     try {
-      const response = await window.electronAPI.getTariffCatalog({
+      const response = await appApi.getTariffCatalog({
         query: searchTerm,
         category: selectedCategory,
         limit: 300,

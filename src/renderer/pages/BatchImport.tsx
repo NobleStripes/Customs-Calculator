@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { appApi } from '../lib/appApi'
 import './BatchImport.css'
 
 type ShipmentRow = {
@@ -168,7 +169,7 @@ export const BatchImport: React.FC = () => {
     setError(null)
 
     try {
-      const response = await window.electronAPI.batchCalculate(shipments)
+      const response = await appApi.batchCalculate(shipments)
       if (!response.success || !response.data) {
         throw new Error(response.error || 'Batch calculation failed')
       }

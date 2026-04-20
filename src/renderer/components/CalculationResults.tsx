@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { appApi } from '../lib/appApi'
 import './CalculationResults.css'
 
 interface CalculationResultsProps {
@@ -34,7 +35,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
     setExporting(true)
 
     try {
-      const response = await window.electronAPI.generateCalculationDocument({
+      const response = await appApi.generateCalculationDocument({
         formData,
         results,
       })

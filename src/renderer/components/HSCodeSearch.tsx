@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { appApi } from '../lib/appApi'
 import './HSCodeSearch.css'
 
 interface HSCodeSearchProps {
@@ -36,7 +37,7 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
 
       setLoading(true)
       try {
-        const result = await (window as any).electronAPI.searchHSCodes(query)
+        const result = await appApi.searchHSCodes(query)
         if (result.success) {
           setSuggestions(result.data || [])
           setActiveIndex(-1)
