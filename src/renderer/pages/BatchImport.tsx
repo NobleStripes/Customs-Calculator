@@ -4,6 +4,7 @@ import './BatchImport.css'
 
 type ShipmentRow = {
   hsCode: string
+  scheduleCode: string
   value: number
   freight: number
   insurance: number
@@ -80,12 +81,13 @@ const parseCsvText = (input: string): ShipmentRow[] => {
     const value = Number(parts[1])
     const freight = Number(parts[2] || 0)
     const insurance = Number(parts[3] || 0)
-    const originCountry = (parts[4] || '').toUpperCase()
-    const currency = (parts[5] || DEFAULT_CURRENCY).toUpperCase()
-    const declarationType = (parts[6] || 'consumption').toLowerCase() as ShipmentRow['declarationType']
-    const containerSize = (parts[7] || '20ft').toLowerCase() as ShipmentRow['containerSize']
-    const arrastreWharfage = Number(parts[8] || 0)
-    const doxStampOthers = Number(parts[9] || 0)
+    const scheduleCode = (parts[4] || 'MFN').toUpperCase()
+    const originCountry = (parts[5] || '').toUpperCase()
+    const currency = (parts[6] || DEFAULT_CURRENCY).toUpperCase()
+    const declarationType = (parts[7] || 'consumption').toLowerCase() as ShipmentRow['declarationType']
+    const containerSize = (parts[8] || '20ft').toLowerCase() as ShipmentRow['containerSize']
+    const arrastreWharfage = Number(parts[9] || 0)
+    const doxStampOthers = Number(parts[10] || 0)
 
     if (!hsCode || Number.isNaN(value) || value <= 0 || Number.isNaN(freight) || Number.isNaN(insurance) || !originCountry || Number.isNaN(arrastreWharfage) || Number.isNaN(doxStampOthers)) {
       continue
@@ -93,6 +95,7 @@ const parseCsvText = (input: string): ShipmentRow[] => {
 
     rows.push({
       hsCode,
+      scheduleCode,
       value,
       freight,
       insurance,
@@ -111,6 +114,7 @@ const parseCsvText = (input: string): ShipmentRow[] => {
 const toCsv = (rows: BatchResultRow[]): string => {
   const header = [
     'hsCode',
+    'scheduleCode',
     'value',
     'freight',
     'insurance',
@@ -134,6 +138,7 @@ const toCsv = (rows: BatchResultRow[]): string => {
 
     return [
       row.hsCode,
+      row.scheduleCode,
       row.value.toFixed(2),
       row.freight.toFixed(2),
       row.insurance.toFixed(2),
@@ -195,7 +200,7 @@ export const BatchImport: React.FC = () => {
     if (parsed.length === 0) {
       setShipments([])
       setResults([])
-      setError('No valid rows found. Expected columns: hsCode,value,freight,insurance,originCountry,currency(optional),declarationType(optional),containerSize(optional),arrastreWharfage(optional),doxStampOthers(optional).')
+      setError('No valid rows found. Expected columns: hsCode,value,freight,insurance,scheduleCode(optional),originCountry,currency(optional),declarationType(optional),containerSize(optional),arrastreWharfage(optional),doxStampOthers(optional).')
       return
     }
 
@@ -267,14 +272,14 @@ export const BatchImport: React.FC = () => {
       <div className="batch-layout">
         <section className="batch-panel">
           <h2>Input CSV</h2>
-          <p className="hint">Use header: hsCode,value,freight,insurance,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers</p>
+          <p className="hint">Use header: hsCode,value,freight,insurance,scheduleCode,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers</p>
 
           <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
 
           <textarea
             value={rawCsv}
             onChange={(event) => setRawCsv(event.target.value)}
-            placeholder="hsCode,value,freight,insurance,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers\n8471.30,1000,100,25,CHN,USD,consumption,20ft,4500,265\n8517.62,2500,200,30,USA,USD,transit,40ft,6000,300"
+            placeholder="hsCode,value,freight,insurance,scheduleCode,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers\n8471.30,1000,100,25,MFN,CHN,USD,consumption,20ft,4500,265\n8517.62,2500,200,30,AHTN,USA,USD,transit,40ft,6000,300"
           />
 
           <div className="actions">
@@ -300,6 +305,7 @@ export const BatchImport: React.FC = () => {
                 <tr>
                   <th>HS Code</th>
                   <th>FOB</th>
+                  <th>Schedule</th>
                   <th>Freight</th>
                   <th>Insurance</th>
                   <th>Origin</th>
@@ -311,7 +317,7 @@ export const BatchImport: React.FC = () => {
               <tbody>
                 {shipments.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="empty-cell">
+                    <td colSpan={9} className="empty-cell">
                       Parse CSV to preview rows.
                     </td>
                   </tr>
@@ -320,6 +326,7 @@ export const BatchImport: React.FC = () => {
                   <tr key={`${row.hsCode}-${index}`}>
                     <td>{row.hsCode}</td>
                     <td>{row.value.toFixed(2)}</td>
+                    <td>{row.scheduleCode}</td>
                     <td>{row.freight.toFixed(2)}</td>
                     <td>{row.insurance.toFixed(2)}</td>
                     <td>{row.originCountry}</td>
@@ -365,6 +372,7 @@ export const BatchImport: React.FC = () => {
             <thead>
               <tr>
                 <th>HS Code</th>
+                <th>Schedule</th>
                 <th>FOB Input</th>
                 <th>Duty (PHP)</th>
                 <th>VAT (PHP)</th>
@@ -374,7 +382,7 @@ export const BatchImport: React.FC = () => {
             <tbody>
               {results.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="empty-cell">
+                  <td colSpan={6} className="empty-cell">
                     Run batch to see results.
                   </td>
                 </tr>
@@ -387,6 +395,7 @@ export const BatchImport: React.FC = () => {
                 return (
                   <tr key={`${row.hsCode}-result-${index}`}>
                     <td>{row.hsCode}</td>
+                    <td>{row.scheduleCode}</td>
                     <td>{formatCurrency(row.value, row.currency)}</td>
                     <td>{formatCurrency(duty)}</td>
                     <td>{formatCurrency(vat)}</td>

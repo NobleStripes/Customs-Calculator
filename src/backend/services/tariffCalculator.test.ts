@@ -3,12 +3,14 @@ import path from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 let TariffCalculatorClass: typeof import('./tariffCalculator').TariffCalculator
+let getDatabase: typeof import('../db/database').getDatabase
 
 beforeAll(async () => {
   process.env.APPDATA = path.join(os.tmpdir(), 'customs-calculator-vitest')
 
   const databaseModule = await import('../db/database')
   await databaseModule.initializeDatabase()
+  getDatabase = databaseModule.getDatabase
 
   const tariffCalculatorModule = await import('./tariffCalculator')
   TariffCalculatorClass = tariffCalculatorModule.TariffCalculator
@@ -39,5 +41,46 @@ describe('TariffCalculator.searchHSCodes', () => {
     const results = await tariffCalculator.searchHSCodes('   ')
 
     expect(results).toEqual([])
+  })
+
+  it('selects schedule-specific tariff rates when a non-default schedule is requested', async () => {
+    const database = getDatabase()
+    const tariffCalculator = new TariffCalculatorClass()
+
+    await new Promise<void>((resolve, reject) => {
+      database.run(
+        'DELETE FROM tariff_rates WHERE hs_code = ? AND COALESCE(schedule_code, ?) = ?',
+        ['8471.30', 'MFN', 'AHTN'],
+        (deleteError: Error | null) => {
+          if (deleteError) {
+            reject(deleteError)
+            return
+          }
+
+          database.run(
+            `
+              INSERT INTO tariff_rates (hs_code, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date, import_status)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `,
+            ['8471.30', 'AHTN', 0.01, 0.12, 0, '2026-01-01', 'approved'],
+            (insertError: Error | null) => {
+              if (insertError) {
+                reject(insertError)
+                return
+              }
+
+              resolve()
+            }
+          )
+        }
+      )
+    })
+
+    const mfnDuty = await tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'MFN')
+    const ahtnDuty = await tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'AHTN')
+
+    expect(mfnDuty.rate).toBe(5)
+    expect(ahtnDuty.rate).toBe(1)
+    expect(ahtnDuty.amount).toBe(10)
   })
 })

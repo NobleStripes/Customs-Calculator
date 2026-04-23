@@ -17,6 +17,7 @@ The current shipment calculation accepts these major inputs:
 - Freight
 - Insurance
 - HS code
+- Tariff schedule, currently seeded with `MFN`
 - Origin country
 - Destination port
 - Input currency
@@ -30,14 +31,15 @@ The current shipment calculation accepts these major inputs:
 For each shipment, the app performs these steps:
 
 1. Resolve the selected or typed HS code to the canonical tariff code.
-2. Compute the taxable shipment input amount as FOB + Freight + Insurance.
-3. Convert that taxable amount to PHP when the input currency is not already PHP.
-4. Resolve the latest active approved tariff row for the HS code.
-5. Compute duty and surcharge from the PHP taxable amount.
-6. Compute brokerage, declaration-specific fees, and fixed documentary charges.
-7. Build the VAT base in PHP.
-8. Compute VAT from that PHP VAT base.
-9. Return the duty, VAT, fee breakdown, and total landed cost in PHP.
+2. Resolve the tariff schedule, defaulting to `MFN` when no schedule is specified.
+3. Compute the taxable shipment input amount as FOB + Freight + Insurance.
+4. Convert that taxable amount to PHP when the input currency is not already PHP.
+5. Resolve the latest active approved tariff row for the HS code and tariff schedule.
+6. Compute duty and surcharge from the PHP taxable amount.
+7. Compute brokerage, declaration-specific fees, and fixed documentary charges.
+8. Build the VAT base in PHP.
+9. Compute VAT from that PHP VAT base.
+10. Return the duty, VAT, fee breakdown, and total landed cost in PHP.
 
 ## Formulas
 

@@ -2,9 +2,72 @@ import React, { useState } from 'react'
 import { appApi } from '../lib/appApi'
 import './CalculationResults.css'
 
+interface CalculationFormData {
+  hsCode: string
+  scheduleCode: string
+  value: number
+  freight: number
+  insurance: number
+  originCountry: string
+  destinationPort: string
+  currency: string
+  containerSize: 'none' | '20ft' | '40ft'
+  arrastreWharfage: number
+  doxStampOthers: number
+  declarationType: 'consumption' | 'warehousing' | 'transit'
+}
+
+interface CalculationResultsData {
+  tariff?: {
+    scheduleCode?: string
+  }
+  duty?: {
+    rate?: number
+    amount?: number
+    surcharge?: number
+  }
+  vat?: {
+    rate?: number
+    amount?: number
+  }
+  compliance?: {
+    requiredDocuments?: string[]
+    requirements?: string[]
+    restrictions?: string[]
+    warnings?: string[]
+  }
+  costBase?: {
+    taxableValue?: number
+    brokerageFee?: number
+    arrastreWharfage?: number
+    doxStampOthers?: number
+    vatBase?: number
+  }
+  breakdown?: {
+    globalFees?: {
+      transitCharge?: number
+      ipc?: number
+      csf?: number
+      cds?: number
+      irs?: number
+      totalGlobalTax?: number
+    }
+    totalTaxAndFees?: number
+  }
+  fx?: {
+    applied?: boolean
+    rateToPhp?: number
+    inputCurrency?: string
+    source?: string
+    timestamp?: string
+  }
+  calculationCurrency?: string
+  totalLandedCost: number
+}
+
 interface CalculationResultsProps {
-  results: any
-  formData: any
+  results: CalculationResultsData
+  formData: CalculationFormData
 }
 
 export const CalculationResults: React.FC<CalculationResultsProps> = ({
@@ -249,6 +312,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <strong>Tariff Calculation Details:</strong>
         </p>
         <ul>
+          <li>Tariff Schedule: {results.tariff?.scheduleCode || formData.scheduleCode || 'MFN'}</li>
           <li>FOB Value: {formatCurrency(formData.value, formData.currency)}</li>
           <li>Freight: {formatCurrency(formData.freight || 0, formData.currency)}</li>
           <li>Insurance: {formatCurrency(formData.insurance || 0, formData.currency)}</li>

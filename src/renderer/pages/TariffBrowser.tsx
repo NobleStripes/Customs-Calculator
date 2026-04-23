@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { appApi } from '../lib/appApi'
 import './TariffBrowser.css'
 
 type TariffRow = {
   hsCode: string
+  scheduleCode: string
   description: string
   category: string
   dutyRate: number
@@ -20,12 +21,14 @@ const RATE_FORMAT = new Intl.NumberFormat('en-US', {
 export const TariffBrowser: React.FC = () => {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
+  const [scheduleCode, setScheduleCode] = useState('MFN')
   const [categories, setCategories] = useState<string[]>(['All'])
+  const [schedules, setSchedules] = useState<string[]>(['MFN'])
   const [rows, setRows] = useState<TariffRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     try {
       const response = await appApi.getTariffCategories()
       if (response.success && Array.isArray(response.data)) {
@@ -34,9 +37,9 @@ export const TariffBrowser: React.FC = () => {
     } catch (err) {
       console.error('Failed to fetch categories:', err)
     }
-  }
+  }, [])
 
-  const fetchRows = async (searchTerm: string, selectedCategory: string) => {
+  const fetchRows = useCallback(async (searchTerm: string, selectedCategory: string, selectedScheduleCode: string) => {
     setLoading(true)
     setError(null)
 
@@ -44,6 +47,7 @@ export const TariffBrowser: React.FC = () => {
       const response = await appApi.getTariffCatalog({
         query: searchTerm,
         category: selectedCategory,
+        scheduleCode: selectedScheduleCode,
         limit: 300,
       })
 
@@ -58,24 +62,29 @@ export const TariffBrowser: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      void fetchCategories()
-      void fetchRows('', 'All')
-    }, 0)
-
-    return () => clearTimeout(handle)
   }, [])
 
   useEffect(() => {
     const handle = setTimeout(() => {
-      fetchRows(query, category)
+      void fetchCategories()
+      void appApi.getTariffSchedules().then((response) => {
+        if (response.success && Array.isArray(response.data) && response.data.length > 0) {
+          setSchedules(response.data)
+        }
+      })
+      void fetchRows('', 'All', 'MFN')
+    }, 0)
+
+    return () => clearTimeout(handle)
+  }, [fetchCategories, fetchRows])
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      void fetchRows(query, category, scheduleCode)
     }, 250)
 
     return () => clearTimeout(handle)
-  }, [query, category])
+  }, [category, fetchRows, query, scheduleCode])
 
   const stats = useMemo(() => {
     const totalRows = rows.length
@@ -122,6 +131,21 @@ export const TariffBrowser: React.FC = () => {
             ))}
           </select>
         </div>
+
+        <div className="control-group category">
+          <label htmlFor="tariff-schedule-filter">Tariff Schedule</label>
+          <select
+            id="tariff-schedule-filter"
+            value={scheduleCode}
+            onChange={(event) => setScheduleCode(event.target.value)}
+          >
+            {schedules.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
       </section>
 
       <section className="tariff-stats">
@@ -147,6 +171,7 @@ export const TariffBrowser: React.FC = () => {
             <thead>
               <tr>
                 <th>HS Code</th>
+                <th>Schedule</th>
                 <th>Description</th>
                 <th>Category</th>
                 <th>Duty Rate</th>
@@ -158,7 +183,7 @@ export const TariffBrowser: React.FC = () => {
             <tbody>
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td className="empty-cell" colSpan={7}>
+                  <td className="empty-cell" colSpan={8}>
                     No tariff rows found for the selected filters.
                   </td>
                 </tr>
@@ -166,7 +191,7 @@ export const TariffBrowser: React.FC = () => {
 
               {loading && (
                 <tr>
-                  <td className="empty-cell" colSpan={7}>
+                  <td className="empty-cell" colSpan={8}>
                     Loading tariff catalog...
                   </td>
                 </tr>
@@ -174,8 +199,9 @@ export const TariffBrowser: React.FC = () => {
 
               {!loading &&
                 rows.map((row) => (
-                  <tr key={`${row.hsCode}-${row.effectiveDate}`}>
+                  <tr key={`${row.hsCode}-${row.scheduleCode}-${row.effectiveDate}`}>
                     <td>{row.hsCode}</td>
+                    <td>{row.scheduleCode}</td>
                     <td className="description-cell">{row.description}</td>
                     <td>{row.category}</td>
                     <td>{RATE_FORMAT.format(row.dutyRate)}%</td>

@@ -48,6 +48,15 @@ const getBrokerageFeePhp = (taxableValuePhp: number): number =>
 const MIN_HS_SEARCH_QUERY_LENGTH = 2
 const MAX_HS_SEARCH_QUERY_LENGTH = 100
 
+const normalizeScheduleCode = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    return 'MFN'
+  }
+
+  const normalized = value.trim().toUpperCase()
+  return normalized || 'MFN'
+}
+
 const normalizeHsSearchQuery = (value: unknown): string | null => {
   if (typeof value !== 'string') {
     return null
@@ -85,7 +94,7 @@ app.get('/api/health', (_request, response) => {
 })
 
 app.post('/api/calculate/duty', async (request, response) => {
-  const { value, hsCode, originCountry } = request.body || {}
+  const { value, hsCode, originCountry, scheduleCode } = request.body || {}
 
   if (!Number.isFinite(Number(value))) {
     return sendError(response, 400, 'Request body field "value" must be a valid number')
@@ -100,7 +109,7 @@ app.post('/api/calculate/duty', async (request, response) => {
   }
 
   try {
-    const result = await tariffCalculator.calculateDuty(Number(value), hsCode, originCountry)
+    const result = await tariffCalculator.calculateDuty(Number(value), hsCode, originCountry, normalizeScheduleCode(scheduleCode))
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)
@@ -108,7 +117,7 @@ app.post('/api/calculate/duty', async (request, response) => {
 })
 
 app.post('/api/calculate/vat', async (request, response) => {
-  const { dutiableValue, hsCode } = request.body || {}
+  const { dutiableValue, hsCode, scheduleCode } = request.body || {}
 
   if (!Number.isFinite(Number(dutiableValue))) {
     return sendError(response, 400, 'Request body field "dutiableValue" must be a valid number')
@@ -119,7 +128,7 @@ app.post('/api/calculate/vat', async (request, response) => {
   }
 
   try {
-    const result = await tariffCalculator.calculateVAT(Number(dutiableValue), hsCode)
+    const result = await tariffCalculator.calculateVAT(Number(dutiableValue), hsCode, normalizeScheduleCode(scheduleCode))
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)
@@ -178,10 +187,11 @@ app.post('/api/calculate/batch', async (request, response) => {
       }
 
       const shipmentCurrency = String(shipment.currency || 'USD').trim().toUpperCase()
+      const scheduleCode = normalizeScheduleCode(shipment.scheduleCode)
       const taxableInputAmount = Number(shipment.value) + Number(shipment.freight || 0) + Number(shipment.insurance || 0)
       const conversionResult = await currencyConverter.convert(taxableInputAmount, shipmentCurrency, 'PHP')
       const valueInPhp = shipmentCurrency === 'PHP' ? taxableInputAmount : conversionResult.convertedAmount
-      const dutyResult = await tariffCalculator.calculateDuty(valueInPhp, resolvedCode.code, String(shipment.originCountry || ''))
+      const dutyResult = await tariffCalculator.calculateDuty(valueInPhp, resolvedCode.code, String(shipment.originCountry || ''), scheduleCode)
       const brokerageFeePhp = getBrokerageFeePhp(valueInPhp)
       const csfUsd = getContainerSecurityFeeUsd(String(shipment.containerSize || '20ft').toLowerCase())
       let csfPhp = 0
@@ -203,6 +213,7 @@ app.post('/api/calculate/batch', async (request, response) => {
       results.push({
         ...shipment,
         hsCode: resolvedCode.code,
+        scheduleCode,
         duty: {
           amount: dutyResult.amount,
           surcharge: dutyResult.surcharge,
@@ -288,6 +299,43 @@ app.post('/api/import/hs-codes', async (request, response) => {
   }
 })
 
+app.post('/api/import/tariff-rates/preview', async (request, response) => {
+  try {
+    const rows = tariffDataIngestion.parseCsvText(typeof request.body?.csvText === 'string' ? request.body.csvText : '')
+    const result = tariffDataIngestion.previewRows(Array.isArray(request.body?.rows) ? request.body.rows : rows)
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 400, error)
+  }
+})
+
+app.post('/api/import/tariff-rates', async (request, response) => {
+  const payload = request.body || {}
+
+  if (typeof payload.sourceName !== 'string' || !payload.sourceName.trim()) {
+    return sendError(response, 400, 'Request body field "sourceName" is required')
+  }
+
+  try {
+    const rows = Array.isArray(payload.rows)
+      ? payload.rows
+      : tariffDataIngestion.parseCsvText(typeof payload.csvText === 'string' ? payload.csvText : '')
+
+    const result = await tariffDataIngestion.importRows({
+      sourceName: payload.sourceName,
+      sourceType: typeof payload.sourceType === 'string' ? payload.sourceType : 'tariff-rates',
+      sourceReference: typeof payload.sourceReference === 'string' ? payload.sourceReference : payload.fileName,
+      rows,
+      autoApproveThreshold: typeof payload.autoApproveThreshold === 'number' ? payload.autoApproveThreshold : undefined,
+      forceApprove: Boolean(payload.forceApprove),
+    })
+
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 400, error)
+  }
+})
+
 app.get('/api/import-jobs', async (request, response) => {
   const parsedLimit = typeof request.query.limit === 'string' ? Number(request.query.limit) : 20
 
@@ -349,13 +397,14 @@ app.get('/api/hs-codes/resolve', async (request, response) => {
 })
 
 app.get('/api/tariff-catalog', async (request, response) => {
-  const { query, category, limit } = request.query
+  const { query, category, limit, scheduleCode } = request.query
   const parsedLimit = typeof limit === 'string' ? Number(limit) : undefined
 
   try {
     const result = await tariffCalculator.getTariffCatalog(
       typeof query === 'string' ? query : '',
       typeof category === 'string' ? category : 'All',
+      normalizeScheduleCode(scheduleCode),
       Number.isFinite(parsedLimit) ? parsedLimit : 200
     )
 
@@ -368,6 +417,15 @@ app.get('/api/tariff-catalog', async (request, response) => {
 app.get('/api/tariff-categories', async (_request, response) => {
   try {
     const result = await tariffCalculator.getTariffCategories()
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/tariff-schedules', async (_request, response) => {
+  try {
+    const result = await tariffCalculator.getTariffSchedules()
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)

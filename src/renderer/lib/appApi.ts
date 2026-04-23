@@ -31,6 +31,7 @@ type HSCodeRow = {
 
 type TariffRateRow = {
   hs_code: string
+  schedule_code: string
   duty_rate: number
   vat_rate: number
   surcharge_rate: number
@@ -49,6 +50,7 @@ type ComplianceRuleRow = {
 
 type ShipmentRow = {
   hsCode: string
+  scheduleCode?: string
   value: number
   freight: number
   insurance: number
@@ -65,6 +67,75 @@ type ImportPreviewRow = {
   raw: Record<string, unknown>
   normalized?: Record<string, unknown>
   errors: string[]
+}
+
+type CalculationDocumentFormData = {
+  hsCode?: string
+  scheduleCode?: string
+  value?: number
+  freight?: number
+  insurance?: number
+  originCountry?: string
+  destinationPort?: string
+  currency?: string
+  containerSize?: string
+  arrastreWharfage?: number
+  doxStampOthers?: number
+  declarationType?: string
+}
+
+type CalculationDocumentResults = {
+  tariff?: {
+    scheduleCode?: string
+  }
+  duty?: {
+    rate?: number
+    amount?: number
+    surcharge?: number
+  }
+  vat?: {
+    rate?: number
+    amount?: number
+  }
+  compliance?: {
+    requiredDocuments?: string[]
+    restrictions?: string[]
+    warnings?: string[]
+    requirements?: string[]
+  }
+  costBase?: {
+    taxableValue?: number
+    brokerageFee?: number
+    arrastreWharfage?: number
+    doxStampOthers?: number
+    vatBase?: number
+  }
+  breakdown?: {
+    itemTaxes?: {
+      totalItemTax?: number
+    }
+    globalFees?: {
+      transitCharge?: number
+      ipc?: number
+      csf?: number
+      cds?: number
+      irs?: number
+      totalGlobalTax?: number
+    }
+    totalTaxAndFees?: number
+  }
+  totalLandedCost?: number
+  calculationCurrency?: string
+}
+
+type TariffImportSummary = {
+  sourceId: number
+  importJobId: number
+  totalRows: number
+  importedRows: number
+  pendingReviewRows: number
+  errorRows: number
+  status: 'completed' | 'completed_with_errors' | 'failed'
 }
 
 const todayDate = new Date().toISOString().split('T')[0]
@@ -88,21 +159,21 @@ const hsCodes: HSCodeRow[] = [
 ]
 
 const tariffRates: TariffRateRow[] = [
-  { hs_code: '8471.30', duty_rate: 0.05, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '8517.62', duty_rate: 0.03, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '6204.62', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '6203.42', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '8704.21', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '8421.23', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '8511.10', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '8708.30', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '8708.80', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '8708.99', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '0207.14', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '0406.10', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '8544.30', duty_rate: 0.08, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '7326.90', duty_rate: 0.12, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
-  { hs_code: '4418.90', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8471.30', schedule_code: 'MFN', duty_rate: 0.05, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8517.62', schedule_code: 'MFN', duty_rate: 0.03, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '6204.62', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '6203.42', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8704.21', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8421.23', schedule_code: 'MFN', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8511.10', schedule_code: 'MFN', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8708.30', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8708.80', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8708.99', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '0207.14', schedule_code: 'MFN', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '0406.10', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '8544.30', schedule_code: 'MFN', duty_rate: 0.08, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '7326.90', schedule_code: 'MFN', duty_rate: 0.12, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+  { hs_code: '4418.90', schedule_code: 'MFN', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
 ]
 
 const complianceRules: ComplianceRuleRow[] = [
@@ -180,6 +251,8 @@ const getBrokerageFeePhp = (taxableValuePhp: number): number =>
 const importJobs: Array<Record<string, unknown>> = []
 const pendingReviewRows: Record<number, Array<Record<string, unknown>>> = {}
 
+const normalizeScheduleCode = (value?: string): string => value?.trim().toUpperCase() || 'MFN'
+
 const normalizeHSCode = (value: string): string => {
   const normalizedValue = value.trim().toUpperCase()
   const compactValue = normalizedValue.replace(/\./g, '')
@@ -202,10 +275,11 @@ const resolveKnownHSCode = (value: string): HSCodeRow | null => {
   return hsCodes.find((row) => row.code === normalizedCode) || null
 }
 
-const findCurrentTariff = (hsCode: string): TariffRateRow | undefined => {
+const findCurrentTariff = (hsCode: string, scheduleCode: string = 'MFN'): TariffRateRow | undefined => {
   const normalizedCode = normalizeHSCode(hsCode)
+  const normalizedScheduleCode = normalizeScheduleCode(scheduleCode)
   return tariffRates
-    .filter((row) => row.hs_code === normalizedCode)
+    .filter((row) => row.hs_code === normalizedCode && normalizeScheduleCode(row.schedule_code) === normalizedScheduleCode)
     .sort((left, right) => right.effective_date.localeCompare(left.effective_date))[0]
 }
 
@@ -322,7 +396,7 @@ const escapeHtml = (value: unknown): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 
-const buildDocumentMarkup = (payload: { formData: Record<string, unknown>; results: Record<string, any> }) => {
+const buildDocumentMarkup = (payload: { formData: CalculationDocumentFormData; results: CalculationDocumentResults }) => {
   const formData = payload.formData
   const results = payload.results
   const calculationCurrency = results.calculationCurrency || 'PHP'
@@ -359,6 +433,7 @@ const buildDocumentMarkup = (payload: { formData: Record<string, unknown>; resul
         <h2>Shipment Details</h2>
         <table>
           <tr><th>HS Code</th><td>${escapeHtml(formData.hsCode)}</td></tr>
+          <tr><th>Tariff Schedule</th><td>${escapeHtml(results.tariff?.scheduleCode || formData.scheduleCode || 'MFN')}</td></tr>
           <tr><th>FOB Value</th><td>${escapeHtml(formData.value)} ${escapeHtml(formData.currency)}</td></tr>
           <tr><th>Freight</th><td>${escapeHtml(formData.freight || 0)} ${escapeHtml(formData.currency)}</td></tr>
           <tr><th>Insurance</th><td>${escapeHtml(formData.insurance || 0)} ${escapeHtml(formData.currency)}</td></tr>
@@ -510,7 +585,7 @@ const searchHSCodesRemote = async (query: string): ApiResponse<HSCodeRow[]> => {
   return callApi<HSCodeRow[]>(`/api/hs-codes/search?${params.toString()}`)
 }
 
-const getTariffCatalogRemote = async (payload: { query?: string; category?: string; limit?: number }) => {
+const getTariffCatalogRemote = async (payload: { query?: string; category?: string; scheduleCode?: string; limit?: number }) => {
   const params = new URLSearchParams()
 
   if (payload.query?.trim()) {
@@ -521,12 +596,17 @@ const getTariffCatalogRemote = async (payload: { query?: string; category?: stri
     params.set('category', payload.category.trim())
   }
 
+  if (payload.scheduleCode?.trim()) {
+    params.set('scheduleCode', normalizeScheduleCode(payload.scheduleCode))
+  }
+
   if (typeof payload.limit === 'number') {
     params.set('limit', String(payload.limit))
   }
 
   return callApi<Array<{
     hsCode: string
+    scheduleCode: string
     description: string
     category: string
     dutyRate: number
@@ -537,14 +617,16 @@ const getTariffCatalogRemote = async (payload: { query?: string; category?: stri
 }
 
 const getTariffCategoriesRemote = async (): ApiResponse<string[]> => callApi<string[]>('/api/tariff-categories')
+const getTariffSchedulesRemote = async (): ApiResponse<string[]> => callApi<string[]>('/api/tariff-schedules')
 
 const calculateDutyRemote = async (payload: {
   value: number
   hsCode: string
   originCountry: string
+  scheduleCode?: string
 }) => postApi<DutyResult>('/api/calculate/duty', payload)
 
-const calculateVatRemote = async (payload: { dutiableValue: number; hsCode: string }) =>
+const calculateVatRemote = async (payload: { dutiableValue: number; hsCode: string; scheduleCode?: string }) =>
   postApi<VATResult>('/api/calculate/vat', payload)
 
 const getComplianceRequirementsRemote = async (payload: {
@@ -556,10 +638,16 @@ const getComplianceRequirementsRemote = async (payload: {
 const batchCalculateRemote = async (shipments: ShipmentRow[]) =>
   postApi<Array<Record<string, unknown>>>('/api/calculate/batch', { shipments })
 
-const previewHSCatalogImportRemote = async (payload: { csvText?: string; contentBase64?: string; fileName?: string; rows?: Record<string, unknown>[] }) =>
+const _previewHSCatalogImportRemote = async (payload: { csvText?: string; contentBase64?: string; fileName?: string; rows?: Record<string, unknown>[] }) =>
   postApi('/api/import/hs-codes/preview', payload)
 
-const importHSCatalogRemote = async (payload: Record<string, unknown>) => postApi('/api/import/hs-codes', payload)
+const _importHSCatalogRemote = async (payload: Record<string, unknown>) => postApi('/api/import/hs-codes', payload)
+
+const previewTariffImportRemote = async (payload: { csvText?: string; rows?: Record<string, unknown>[] }) =>
+  postApi('/api/import/tariff-rates/preview', payload)
+
+const importTariffDataRemote = async (payload: Record<string, unknown>) =>
+  postApi<TariffImportSummary>('/api/import/tariff-rates', payload)
 
 const getImportJobsRemote = async () => callApi<Array<Record<string, unknown>>>('/api/import-jobs')
 
@@ -573,6 +661,7 @@ export const appApi = {
     value: number
     hsCode: string
     originCountry: string
+    scheduleCode?: string
   }): ApiResponse<DutyResult> => {
     const remoteResult = await calculateDutyRemote(payload)
     if (remoteResult.success && remoteResult.data) {
@@ -580,7 +669,7 @@ export const appApi = {
     }
 
     try {
-      const row = findCurrentTariff(payload.hsCode)
+      const row = findCurrentTariff(payload.hsCode, payload.scheduleCode)
       const dutyRate = row?.duty_rate || 0
       const surchargeRate = row?.surcharge_rate || 0
       return makeSuccess({
@@ -594,14 +683,14 @@ export const appApi = {
     }
   },
 
-  calculateVAT: async (payload: { dutiableValue: number; hsCode: string }): ApiResponse<VATResult> => {
+  calculateVAT: async (payload: { dutiableValue: number; hsCode: string; scheduleCode?: string }): ApiResponse<VATResult> => {
     const remoteResult = await calculateVatRemote(payload)
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
     }
 
     try {
-      const row = findCurrentTariff(payload.hsCode)
+      const row = findCurrentTariff(payload.hsCode, payload.scheduleCode)
       const vatRate = row?.vat_rate || 0.12
       return makeSuccess({
         rate: vatRate * 100,
@@ -634,6 +723,7 @@ export const appApi = {
   getTariffCatalog: async (payload: {
     query?: string
     category?: string
+    scheduleCode?: string
     limit?: number
   }) => {
     const remoteResult = await getTariffCatalogRemote(payload || {})
@@ -644,7 +734,9 @@ export const appApi = {
     try {
       const searchTerm = payload?.query?.trim().toUpperCase() || ''
       const selectedCategory = payload?.category || 'All'
+      const selectedScheduleCode = normalizeScheduleCode(payload?.scheduleCode)
       const rows = tariffRates
+        .filter((rateRow) => normalizeScheduleCode(rateRow.schedule_code) === selectedScheduleCode)
         .map((rateRow) => {
           const hsCodeRow = hsCodes.find((row) => row.code === rateRow.hs_code)
           if (!hsCodeRow) {
@@ -653,6 +745,7 @@ export const appApi = {
 
           return {
             hsCode: hsCodeRow.code,
+            scheduleCode: normalizeScheduleCode(rateRow.schedule_code),
             description: hsCodeRow.description,
             category: hsCodeRow.category,
             dutyRate: rateRow.duty_rate * 100,
@@ -691,6 +784,16 @@ export const appApi = {
     return makeSuccess(categories)
   },
 
+  getTariffSchedules: async (): ApiResponse<string[]> => {
+    const remoteResult = await getTariffSchedulesRemote()
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
+    const schedules = [...new Set(tariffRates.map((row) => normalizeScheduleCode(row.schedule_code)))].sort((left, right) => left.localeCompare(right))
+    return makeSuccess(schedules)
+  },
+
   getComplianceRequirements: async (payload: {
     hsCode: string
     value: number
@@ -724,6 +827,7 @@ export const appApi = {
       const results = []
       for (const shipment of shipments) {
         const shipmentCurrency = shipment.currency.toUpperCase()
+        const scheduleCode = normalizeScheduleCode(shipment.scheduleCode)
         const taxableInputAmount = shipment.value + shipment.freight + shipment.insurance
         const conversionResult = await getCurrencyConversion(taxableInputAmount, shipmentCurrency, 'PHP')
         if (!conversionResult.success || !conversionResult.data) {
@@ -732,7 +836,7 @@ export const appApi = {
 
         const converted = conversionResult.data
         const valueInPhp = shipmentCurrency === 'PHP' ? taxableInputAmount : converted.convertedAmount
-        const tariffRow = findCurrentTariff(shipment.hsCode)
+        const tariffRow = findCurrentTariff(shipment.hsCode, scheduleCode)
         const dutyAmount = valueInPhp * (tariffRow?.duty_rate || 0)
         const surchargeAmount = valueInPhp * (tariffRow?.surcharge_rate || 0)
         const brokerageFeePhp = getBrokerageFeePhp(valueInPhp)
@@ -757,6 +861,7 @@ export const appApi = {
         const vatAmount = vatBasePhp * VAT_RATE
         results.push({
           ...shipment,
+          scheduleCode,
           duty: {
             amount: dutyAmount,
             surcharge: surchargeAmount,
@@ -809,7 +914,7 @@ export const appApi = {
   },
 
   previewTariffImport: async (payload: { csvText?: string; rows?: Record<string, unknown>[] }) => {
-    const remoteResult = await previewHSCatalogImportRemote(payload)
+    const remoteResult = await previewTariffImportRemote(payload)
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
     }
@@ -819,7 +924,10 @@ export const appApi = {
       const previewRows: ImportPreviewRow[] = rows.map((row, index) => ({
         rowNumber: index + 1,
         raw: row,
-        normalized: row,
+        normalized: {
+          ...row,
+          scheduleCode: normalizeScheduleCode(typeof row.scheduleCode === 'string' ? row.scheduleCode : undefined),
+        },
         errors: [],
       }))
       return makeSuccess({
@@ -834,7 +942,7 @@ export const appApi = {
   },
 
   importTariffData: async (payload: Record<string, unknown>) => {
-    const remoteResult = await importHSCatalogRemote(payload)
+    const remoteResult = await importTariffDataRemote(payload)
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
     }
@@ -900,7 +1008,7 @@ export const appApi = {
     return callApi(`/api/fetch-regulatory-updates?${params.toString()}`)
   },
 
-  generateCalculationDocument: async (payload: { formData: Record<string, unknown>; results: Record<string, any>; format: 'pdf' | 'word' | 'excel' }) => {
+  generateCalculationDocument: async (payload: { formData: CalculationDocumentFormData; results: CalculationDocumentResults; format: 'pdf' | 'word' | 'excel' }) => {
     try {
       const baseFileName = `customs-calculation-${todayDate}`
 

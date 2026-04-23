@@ -1,5 +1,23 @@
 import { getDatabase } from '../db/database'
 
+type ComplianceRuleRow = {
+  required_documents?: string | null
+  restrictions?: string | null
+  special_conditions?: string | null
+}
+
+type CategoryRow = {
+  category?: string | null
+}
+
+type CountRow = {
+  count?: number | null
+}
+
+type RestrictedProductRow = {
+  hs_code_range: string
+}
+
 export interface ComplianceRequirement {
   requiredDocuments: string[]
   restrictions: string[]
@@ -26,7 +44,7 @@ export class ComplianceChecker {
       this.db.get(
         'SELECT required_documents, restrictions, special_conditions FROM compliance_rules WHERE hs_code_range = ?',
         [hsCode],
-        async (err, row: any) => {
+        async (_err: Error | null, row: ComplianceRuleRow | undefined) => {
           if (row) {
             if (row.required_documents) {
               requiredDocuments.push(...row.required_documents.split(',').map((d: string) => d.trim()))
@@ -54,7 +72,7 @@ export class ComplianceChecker {
           }
 
           // Get category for additional rules
-          this.db.get('SELECT category FROM hs_codes WHERE code = ? LIMIT 1', [hsCode], (err, hsRow: any) => {
+          this.db.get('SELECT category FROM hs_codes WHERE code = ? LIMIT 1', [hsCode], (_categoryErr: Error | null, hsRow: CategoryRow | undefined) => {
             const hsCategory = hsRow?.category || 'General'
 
             if (hsCategory === 'Electronics') {
@@ -91,7 +109,7 @@ export class ComplianceChecker {
       this.db.get(
         `SELECT COUNT(*) as count FROM compliance_rules WHERE hs_code_range = ? AND restrictions LIKE '%prohibited%'`,
         [hsCode],
-        (err, row: any) => {
+        (_err: Error | null, row: CountRow | undefined) => {
           resolve((row?.count || 0) > 0)
         }
       )
@@ -105,8 +123,8 @@ export class ComplianceChecker {
     return new Promise((resolve) => {
       this.db.all(
         `SELECT DISTINCT hs_code_range FROM compliance_rules WHERE restrictions LIKE '%prohibited%' OR restrictions LIKE '%banned%'`,
-        (err, rows: any) => {
-          resolve(rows?.map((r: any) => r.hs_code_range) || [])
+        (_err: Error | null, rows: RestrictedProductRow[] | undefined) => {
+          resolve(rows?.map((row) => row.hs_code_range) || [])
         }
       )
     })
@@ -185,7 +203,7 @@ export class ComplianceChecker {
     }
 
     return new Promise((resolve) => {
-      this.db.get('SELECT category FROM hs_codes WHERE code = ? LIMIT 1', [hsCode], (err, row: any) => {
+      this.db.get('SELECT category FROM hs_codes WHERE code = ? LIMIT 1', [hsCode], (_err: Error | null, row: CategoryRow | undefined) => {
         const category = row?.category || 'General'
 
         if (category === 'Food') {

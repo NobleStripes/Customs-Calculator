@@ -5,6 +5,7 @@ type PdfDocumentInstance = InstanceType<typeof PDFDocument>
 
 interface CalculationFormData {
   hsCode: string
+  scheduleCode?: string
   value: number
   freight?: number
   insurance?: number
@@ -18,6 +19,9 @@ interface CalculationFormData {
 }
 
 interface CalculationResultsData {
+  tariff?: {
+    scheduleCode?: string
+  }
   duty?: {
     rate?: number
     amount?: number
@@ -94,6 +98,7 @@ export class DocumentGenerator {
     doc.moveDown(0.3)
     doc.fontSize(11)
     doc.text(`HS Code: ${payload.formData.hsCode}`)
+    doc.text(`Tariff Schedule: ${payload.results.tariff?.scheduleCode || payload.formData.scheduleCode || 'MFN'}`)
     doc.text(`FOB Value: ${payload.formData.value.toFixed(2)} ${payload.formData.currency}`)
     doc.text(`Freight: ${(payload.formData.freight || 0).toFixed(2)} ${payload.formData.currency}`)
     doc.text(`Insurance: ${(payload.formData.insurance || 0).toFixed(2)} ${payload.formData.currency}`)

@@ -50,6 +50,7 @@ const schema = [
   `CREATE TABLE IF NOT EXISTS tariff_rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     hs_code TEXT NOT NULL,
+    schedule_code TEXT NOT NULL DEFAULT 'MFN',
     duty_rate REAL NOT NULL DEFAULT 0,
     vat_rate REAL NOT NULL DEFAULT 0.12,
     surcharge_rate REAL NOT NULL DEFAULT 0,
@@ -213,6 +214,10 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
       const existingColumns = new Set((rows || []).map((row) => row.name))
       const migrationStatements: string[] = []
 
+      if (!existingColumns.has('schedule_code')) {
+        migrationStatements.push("ALTER TABLE tariff_rates ADD COLUMN schedule_code TEXT NOT NULL DEFAULT 'MFN'")
+      }
+
       if (!existingColumns.has('end_date')) {
         migrationStatements.push('ALTER TABLE tariff_rates ADD COLUMN end_date DATE')
       }
@@ -238,7 +243,9 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
       }
 
       if (migrationStatements.length === 0) {
-        ensureComplianceRulesSchemaCompatibility(database)
+        runStatement(database, "UPDATE tariff_rates SET schedule_code = 'MFN' WHERE schedule_code IS NULL OR TRIM(schedule_code) = ''")
+          .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_tariff_rates_schedule_code ON tariff_rates(schedule_code)'))
+          .then(() => ensureComplianceRulesSchemaCompatibility(database))
           .then(() => cleanupDuplicateSeedRows(database))
           .then(resolve)
           .catch(reject)
@@ -255,7 +262,9 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
 
           completed += 1
           if (completed === migrationStatements.length) {
-            ensureComplianceRulesSchemaCompatibility(database)
+            runStatement(database, "UPDATE tariff_rates SET schedule_code = 'MFN' WHERE schedule_code IS NULL OR TRIM(schedule_code) = ''")
+              .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_tariff_rates_schedule_code ON tariff_rates(schedule_code)'))
+              .then(() => ensureComplianceRulesSchemaCompatibility(database))
               .then(() => cleanupDuplicateSeedRows(database))
               .then(resolve)
               .catch(reject)
@@ -276,6 +285,7 @@ const cleanupDuplicateSeedRows = async (database: sqlite3.Database): Promise<voi
         FROM tariff_rates
         GROUP BY
           hs_code,
+          IFNULL(schedule_code, 'MFN'),
           duty_rate,
           vat_rate,
           surcharge_rate,
@@ -401,21 +411,21 @@ const insertHSCodes = (database: sqlite3.Database, hsCodesData: any[]): Promise<
 const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
   return new Promise((resolve, _reject) => {
     const tariffData = [
-      { hs_code: '8471.30', duty_rate: 0.05, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '8517.62', duty_rate: 0.03, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '6204.62', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '6203.42', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '8704.21', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '8421.23', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '8511.10', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '8708.30', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '8708.80', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '8708.99', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '0207.14', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '0406.10', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '8544.30', duty_rate: 0.08, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '7326.90', duty_rate: 0.12, vat_rate: 0.12, surcharge_rate: 0 },
-      { hs_code: '4418.90', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8471.30', schedule_code: 'MFN', duty_rate: 0.05, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8517.62', schedule_code: 'MFN', duty_rate: 0.03, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '6204.62', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '6203.42', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8704.21', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8421.23', schedule_code: 'MFN', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8511.10', schedule_code: 'MFN', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.30', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.80', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.99', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '0207.14', schedule_code: 'MFN', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '0406.10', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8544.30', schedule_code: 'MFN', duty_rate: 0.08, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '7326.90', schedule_code: 'MFN', duty_rate: 0.12, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '4418.90', schedule_code: 'MFN', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0 },
     ]
 
     const todayDate = new Date().toISOString().split('T')[0]
@@ -425,12 +435,13 @@ const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
     tariffData.forEach((item) => {
       database.run(
         `
-          INSERT INTO tariff_rates (hs_code, duty_rate, vat_rate, surcharge_rate, effective_date)
-          SELECT ?, ?, ?, ?, ?
+          INSERT INTO tariff_rates (hs_code, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date)
+          SELECT ?, ?, ?, ?, ?, ?
           WHERE NOT EXISTS (
             SELECT 1
             FROM tariff_rates
             WHERE hs_code = ?
+              AND COALESCE(schedule_code, 'MFN') = ?
               AND duty_rate = ?
               AND vat_rate = ?
               AND surcharge_rate = ?
@@ -442,11 +453,13 @@ const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
         `,
         [
           item.hs_code,
+          item.schedule_code,
           item.duty_rate,
           item.vat_rate,
           item.surcharge_rate,
           todayDate,
           item.hs_code,
+          item.schedule_code,
           item.duty_rate,
           item.vat_rate,
           item.surcharge_rate,

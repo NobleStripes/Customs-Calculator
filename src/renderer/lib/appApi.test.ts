@@ -115,6 +115,21 @@ describe('appApi backend-first calculation', () => {
     expect(result.data?.amount).toBe(70)
     expect(result.data?.rate).toBe(7)
   })
+
+  it('uses the requested tariff schedule in the local fallback path', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.calculateDuty({
+      value: 1000,
+      hsCode: '8421.23',
+      originCountry: 'JPN',
+      scheduleCode: 'MFN',
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.data?.rate).toBeCloseTo(7)
+    expect(result.data?.amount).toBeCloseTo(70)
+  })
 })
 
 describe('appApi.batchCalculate', () => {
@@ -344,5 +359,35 @@ describe('appApi HS lookup', () => {
     expect(result.success).toBe(true)
     expect(result.data?.totalRows).toBe(1)
     expect(result.data?.validRows).toBe(1)
+  })
+
+  it('uses the tariff-rate preview endpoint for tariff imports', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          totalRows: 1,
+          validRows: 1,
+          invalidRows: 0,
+          rows: [],
+        },
+      }),
+    } as Response)
+
+    await appApi.previewTariffImport({
+      rows: [
+        {
+          hsCode: '8471.30',
+          scheduleCode: 'AHTN',
+          dutyRate: '1%',
+        },
+      ],
+    })
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/import/tariff-rates/preview'),
+      expect.anything()
+    )
   })
 })

@@ -9,6 +9,7 @@ interface CalculationPayload {
   freight: number
   insurance: number
   hsCode: string
+  scheduleCode: string
   originCountry: string
   destinationPort: string
   currency: string
@@ -16,6 +17,63 @@ interface CalculationPayload {
   arrastreWharfage: number
   doxStampOthers: number
   declarationType: 'consumption' | 'warehousing' | 'transit'
+}
+
+interface CalculationResultsData {
+  duty: {
+    rate: number
+    amount: number
+    surcharge: number
+    notes?: string
+  }
+  tariff: {
+    scheduleCode: string
+  }
+  vat: {
+    rate: number
+    amount: number
+  }
+  compliance: {
+    requiredDocuments?: string[]
+    restrictions?: string[]
+    warnings?: string[]
+  } | null
+  costBase: {
+    fob: number
+    freight: number
+    insurance: number
+    taxableValue: number
+    brokerageFee: number
+    arrastreWharfage: number
+    doxStampOthers: number
+    vatBase: number
+  }
+  breakdown: {
+    itemTaxes: {
+      cud: number
+      vat: number
+      totalItemTax: number
+    }
+    globalFees: {
+      transitCharge: number
+      ipc: number
+      csf: number
+      cds: number
+      irs: number
+      totalGlobalTax: number
+    }
+    totalTaxAndFees: number
+  }
+  totalLandedCost: number
+  calculationCurrency: 'PHP'
+  fx: {
+    applied: boolean
+    rateToPhp: number
+    inputCurrency: string
+    baseCurrency: 'PHP'
+    source?: 'cache' | 'live' | 'fallback' | 'identity'
+    timestamp?: string
+  }
 }
 
 const TRANSIT_CHARGE_PHP = 1000
@@ -47,6 +105,7 @@ export const Calculator: React.FC = () => {
     freight: 0,
     insurance: 0,
     hsCode: '',
+    scheduleCode: 'MFN',
     originCountry: '',
     destinationPort: 'MNL', // Manila by default
     currency: 'USD',
@@ -56,7 +115,7 @@ export const Calculator: React.FC = () => {
     declarationType: 'consumption',
   })
 
-  const [results, setResults] = useState<any>(null)
+  const [results, setResults] = useState<CalculationResultsData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fxPreview, setFxPreview] = useState<{
@@ -66,6 +125,30 @@ export const Calculator: React.FC = () => {
   } | null>(null)
   const [fxLoading, setFxLoading] = useState(false)
   const [hsCodeValidationMessage, setHsCodeValidationMessage] = useState<string | null>(null)
+  const [tariffSchedules, setTariffSchedules] = useState<string[]>(['MFN'])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadTariffSchedules = async () => {
+      try {
+        const result = await appApi.getTariffSchedules()
+        if (!cancelled && result.success && result.data && result.data.length > 0) {
+          setTariffSchedules(result.data)
+        }
+      } catch (scheduleError) {
+        if (!cancelled) {
+          console.error('Failed to load tariff schedules:', scheduleError)
+        }
+      }
+    }
+
+    loadTariffSchedules()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -196,6 +279,7 @@ export const Calculator: React.FC = () => {
         value: taxableValuePhp,
         hsCode: canonicalHsCode,
         originCountry: formData.originCountry,
+        scheduleCode: formData.scheduleCode,
       })
 
       if (!dutyResult.success) {
@@ -266,6 +350,9 @@ export const Calculator: React.FC = () => {
           ...dutyData,
           amount: dutyAmount,
           surcharge: surchargeAmount,
+        },
+        tariff: {
+          scheduleCode: formData.scheduleCode,
         },
         vat: {
           rate: VAT_RATE * 100,
@@ -434,6 +521,27 @@ export const Calculator: React.FC = () => {
             </div>
 
             <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="tariff-schedule">Tariff Schedule</label>
+                <select
+                  id="tariff-schedule"
+                  value={formData.scheduleCode}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      scheduleCode: e.target.value,
+                    }))
+                  }
+                >
+                  {tariffSchedules.map((schedule) => (
+                    <option key={schedule} value={schedule}>
+                      {schedule}
+                    </option>
+                  ))}
+                </select>
+                <div className="field-help-text">MFN is the currently seeded tariff schedule. Additional schedules can be added through tariff data imports.</div>
+              </div>
+
               <div className="form-group">
                 <label htmlFor="origin">Origin Country</label>
                 <input

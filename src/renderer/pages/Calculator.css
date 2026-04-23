@@ -101,6 +101,13 @@
   font-size: 0.82rem;
 }
 
+.field-help-text {
+  margin-top: 8px;
+  color: #5c6f82;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .error-message {
   background-color: #f8d7da;
   color: #721c24;

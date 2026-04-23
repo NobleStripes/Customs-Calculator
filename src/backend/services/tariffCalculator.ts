@@ -15,6 +15,7 @@ export interface VATResult {
 
 export interface TariffCatalogRow {
   hsCode: string
+  scheduleCode: string
   description: string
   category: string
   dutyRate: number
@@ -56,15 +57,18 @@ export class TariffCalculator {
 
   private getCurrentTariffRateRow(
     hsCode: string,
-    fields: string
+    fields: string,
+    scheduleCode: string = 'MFN'
   ): Promise<any | null> {
     return new Promise((resolve, reject) => {
       this.resolveCanonicalHSCode(hsCode)
         .then((normalizedHSCode) => {
+          const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
           const sql = `
             SELECT ${fields}
             FROM tariff_rates
             WHERE hs_code = ?
+              AND COALESCE(schedule_code, 'MFN') = ?
               AND effective_date <= date('now')
               AND (end_date IS NULL OR end_date > date('now'))
               AND (import_status = 'approved' OR import_status IS NULL)
@@ -72,7 +76,7 @@ export class TariffCalculator {
             LIMIT 1
           `
 
-          this.db.get(sql, [normalizedHSCode], (err, row: any) => {
+          this.db.get(sql, [normalizedHSCode, normalizedScheduleCode], (err, row: any) => {
             if (err) {
               reject(err)
               return
@@ -88,9 +92,9 @@ export class TariffCalculator {
   /**
    * Calculate import duty for a product
    */
-  async calculateDuty(value: number, hsCode: string, _originCountry: string): Promise<DutyResult> {
+  async calculateDuty(value: number, hsCode: string, _originCountry: string, scheduleCode: string = 'MFN'): Promise<DutyResult> {
     try {
-      const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes')
+      const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes', scheduleCode)
 
       const dutyRate = row?.duty_rate || 0
       const surchargeRate = row?.surcharge_rate || 0
@@ -110,9 +114,9 @@ export class TariffCalculator {
   /**
    * Calculate VAT on dutiable value
    */
-  async calculateVAT(dutiableValue: number, hsCode: string): Promise<VATResult> {
+  async calculateVAT(dutiableValue: number, hsCode: string, scheduleCode: string = 'MFN'): Promise<VATResult> {
     try {
-      const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes')
+      const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes', scheduleCode)
       const vatRate = row?.vat_rate || 0.12
 
       return {
@@ -245,18 +249,20 @@ export class TariffCalculator {
   /**
    * Get all tariff rates for a product category
    */
-  getTariffsByCategory(category: string): Promise<Array<{ hs_code: string; duty_rate: number; vat_rate: number }>> {
+  getTariffsByCategory(category: string, scheduleCode: string = 'MFN'): Promise<Array<{ hs_code: string; duty_rate: number; vat_rate: number }>> {
     return new Promise((resolve, reject) => {
+      const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
       const sql = `
         SELECT DISTINCT tr.hs_code, tr.duty_rate, tr.vat_rate
         FROM tariff_rates tr
         JOIN hs_codes hc ON tr.hs_code = hc.code
         WHERE hc.category = ? AND tr.effective_date <= date('now')
+        AND COALESCE(tr.schedule_code, 'MFN') = ?
         AND (tr.end_date IS NULL OR tr.end_date > date('now'))
         ORDER BY tr.hs_code
       `
 
-      this.db.all(sql, [category], (err, rows: any) => {
+      this.db.all(sql, [category, normalizedScheduleCode], (err, rows: any) => {
         if (err) {
           console.error('Error fetching tariffs by category:', err)
           reject(new Error(`Failed to fetch tariffs: ${err.message}`))
@@ -280,14 +286,17 @@ export class TariffCalculator {
   getTariffCatalog(
     query: string = '',
     category: string = 'All',
+    scheduleCode: string = 'MFN',
     limit: number = 200
   ): Promise<TariffCatalogRow[]> {
     return new Promise((resolve, reject) => {
       const searchQuery = `%${query.trim().toUpperCase()}%`
+      const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
 
       let sql = `
         SELECT
           hc.code AS hs_code,
+          COALESCE(tr.schedule_code, 'MFN') AS schedule_code,
           hc.description,
           hc.category,
           tr.duty_rate,
@@ -299,6 +308,7 @@ export class TariffCalculator {
           SELECT tr2.id
           FROM tariff_rates tr2
           WHERE tr2.hs_code = hc.code
+            AND COALESCE(tr2.schedule_code, 'MFN') = ?
             AND tr2.effective_date <= date('now')
             AND (tr2.end_date IS NULL OR tr2.end_date > date('now'))
             AND (tr2.import_status = 'approved' OR tr2.import_status IS NULL)
@@ -308,7 +318,7 @@ export class TariffCalculator {
         WHERE (hc.code LIKE ? OR hc.description LIKE ?)
       `
 
-      const params: Array<string | number> = [searchQuery, searchQuery]
+      const params: Array<string | number> = [normalizedScheduleCode, searchQuery, searchQuery]
 
       if (category && category !== 'All') {
         sql += ' AND hc.category = ?'
@@ -328,6 +338,7 @@ export class TariffCalculator {
         resolve(
           rows?.map((row) => ({
             hsCode: row.hs_code,
+            scheduleCode: row.schedule_code,
             description: row.description,
             category: row.category,
             dutyRate: (row.duty_rate || 0) * 100,
@@ -359,13 +370,35 @@ export class TariffCalculator {
     })
   }
 
+  getTariffSchedules(): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT DISTINCT COALESCE(schedule_code, 'MFN') AS schedule_code
+        FROM tariff_rates
+        WHERE import_status = 'approved' OR import_status IS NULL
+        ORDER BY schedule_code
+      `
+
+      this.db.all(sql, (err, rows: any[]) => {
+        if (err) {
+          console.error('Error fetching tariff schedules:', err)
+          reject(new Error(`Failed to fetch tariff schedules: ${err.message}`))
+          return
+        }
+
+        resolve(rows?.map((row) => row.schedule_code) || [])
+      })
+    })
+  }
+
   /**
    * Calculate total landed cost
    */
   async calculateTotalLandedCost(
     value: number,
     hsCode: string,
-    originCountry: string
+    originCountry: string,
+    scheduleCode: string = 'MFN'
   ): Promise<{
     value: number
     duty: number
@@ -373,9 +406,9 @@ export class TariffCalculator {
     total: number
   }> {
     try {
-      const dutyResult = await this.calculateDuty(value, hsCode, originCountry)
+      const dutyResult = await this.calculateDuty(value, hsCode, originCountry, scheduleCode)
       const dutiableValue = value + dutyResult.amount + dutyResult.surcharge
-      const vatResult = await this.calculateVAT(dutiableValue, hsCode)
+      const vatResult = await this.calculateVAT(dutiableValue, hsCode, scheduleCode)
 
       return {
         value,

@@ -42,6 +42,7 @@ export interface HSCatalogImportRequest {
 
 export interface TariffImportRow {
   hsCode: string
+  scheduleCode?: string
   description?: string
   category?: string
   dutyRate: string | number
@@ -58,6 +59,7 @@ export interface TariffImportPreviewRow {
   raw: TariffImportRow
   normalized?: {
     hsCode: string
+    scheduleCode: string
     description: string
     category: string
     dutyRate: number
@@ -174,6 +176,11 @@ const all = <T>(sql: string, params: Array<string | number | null> = []): Promis
 
 const todayIsoDate = (): string => new Date().toISOString().split('T')[0]
 
+const normalizeScheduleCode = (value: string | undefined): string => {
+  const normalizedValue = String(value || '').trim().toUpperCase()
+  return normalizedValue || 'MFN'
+}
+
 const normalizeRate = (value: string | number | undefined, fallback: number): number => {
   if (value === undefined || value === null || value === '') {
     return fallback
@@ -184,6 +191,7 @@ const normalizeRate = (value: string | number | undefined, fallback: number): nu
   }
 
   const trimmed = value.trim().toLowerCase()
+  const isPercentInput = trimmed.includes('%') || trimmed.includes('percent')
   if (!trimmed) {
     return fallback
   }
@@ -193,7 +201,7 @@ const normalizeRate = (value: string | number | undefined, fallback: number): nu
     return fallback
   }
 
-  return numeric > 1 ? numeric / 100 : numeric
+  return isPercentInput || numeric > 1 ? numeric / 100 : numeric
 }
 
 const normalizeHsCode = (hsCode: string): string => {
@@ -235,6 +243,7 @@ const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPrevi
   const errors: string[] = []
 
   const hsCode = normalizeHsCode(row.hsCode || '')
+  const scheduleCode = normalizeScheduleCode(row.scheduleCode)
   if (!hsCode) {
     errors.push('HS code is required')
   }
@@ -270,6 +279,7 @@ const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPrevi
     ? undefined
     : {
         hsCode,
+      scheduleCode,
         description: (row.description || 'Imported from source').trim() || 'Imported from source',
         category: (row.category || 'Imported').trim() || 'Imported',
         dutyRate,
@@ -364,6 +374,7 @@ export class TariffDataIngestionService {
 
     return rows.map((row) => ({
       hsCode: getFieldValue(row, ['hscode', 'hscode', 'hscode', 'hs_code', 'code']),
+      scheduleCode: getFieldValue(row, ['schedulecode', 'schedule_code', 'tariffschedule', 'tariff_schedule', 'schedule']) || undefined,
       description: getFieldValue(row, ['description', 'goodsdescription', 'productdescription']) || undefined,
       category: getFieldValue(row, ['category', 'section', 'chapterdescription']) || undefined,
       dutyRate: getFieldValue(row, ['dutyrate', 'dutyratepercent', 'duty_rate', 'duty']) || '',
@@ -573,6 +584,7 @@ export class TariffDataIngestionService {
 
         const existingRate = await get<{
           id: number
+          schedule_code: string | null
           duty_rate: number
           vat_rate: number
           surcharge_rate: number
@@ -580,14 +592,15 @@ export class TariffDataIngestionService {
           end_date: string | null
         }>(
           `
-            SELECT id, duty_rate, vat_rate, surcharge_rate, effective_date, end_date
+            SELECT id, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date, end_date
             FROM tariff_rates
             WHERE hs_code = ?
+              AND COALESCE(schedule_code, 'MFN') = ?
               AND (end_date IS NULL OR end_date > date('now'))
             ORDER BY effective_date DESC
             LIMIT 1
           `,
-          [row.normalized.hsCode]
+          [row.normalized.hsCode, row.normalized.scheduleCode]
         )
 
         const hasRateChange =
@@ -610,11 +623,12 @@ export class TariffDataIngestionService {
         await run(
           `
             INSERT INTO tariff_rates
-            (hs_code, duty_rate, vat_rate, surcharge_rate, effective_date, end_date, notes, source_id, confidence_score, import_status, last_modified_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', CURRENT_TIMESTAMP)
+            (hs_code, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date, end_date, notes, source_id, confidence_score, import_status, last_modified_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', CURRENT_TIMESTAMP)
           `,
           [
             row.normalized.hsCode,
+            row.normalized.scheduleCode,
             row.normalized.dutyRate,
             row.normalized.vatRate,
             row.normalized.surchargeRate,
@@ -640,7 +654,7 @@ export class TariffDataIngestionService {
             row.normalized.vatRate,
             existingRate?.surcharge_rate ?? null,
             row.normalized.surchargeRate,
-            'Source import',
+            `Source import (${row.normalized.scheduleCode})`,
             sourceId,
             importJobId,
           ]
