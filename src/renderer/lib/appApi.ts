@@ -40,6 +40,11 @@ type TariffRateRow = {
   notes?: string
 }
 
+type TariffScheduleOption = {
+  code: string
+  displayName: string
+}
+
 type ComplianceRuleRow = {
   hs_code_range: string
   category: string
@@ -174,6 +179,23 @@ const tariffRates: TariffRateRow[] = [
   { hs_code: '8544.30', schedule_code: 'MFN', duty_rate: 0.08, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
   { hs_code: '7326.90', schedule_code: 'MFN', duty_rate: 0.12, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
   { hs_code: '4418.90', schedule_code: 'MFN', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
+]
+
+const tariffScheduleOptions: TariffScheduleOption[] = [
+  { code: 'MFN', displayName: 'Most-Favored-Nation' },
+  { code: 'AANZFTA', displayName: 'ASEAN-Australia-New Zealand Free Trade Agreement' },
+  { code: 'ACFTA', displayName: 'ASEAN-China Free Trade Agreement' },
+  { code: 'AHKFTA', displayName: 'ASEAN-Hong Kong, China Free Trade Agreement' },
+  { code: 'AIFTA', displayName: 'ASEAN-India Free Trade Agreement' },
+  { code: 'AJCEPA', displayName: 'ASEAN-Japan Comprehensive Economic Partnership Agreement' },
+  { code: 'AKFTA', displayName: 'ASEAN-Korea Free Trade Agreement' },
+  { code: 'ATIGA', displayName: 'ASEAN Trade in Goods Agreement' },
+  { code: 'PH-EFTA FTA (CHE/LIE)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Switzerland/Liechtenstein)' },
+  { code: 'PH-EFTA FTA (ISL)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Iceland)' },
+  { code: 'PH-EFTA FTA (NOR)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Norway)' },
+  { code: 'PH-KR FTA', displayName: 'Philippines-Korea Free Trade Agreement' },
+  { code: 'PJEPA', displayName: 'Philippines-Japan Economic Partnership Agreement' },
+  { code: 'RCEP', displayName: 'Regional Comprehensive Economic Partnership Agreement' },
 ]
 
 const complianceRules: ComplianceRuleRow[] = [
@@ -617,7 +639,7 @@ const getTariffCatalogRemote = async (payload: { query?: string; category?: stri
 }
 
 const getTariffCategoriesRemote = async (): ApiResponse<string[]> => callApi<string[]>('/api/tariff-categories')
-const getTariffSchedulesRemote = async (): ApiResponse<string[]> => callApi<string[]>('/api/tariff-schedules')
+const getTariffSchedulesRemote = async (): ApiResponse<TariffScheduleOption[]> => callApi<TariffScheduleOption[]>('/api/tariff-schedules')
 
 const calculateDutyRemote = async (payload: {
   value: number
@@ -784,14 +806,13 @@ export const appApi = {
     return makeSuccess(categories)
   },
 
-  getTariffSchedules: async (): ApiResponse<string[]> => {
+  getTariffSchedules: async (): ApiResponse<TariffScheduleOption[]> => {
     const remoteResult = await getTariffSchedulesRemote()
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
     }
 
-    const schedules = [...new Set(tariffRates.map((row) => normalizeScheduleCode(row.schedule_code)))].sort((left, right) => left.localeCompare(right))
-    return makeSuccess(schedules)
+    return makeSuccess(tariffScheduleOptions)
   },
 
   getComplianceRequirements: async (payload: {

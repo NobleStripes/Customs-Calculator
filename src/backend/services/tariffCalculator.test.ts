@@ -83,4 +83,26 @@ describe('TariffCalculator.searchHSCodes', () => {
     expect(ahtnDuty.rate).toBe(1)
     expect(ahtnDuty.amount).toBe(10)
   })
+
+  it('returns seeded tariff schedule metadata for agreement selectors', async () => {
+    const tariffCalculator = new TariffCalculatorClass()
+
+    const schedules = await tariffCalculator.getTariffSchedules()
+
+    expect(schedules.some((schedule) => schedule.code === 'MFN' && schedule.displayName === 'Most-Favored-Nation')).toBe(true)
+    expect(
+      schedules.some(
+        (schedule) =>
+          schedule.code === 'AANZFTA' &&
+          schedule.displayName === 'ASEAN-Australia-New Zealand Free Trade Agreement'
+      )
+    ).toBe(true)
+    expect(
+      schedules.some(
+        (schedule) =>
+          schedule.code === 'PH-EFTA FTA (CHE/LIE)' &&
+          schedule.displayName === 'Philippines-European Free Trade Association Free Trade Agreement (Switzerland/Liechtenstein)'
+      )
+    ).toBe(true)
+  })
 })

@@ -24,6 +24,11 @@ export interface TariffCatalogRow {
   effectiveDate: string
 }
 
+export interface TariffScheduleOption {
+  code: string
+  displayName: string
+}
+
 export class TariffCalculator {
   private db = getDatabase()
 
@@ -370,13 +375,13 @@ export class TariffCalculator {
     })
   }
 
-  getTariffSchedules(): Promise<string[]> {
+  getTariffSchedules(): Promise<TariffScheduleOption[]> {
     return new Promise((resolve, reject) => {
       const sql = `
-        SELECT DISTINCT COALESCE(schedule_code, 'MFN') AS schedule_code
-        FROM tariff_rates
-        WHERE import_status = 'approved' OR import_status IS NULL
-        ORDER BY schedule_code
+        SELECT code, display_name
+        FROM tariff_schedules
+        WHERE is_active = 1
+        ORDER BY code
       `
 
       this.db.all(sql, (err, rows: any[]) => {
@@ -386,7 +391,7 @@ export class TariffCalculator {
           return
         }
 
-        resolve(rows?.map((row) => row.schedule_code) || [])
+        resolve(rows?.map((row) => ({ code: row.code, displayName: row.display_name })) || [])
       })
     })
   }

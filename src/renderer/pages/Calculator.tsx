@@ -76,6 +76,11 @@ interface CalculationResultsData {
   }
 }
 
+type TariffScheduleOption = {
+  code: string
+  displayName: string
+}
+
 const TRANSIT_CHARGE_PHP = 1000
 const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
 const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
@@ -125,7 +130,9 @@ export const Calculator: React.FC = () => {
   } | null>(null)
   const [fxLoading, setFxLoading] = useState(false)
   const [hsCodeValidationMessage, setHsCodeValidationMessage] = useState<string | null>(null)
-  const [tariffSchedules, setTariffSchedules] = useState<string[]>(['MFN'])
+  const [tariffSchedules, setTariffSchedules] = useState<TariffScheduleOption[]>([
+    { code: 'MFN', displayName: 'Most-Favored-Nation' },
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -534,12 +541,12 @@ export const Calculator: React.FC = () => {
                   }
                 >
                   {tariffSchedules.map((schedule) => (
-                    <option key={schedule} value={schedule}>
-                      {schedule}
+                    <option key={schedule.code} value={schedule.code}>
+                      {`${schedule.code} - ${schedule.displayName}`}
                     </option>
                   ))}
                 </select>
-                <div className="field-help-text">MFN is the currently seeded tariff schedule. Additional schedules can be added through tariff data imports.</div>
+                <div className="field-help-text">Schedule options now include the seeded FTA agreements, while imported tariff data still controls which rates are available under each code.</div>
               </div>
 
               <div className="form-group">

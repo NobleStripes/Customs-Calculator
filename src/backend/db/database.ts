@@ -38,6 +38,23 @@ const runStatement = (database: sqlite3.Database, sql: string, params: Array<str
   })
 }
 
+const seededTariffSchedules = [
+  { code: 'MFN', displayName: 'Most-Favored-Nation' },
+  { code: 'AANZFTA', displayName: 'ASEAN-Australia-New Zealand Free Trade Agreement' },
+  { code: 'ACFTA', displayName: 'ASEAN-China Free Trade Agreement' },
+  { code: 'AHKFTA', displayName: 'ASEAN-Hong Kong, China Free Trade Agreement' },
+  { code: 'AIFTA', displayName: 'ASEAN-India Free Trade Agreement' },
+  { code: 'AJCEPA', displayName: 'ASEAN-Japan Comprehensive Economic Partnership Agreement' },
+  { code: 'AKFTA', displayName: 'ASEAN-Korea Free Trade Agreement' },
+  { code: 'ATIGA', displayName: 'ASEAN Trade in Goods Agreement' },
+  { code: 'PH-EFTA FTA (CHE/LIE)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Switzerland/Liechtenstein)' },
+  { code: 'PH-EFTA FTA (ISL)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Iceland)' },
+  { code: 'PH-EFTA FTA (NOR)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Norway)' },
+  { code: 'PH-KR FTA', displayName: 'Philippines-Korea Free Trade Agreement' },
+  { code: 'PJEPA', displayName: 'Philippines-Japan Economic Partnership Agreement' },
+  { code: 'RCEP', displayName: 'Regional Comprehensive Economic Partnership Agreement' },
+] as const
+
 const schema = [
   `CREATE TABLE IF NOT EXISTS hs_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +108,13 @@ const schema = [
     fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     imported_at DATETIME,
     notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS tariff_schedules (
+    code TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
 
@@ -479,6 +503,35 @@ const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
   })
 }
 
+const insertTariffSchedules = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve, _reject) => {
+    let count = 0
+    const total = seededTariffSchedules.length
+
+    seededTariffSchedules.forEach((item) => {
+      database.run(
+        `
+          INSERT INTO tariff_schedules (code, display_name, is_active)
+          VALUES (?, ?, 1)
+          ON CONFLICT(code) DO UPDATE SET
+            display_name = excluded.display_name,
+            is_active = 1
+        `,
+        [item.code, item.displayName],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting tariff schedule ${item.code}:`, err)
+          }
+          count += 1
+          if (count === total) {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+}
+
 const insertComplianceRules = (database: sqlite3.Database): Promise<void> => {
   return new Promise((resolve, _reject) => {
     const complianceData = [
@@ -590,6 +643,7 @@ export const seedInitialData = async (): Promise<void> => {
     ]
 
     await insertHSCodes(database, hsCodesData)
+    await insertTariffSchedules(database)
     await insertTariffRates(database)
     await insertComplianceRules(database)
 

@@ -13,6 +13,11 @@ type TariffRow = {
   effectiveDate: string
 }
 
+type TariffScheduleOption = {
+  code: string
+  displayName: string
+}
+
 const RATE_FORMAT = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -23,7 +28,9 @@ export const TariffBrowser: React.FC = () => {
   const [category, setCategory] = useState('All')
   const [scheduleCode, setScheduleCode] = useState('MFN')
   const [categories, setCategories] = useState<string[]>(['All'])
-  const [schedules, setSchedules] = useState<string[]>(['MFN'])
+  const [schedules, setSchedules] = useState<TariffScheduleOption[]>([
+    { code: 'MFN', displayName: 'Most-Favored-Nation' },
+  ])
   const [rows, setRows] = useState<TariffRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -140,8 +147,8 @@ export const TariffBrowser: React.FC = () => {
             onChange={(event) => setScheduleCode(event.target.value)}
           >
             {schedules.map((item) => (
-              <option key={item} value={item}>
-                {item}
+              <option key={item.code} value={item.code}>
+                {`${item.code} - ${item.displayName}`}
               </option>
             ))}
           </select>

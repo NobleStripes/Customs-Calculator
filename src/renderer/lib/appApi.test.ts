@@ -233,6 +233,22 @@ describe('appApi.batchCalculate', () => {
 })
 
 describe('appApi HS lookup', () => {
+  it('returns seeded tariff schedule metadata in the local fallback path', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.getTariffSchedules()
+
+    expect(result.success).toBe(true)
+    expect(result.data?.some((schedule) => schedule.code === 'MFN' && schedule.displayName === 'Most-Favored-Nation')).toBe(true)
+    expect(
+      result.data?.some(
+        (schedule) =>
+          schedule.code === 'RCEP' &&
+          schedule.displayName === 'Regional Comprehensive Economic Partnership Agreement'
+      )
+    ).toBe(true)
+  })
+
   it('trims HS search queries before calling the server endpoint', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
