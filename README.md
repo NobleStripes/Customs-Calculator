@@ -147,7 +147,17 @@ MIT
 
 ## Changelog
 
-### v0.1.0 (Current)
+### v0.2.0 (Current)
+- Added first-class tariff schedule support across the calculator, tariff browser, tariff import pipeline, batch shipment workflows, and exported calculation documents.
+- Added seeded tariff schedule metadata for MFN plus named FTA agreement options such as AANZFTA, ACFTA, AJCEPA, ATIGA, PJEPA, PH-KR FTA, PH-EFTA FTA variants, and RCEP.
+- Upgraded HS code search reliability with better normalization, ranking, input validation, and stale-result handling.
+- Added server-backed tariff-rate preview/import endpoints and schedule-aware tariff row storage using `schedule_code` on `tariff_rates`.
+- Improved tariff import normalization so percentage-style inputs like `1%` are stored correctly as decimal rates.
+- Added PDF/report output schedule metadata and surfaced schedule context in calculator and batch-import UX.
+- Replaced the vulnerable spreadsheet dependency path with an audit-clean XLSX reader flow for HS catalog imports.
+- Cleaned up backend TypeScript typing so lint, targeted tests, and build now pass cleanly.
+
+### v0.1.0
 - Website-first React + TypeScript runtime
 - Seeded browser app API for calculation workflows
 - Express API for same-origin Customs/BIR/Tariff Commission website fetching
@@ -160,4 +170,4 @@ MIT
 
 ---
 
-**Last Updated:** April 20, 2026
+**Last Updated:** April 23, 2026

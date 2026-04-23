@@ -4,6 +4,11 @@ import axios from 'axios'
 const EXCHANGE_RATES_API = 'https://api.exchangerate-api.com/v4/latest'
 const CACHE_DURATION = 24 * 60 * 60 * 1000 // 24 hours in milliseconds
 
+type ExchangeRateCacheRow = {
+  rate: number
+  last_updated: string
+}
+
 export class CurrencyConverter {
   private db = getDatabase()
 
@@ -102,7 +107,7 @@ export class CurrencyConverter {
       this.db.get(
         'SELECT rate, last_updated FROM exchange_rates WHERE currency_pair = ?',
         [pair],
-        async (err, row: any) => {
+        async (err, row: ExchangeRateCacheRow | undefined) => {
           if (err) {
             reject(err)
             return

@@ -29,6 +29,66 @@ export interface TariffScheduleOption {
   displayName: string
 }
 
+type CanonicalHsCodeRow = {
+  code: string
+}
+
+type NotesRateRow = {
+  notes?: string
+}
+
+type DutyRateRow = NotesRateRow & {
+  duty_rate?: number
+  surcharge_rate?: number
+}
+
+type VatRateRow = NotesRateRow & {
+  vat_rate?: number
+}
+
+type HSCodeLookupRow = {
+  code: string
+  description: string
+  category: string
+}
+
+type TariffsByCategoryRow = {
+  hs_code: string
+  duty_rate: number
+  vat_rate: number
+}
+
+type TariffCatalogDbRow = {
+  hs_code: string
+  schedule_code: string
+  description: string
+  category: string
+  duty_rate: number
+  vat_rate: number
+  surcharge_rate: number
+  effective_date: string
+}
+
+type TariffCategoryRow = {
+  category: string
+}
+
+type TariffScheduleDbRow = {
+  code: string
+  display_name: string
+}
+
+type CalculationHistoryRow = {
+  id: number
+  hs_code: string
+  product_value: number
+  duty_amount: number
+  vat_amount: number
+  created_at: string
+}
+
+const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
 export class TariffCalculator {
   private db = getDatabase()
 
@@ -49,7 +109,7 @@ export class TariffCalculator {
         LIMIT 1
       `
 
-      this.db.get(sql, [normalizedHSCode, compactHSCode, normalizedHSCode], (err, row: any) => {
+      this.db.get(sql, [normalizedHSCode, compactHSCode, normalizedHSCode], (err, row: CanonicalHsCodeRow | undefined) => {
         if (err) {
           reject(err)
           return
@@ -64,7 +124,7 @@ export class TariffCalculator {
     hsCode: string,
     fields: string,
     scheduleCode: string = 'MFN'
-  ): Promise<any | null> {
+  ): Promise<Record<string, unknown> | null> {
     return new Promise((resolve, reject) => {
       this.resolveCanonicalHSCode(hsCode)
         .then((normalizedHSCode) => {
@@ -81,7 +141,7 @@ export class TariffCalculator {
             LIMIT 1
           `
 
-          this.db.get(sql, [normalizedHSCode, normalizedScheduleCode], (err, row: any) => {
+          this.db.get(sql, [normalizedHSCode, normalizedScheduleCode], (err, row: Record<string, unknown> | undefined) => {
             if (err) {
               reject(err)
               return
@@ -99,7 +159,7 @@ export class TariffCalculator {
    */
   async calculateDuty(value: number, hsCode: string, _originCountry: string, scheduleCode: string = 'MFN'): Promise<DutyResult> {
     try {
-      const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes', scheduleCode)
+      const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes', scheduleCode) as DutyRateRow | null
 
       const dutyRate = row?.duty_rate || 0
       const surchargeRate = row?.surcharge_rate || 0
@@ -110,9 +170,9 @@ export class TariffCalculator {
         surcharge: value * surchargeRate,
         notes: row?.notes || '',
       }
-    } catch (err: any) {
-      console.error('Error calculating duty:', err)
-      throw new Error(`Failed to calculate duty: ${err.message}`)
+    } catch (error: unknown) {
+      console.error('Error calculating duty:', error)
+      throw new Error(`Failed to calculate duty: ${getErrorMessage(error)}`)
     }
   }
 
@@ -121,7 +181,7 @@ export class TariffCalculator {
    */
   async calculateVAT(dutiableValue: number, hsCode: string, scheduleCode: string = 'MFN'): Promise<VATResult> {
     try {
-      const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes', scheduleCode)
+      const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes', scheduleCode) as VatRateRow | null
       const vatRate = row?.vat_rate || 0.12
 
       return {
@@ -129,9 +189,9 @@ export class TariffCalculator {
         amount: dutiableValue * vatRate,
         notes: row?.notes || '',
       }
-    } catch (err: any) {
-      console.error('Error calculating VAT:', err)
-      throw new Error(`Failed to calculate VAT: ${err.message}`)
+    } catch (error: unknown) {
+      console.error('Error calculating VAT:', error)
+      throw new Error(`Failed to calculate VAT: ${getErrorMessage(error)}`)
     }
   }
 
@@ -197,7 +257,7 @@ export class TariffCalculator {
       this.db.all(
         sql,
         sqlParams,
-        (err, rows: any) => {
+        (err, rows: HSCodeLookupRow[]) => {
         if (err) {
           console.error('Error searching HS codes:', err)
           reject(new Error(`Failed to search HS codes: ${err.message}`))
@@ -205,7 +265,7 @@ export class TariffCalculator {
         }
 
         resolve(
-          rows?.map((r: any) => ({
+          rows?.map((r) => ({
             code: r.code,
             description: r.description,
             category: r.category,
@@ -231,7 +291,7 @@ export class TariffCalculator {
         LIMIT 1
       `
 
-      this.db.get(sql, [normalizedCode, compactCode, normalizedCode], (err, row: any) => {
+      this.db.get(sql, [normalizedCode, compactCode, normalizedCode], (err, row: HSCodeLookupRow | undefined) => {
         if (err) {
           console.error('Error fetching HS code details:', err)
           reject(new Error(`Failed to fetch HS code details: ${err.message}`))
@@ -267,7 +327,7 @@ export class TariffCalculator {
         ORDER BY tr.hs_code
       `
 
-      this.db.all(sql, [category, normalizedScheduleCode], (err, rows: any) => {
+      this.db.all(sql, [category, normalizedScheduleCode], (err, rows: TariffsByCategoryRow[]) => {
         if (err) {
           console.error('Error fetching tariffs by category:', err)
           reject(new Error(`Failed to fetch tariffs: ${err.message}`))
@@ -275,7 +335,7 @@ export class TariffCalculator {
         }
 
         resolve(
-          rows?.map((r: any) => ({
+          rows?.map((r) => ({
             hs_code: r.hs_code,
             duty_rate: r.duty_rate,
             vat_rate: r.vat_rate,
@@ -333,7 +393,7 @@ export class TariffCalculator {
       sql += ' ORDER BY hc.category, hc.code LIMIT ?'
       params.push(limit)
 
-      this.db.all(sql, params, (err, rows: any[]) => {
+      this.db.all(sql, params, (err, rows: TariffCatalogDbRow[]) => {
         if (err) {
           console.error('Error fetching tariff catalog:', err)
           reject(new Error(`Failed to fetch tariff catalog: ${err.message}`))
@@ -363,7 +423,7 @@ export class TariffCalculator {
     return new Promise((resolve, reject) => {
       const sql = 'SELECT DISTINCT category FROM hs_codes ORDER BY category'
 
-      this.db.all(sql, (err, rows: any[]) => {
+      this.db.all(sql, (err, rows: TariffCategoryRow[]) => {
         if (err) {
           console.error('Error fetching tariff categories:', err)
           reject(new Error(`Failed to fetch categories: ${err.message}`))
@@ -384,7 +444,7 @@ export class TariffCalculator {
         ORDER BY code
       `
 
-      this.db.all(sql, (err, rows: any[]) => {
+      this.db.all(sql, (err, rows: TariffScheduleDbRow[]) => {
         if (err) {
           console.error('Error fetching tariff schedules:', err)
           reject(new Error(`Failed to fetch tariff schedules: ${err.message}`))
@@ -485,7 +545,7 @@ export class TariffCalculator {
         LIMIT ?
       `
 
-      this.db.all(sql, [limit], (err, rows: any) => {
+      this.db.all(sql, [limit], (err, rows: CalculationHistoryRow[]) => {
         if (err) {
           console.error('Error fetching calculation history:', err)
           resolve([])

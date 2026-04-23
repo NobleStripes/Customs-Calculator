@@ -269,7 +269,7 @@ app.post('/api/calculate/batch', async (request, response) => {
 
 app.post('/api/import/hs-codes/preview', async (request, response) => {
   try {
-    const rows = tariffDataIngestion.parseHSCatalogRows(request.body || {})
+    const rows = await tariffDataIngestion.parseHSCatalogRows(request.body || {})
     const result = tariffDataIngestion.previewHSCatalogRows(rows)
     return response.json({ success: true, data: result })
   } catch (error) {
@@ -285,7 +285,7 @@ app.post('/api/import/hs-codes', async (request, response) => {
   }
 
   try {
-    const rows = tariffDataIngestion.parseHSCatalogRows(payload)
+    const rows = await tariffDataIngestion.parseHSCatalogRows(payload)
     const result = await tariffDataIngestion.importHSCatalog({
       sourceName: payload.sourceName,
       sourceType: typeof payload.sourceType === 'string' ? payload.sourceType : 'hs-catalog',

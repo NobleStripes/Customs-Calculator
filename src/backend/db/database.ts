@@ -5,6 +5,16 @@ import { existsSync, mkdirSync } from 'fs'
 
 let db: sqlite3.Database | null = null
 
+type TableInfoRow = {
+  name: string
+}
+
+type HSCodeSeedRow = {
+  code: string
+  description: string
+  category: string
+}
+
 export const getDbPath = (): string => {
   const baseDataDir = process.env.APPDATA || path.join(os.homedir(), '.customs-calculator')
   const dbDir = path.join(baseDataDir, 'customs-calculator')
@@ -229,7 +239,7 @@ export const initializeDatabase = (): Promise<void> => {
 
 const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
   return new Promise((resolve, reject) => {
-    database.all("PRAGMA table_info('tariff_rates')", (err: Error | null, rows: any[]) => {
+    database.all("PRAGMA table_info('tariff_rates')", (err: Error | null, rows: TableInfoRow[]) => {
       if (err) {
         reject(err)
         return
@@ -348,7 +358,7 @@ const cleanupDuplicateSeedRows = async (database: sqlite3.Database): Promise<voi
 
 const ensureComplianceRulesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
   return new Promise((resolve, reject) => {
-    database.all("PRAGMA table_info('compliance_rules')", (err: Error | null, rows: any[]) => {
+    database.all("PRAGMA table_info('compliance_rules')", (err: Error | null, rows: TableInfoRow[]) => {
       if (err) {
         reject(err)
         return
@@ -404,7 +414,7 @@ const ensureComplianceRulesSchemaCompatibility = (database: sqlite3.Database): P
   })
 }
 
-const insertHSCodes = (database: sqlite3.Database, hsCodesData: any[]): Promise<void> => {
+const insertHSCodes = (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[]): Promise<void> => {
   return new Promise((resolve, _reject) => {
     let count = 0
     const total = hsCodesData.length

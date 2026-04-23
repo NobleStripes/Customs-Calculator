@@ -1,5 +1,5 @@
 import sqlite3 from 'sqlite3'
-import * as XLSX from 'xlsx'
+import { readSheet } from 'read-excel-file/node'
 import { getDatabase } from '../db/database'
 
 type TabularImportPayload = {
@@ -103,17 +103,93 @@ const DEFAULT_THRESHOLD = 85
 
 const normalizeHeaderKey = (value: string): string => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
 
-const getSheetRows = (workbook: XLSX.WorkBook): Record<string, unknown>[] => {
-  const firstSheetName = workbook.SheetNames[0]
-  if (!firstSheetName) {
+const parseCsvRecords = (input: string): Record<string, unknown>[] => {
+  const rows: string[][] = []
+  let currentRow: string[] = []
+  let currentValue = ''
+  let insideQuotes = false
+
+  const pushValue = (): void => {
+    currentRow.push(currentValue)
+    currentValue = ''
+  }
+
+  const pushRow = (): void => {
+    pushValue()
+    rows.push(currentRow)
+    currentRow = []
+  }
+
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index]
+    const nextCharacter = input[index + 1]
+
+    if (character === '"') {
+      if (insideQuotes && nextCharacter === '"') {
+        currentValue += '"'
+        index += 1
+      } else {
+        insideQuotes = !insideQuotes
+      }
+      continue
+    }
+
+    if (!insideQuotes && character === ',') {
+      pushValue()
+      continue
+    }
+
+    if (!insideQuotes && (character === '\n' || character === '\r')) {
+      if (character === '\r' && nextCharacter === '\n') {
+        index += 1
+      }
+      pushRow()
+      continue
+    }
+
+    currentValue += character
+  }
+
+  if (currentValue.length > 0 || currentRow.length > 0) {
+    pushRow()
+  }
+
+  const [headerRow, ...dataRows] = rows.filter((row) => row.some((value) => value.trim() !== ''))
+  if (!headerRow || headerRow.length === 0) {
     return []
   }
 
-  const sheet = workbook.Sheets[firstSheetName]
-  return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: '',
-    raw: false,
-  })
+  return dataRows
+    .filter((row) => row.some((value) => value.trim() !== ''))
+    .map((row) => {
+      const record: Record<string, unknown> = {}
+      headerRow.forEach((header, index) => {
+        record[header] = row[index] ?? ''
+      })
+      return record
+    })
+}
+
+const readWorkbookRows = async (contentBase64: string): Promise<Record<string, unknown>[]> => {
+  const rows = await readSheet(Buffer.from(contentBase64, 'base64'))
+  const [headerRow, ...dataRows] = rows
+
+  if (!headerRow || headerRow.length === 0) {
+    return []
+  }
+
+  const headers = Array.from(headerRow, (value) => String(value ?? '').trim())
+
+  return dataRows
+    .filter((row) => Array.from(row).some((value) => String(value ?? '').trim() !== ''))
+    .map((row) => {
+      const record: Record<string, unknown> = {}
+      const rowValues = Array.from(row)
+      headers.forEach((header, index) => {
+        record[header] = String(rowValues[index] ?? '')
+      })
+      return record
+    })
 }
 
 const getFieldValue = (row: Record<string, unknown>, aliases: string[]): string => {
@@ -351,26 +427,28 @@ const updateImportJobStatus = async (
 }
 
 export class TariffDataIngestionService {
-  private readTabularRows(payload: TabularImportPayload): Record<string, unknown>[] {
+  private async readTabularRows(payload: TabularImportPayload): Promise<Record<string, unknown>[]> {
     if (Array.isArray(payload.rows)) {
       return payload.rows
     }
 
     if (payload.contentBase64) {
-      const workbook = XLSX.read(payload.contentBase64, { type: 'base64' })
-      return getSheetRows(workbook)
+      if ((payload.fileName || '').toLowerCase().endsWith('.csv')) {
+        return parseCsvRecords(Buffer.from(payload.contentBase64, 'base64').toString('utf-8'))
+      }
+
+      return readWorkbookRows(payload.contentBase64)
     }
 
     if (payload.csvText) {
-      const workbook = XLSX.read(payload.csvText, { type: 'string' })
-      return getSheetRows(workbook)
+      return parseCsvRecords(payload.csvText)
     }
 
     return []
   }
 
   parseCsvText(input: string): TariffImportRow[] {
-    const rows = this.readTabularRows({ csvText: input })
+    const rows = parseCsvRecords(input)
 
     return rows.map((row) => ({
       hsCode: getFieldValue(row, ['hscode', 'hscode', 'hscode', 'hs_code', 'code']),
@@ -389,8 +467,8 @@ export class TariffDataIngestionService {
     }))
   }
 
-  parseHSCatalogRows(payload: TabularImportPayload): HSCatalogImportRow[] {
-    const rows = this.readTabularRows(payload)
+  async parseHSCatalogRows(payload: TabularImportPayload): Promise<HSCatalogImportRow[]> {
+    const rows = await this.readTabularRows(payload)
 
     return rows.map((row) => ({
       hsCode: getFieldValue(row, ['hscode', 'hs_code', 'code', 'commoditycode', 'commodity_code', 'tariffcode', 'tariff_code']),
