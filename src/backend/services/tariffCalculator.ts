@@ -88,50 +88,42 @@ export class TariffCalculator {
   /**
    * Calculate import duty for a product
    */
-  calculateDuty(value: number, hsCode: string, _originCountry: string): Promise<DutyResult> {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes')
+  async calculateDuty(value: number, hsCode: string, _originCountry: string): Promise<DutyResult> {
+    try {
+      const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes')
 
-        const dutyRate = row?.duty_rate || 0
-        const surchargeRate = row?.surcharge_rate || 0
+      const dutyRate = row?.duty_rate || 0
+      const surchargeRate = row?.surcharge_rate || 0
 
-        const dutyAmount = value * dutyRate
-        const surcharge = value * surchargeRate
-
-        resolve({
-          rate: dutyRate * 100,
-          amount: dutyAmount,
-          surcharge,
-          notes: row?.notes || '',
-        })
-      } catch (err: any) {
-        console.error('Error calculating duty:', err)
-        reject(new Error(`Failed to calculate duty: ${err.message}`))
+      return {
+        rate: dutyRate * 100,
+        amount: value * dutyRate,
+        surcharge: value * surchargeRate,
+        notes: row?.notes || '',
       }
-    })
+    } catch (err: any) {
+      console.error('Error calculating duty:', err)
+      throw new Error(`Failed to calculate duty: ${err.message}`)
+    }
   }
 
   /**
    * Calculate VAT on dutiable value
    */
-  calculateVAT(dutiableValue: number, hsCode: string): Promise<VATResult> {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes')
-        const vatRate = row?.vat_rate || 0.12
-        const vatAmount = dutiableValue * vatRate
+  async calculateVAT(dutiableValue: number, hsCode: string): Promise<VATResult> {
+    try {
+      const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes')
+      const vatRate = row?.vat_rate || 0.12
 
-        resolve({
-          rate: vatRate * 100,
-          amount: vatAmount,
-          notes: row?.notes || '',
-        })
-      } catch (err: any) {
-        console.error('Error calculating VAT:', err)
-        reject(new Error(`Failed to calculate VAT: ${err.message}`))
+      return {
+        rate: vatRate * 100,
+        amount: dutiableValue * vatRate,
+        notes: row?.notes || '',
       }
-    })
+    } catch (err: any) {
+      console.error('Error calculating VAT:', err)
+      throw new Error(`Failed to calculate VAT: ${err.message}`)
+    }
   }
 
   /**
@@ -141,6 +133,7 @@ export class TariffCalculator {
     return new Promise((resolve, reject) => {
       const normalizedQuery = query.trim().toUpperCase()
       const compactQuery = normalizedQuery.replace(/\./g, '')
+      const queryTerms = normalizedQuery.split(/\s+/).filter(Boolean)
 
       if (!normalizedQuery) {
         resolve([])
@@ -151,6 +144,10 @@ export class TariffCalculator {
       const compactSearchQuery = `%${compactQuery}%`
       const startsWithQuery = `${normalizedQuery}%`
       const compactStartsWithQuery = `${compactQuery}%`
+      const descriptionTermClause = queryTerms.length > 0
+        ? queryTerms.map(() => 'UPPER(description) LIKE ?').join(' AND ')
+        : '0'
+      const descriptionTermParams = queryTerms.map((term) => `%${term}%`)
 
       const sql = `
         SELECT
@@ -158,24 +155,39 @@ export class TariffCalculator {
           description,
           category,
           CASE
-            WHEN REPLACE(code, '.', '') = ? THEN 0
-            WHEN code = ? THEN 1
-            WHEN code LIKE ? THEN 2
-            WHEN REPLACE(code, '.', '') LIKE ? THEN 3
+            WHEN REPLACE(UPPER(code), '.', '') = ? THEN 0
+            WHEN UPPER(code) = ? THEN 1
+            WHEN UPPER(code) LIKE ? THEN 2
+            WHEN REPLACE(UPPER(code), '.', '') LIKE ? THEN 3
             WHEN UPPER(description) LIKE ? THEN 4
-            ELSE 5
+            WHEN ${descriptionTermClause} THEN 5
+            ELSE 6
           END AS rank
         FROM hs_codes
         WHERE UPPER(code) LIKE ?
           OR REPLACE(UPPER(code), '.', '') LIKE ?
           OR UPPER(description) LIKE ?
-        ORDER BY rank, code
+          OR ${descriptionTermClause}
+        ORDER BY rank, LENGTH(code), code, description
         LIMIT 20
       `
 
+      const sqlParams = [
+        compactQuery,
+        normalizedQuery,
+        startsWithQuery,
+        compactStartsWithQuery,
+        searchQuery,
+        ...descriptionTermParams,
+        searchQuery,
+        compactSearchQuery,
+        searchQuery,
+        ...descriptionTermParams,
+      ]
+
       this.db.all(
         sql,
-        [compactQuery, normalizedQuery, startsWithQuery, compactStartsWithQuery, searchQuery, searchQuery, compactSearchQuery, searchQuery],
+        sqlParams,
         (err, rows: any) => {
         if (err) {
           console.error('Error searching HS codes:', err)

@@ -61,8 +61,12 @@ export const TariffBrowser: React.FC = () => {
   }
 
   useEffect(() => {
-    fetchCategories()
-    fetchRows('', 'All')
+    const handle = setTimeout(() => {
+      void fetchCategories()
+      void fetchRows('', 'All')
+    }, 0)
+
+    return () => clearTimeout(handle)
   }, [])
 
   useEffect(() => {

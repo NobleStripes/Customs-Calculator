@@ -15,7 +15,7 @@ export class ComplianceChecker {
   async getRequirements(
     hsCode: string,
     value: number,
-    destination: string
+    _destination: string
   ): Promise<ComplianceRequirement> {
     return new Promise((resolve) => {
       const requiredDocuments: string[] = []

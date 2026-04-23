@@ -45,6 +45,26 @@ const getContainerSecurityFeeUsd = (containerSize: string): number => {
 const getBrokerageFeePhp = (taxableValuePhp: number): number =>
   ((taxableValuePhp - 200000) * 0.00125) + 5300
 
+const MIN_HS_SEARCH_QUERY_LENGTH = 2
+const MAX_HS_SEARCH_QUERY_LENGTH = 100
+
+const normalizeHsSearchQuery = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalizedQuery = value.trim().replace(/\s+/g, ' ')
+  if (!normalizedQuery) {
+    return null
+  }
+
+  if (normalizedQuery.length < MIN_HS_SEARCH_QUERY_LENGTH || normalizedQuery.length > MAX_HS_SEARCH_QUERY_LENGTH) {
+    return null
+  }
+
+  return normalizedQuery
+}
+
 const sendError = (response: express.Response, statusCode: number, error: unknown) => {
   response.status(statusCode).json({
     success: false,
@@ -295,14 +315,18 @@ app.get('/api/import-jobs/:importJobId/pending-review', async (request, response
 })
 
 app.get('/api/hs-codes/search', async (request, response) => {
-  const { query } = request.query
+  const normalizedQuery = normalizeHsSearchQuery(request.query.query)
 
-  if (typeof query !== 'string' || !query.trim()) {
-    return sendError(response, 400, 'Query parameter "query" is required')
+  if (!normalizedQuery) {
+    return sendError(
+      response,
+      400,
+      `Query parameter "query" must be between ${MIN_HS_SEARCH_QUERY_LENGTH} and ${MAX_HS_SEARCH_QUERY_LENGTH} characters`
+    )
   }
 
   try {
-    const result = await tariffCalculator.searchHSCodes(query)
+    const result = await tariffCalculator.searchHSCodes(normalizedQuery)
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)

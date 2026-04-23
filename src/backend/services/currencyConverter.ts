@@ -95,7 +95,7 @@ export class CurrencyConverter {
     rate: number
     source: 'cache' | 'live' | 'fallback'
   }> {
-    return new Promise(async (resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const pair = `${fromCurrency}_${toCurrency}`
 
       // Try to get from cache first

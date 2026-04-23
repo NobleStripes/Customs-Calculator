@@ -218,6 +218,23 @@ describe('appApi.batchCalculate', () => {
 })
 
 describe('appApi HS lookup', () => {
+  it('trims HS search queries before calling the server endpoint', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: [],
+      }),
+    } as Response)
+
+    await appApi.searchHSCodes(' 8471  ')
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/hs-codes/search?query=8471'),
+      expect.anything()
+    )
+  })
+
   it('uses the server HS search endpoint when available', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -246,6 +263,24 @@ describe('appApi HS lookup', () => {
 
     expect(result.success).toBe(true)
     expect(result.data?.[0]?.code).toBe('8421.23')
+  })
+
+  it('returns no fallback matches for whitespace-only HS search queries', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.searchHSCodes('   ')
+
+    expect(result.success).toBe(true)
+    expect(result.data).toEqual([])
+  })
+
+  it('prefers exact undotted code matches in the local fallback path', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.searchHSCodes('847130')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.[0]?.code).toBe('8471.30')
   })
 
   it('resolves typed HS codes through the server when available', async () => {

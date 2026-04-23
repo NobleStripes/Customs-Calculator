@@ -434,7 +434,7 @@ export class TariffDataIngestionService {
     const importJobId = jobInsert.lastID
 
     let importedRows = 0
-    let pendingReviewRows = 0
+    const pendingReviewRows = 0
     let errorRows = 0
 
     try {

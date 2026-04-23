@@ -118,12 +118,10 @@ export const Calculator: React.FC = () => {
     const compactInput = normalizedInput.replace(/\./g, '')
 
     if (!normalizedInput) {
-      setHsCodeValidationMessage(null)
       return
     }
 
     if (compactInput.length < 4) {
-      setHsCodeValidationMessage(null)
       return
     }
 
@@ -148,6 +146,7 @@ export const Calculator: React.FC = () => {
   }, [formData.hsCode])
 
   const handleHSCodeSelect = (code: string) => {
+    setHsCodeValidationMessage(null)
     setFormData((prev) => ({ ...prev, hsCode: code }))
   }
 

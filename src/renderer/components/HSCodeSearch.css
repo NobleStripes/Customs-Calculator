@@ -81,8 +81,18 @@
   color: #7f8c8d;
 }
 
+.suggestion-item.search-error {
+  cursor: default;
+  color: #b42318;
+  background-color: #fef3f2;
+}
+
 .suggestion-item.no-results:hover {
   background-color: transparent;
+}
+
+.suggestion-item.search-error:hover {
+  background-color: #fef3f2;
 }
 
 .suggestion-item .code {
