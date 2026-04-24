@@ -176,14 +176,28 @@ const extractSnippets = (text: string, query?: string): string[] => {
 
 const isPrivateHost = (hostname: string): boolean => {
   const host = hostname.toLowerCase()
+
+  // Strip IPv6 brackets (e.g. [::1] → ::1)
+  const bare = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host
+
   return (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === '::1' ||
-    host.startsWith('10.') ||
-    host.startsWith('192.168.') ||
-    host.startsWith('169.254.') ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+    // Loopback / unspecified
+    bare === 'localhost' ||
+    bare === '127.0.0.1' ||
+    bare === '0.0.0.0' ||
+    bare === '::' ||
+    bare === '::1' ||
+    // IPv4-mapped IPv6 loopback  ::ffff:127.x.x.x
+    /^::ffff:127\./i.test(bare) ||
+    // IPv4 private ranges
+    bare.startsWith('10.') ||
+    bare.startsWith('192.168.') ||
+    bare.startsWith('169.254.') ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(bare) ||
+    // IPv6 unique-local (fc00::/7 covers fc and fd prefixes)
+    /^f[cd]/i.test(bare) ||
+    // IPv6 link-local (fe80::/10)
+    /^fe[89ab]/i.test(bare)
   )
 }
 
