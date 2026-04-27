@@ -27,6 +27,20 @@ The project is in an active build-out phase: core calculation and operator workf
 - Runtime, storage, API, and service boundaries are documented in [docs/architecture.md](docs/architecture.md).
 - Calculation formulas, fee rules, VAT-base logic, and PHP output rules are documented in [docs/calculation-logic.md](docs/calculation-logic.md).
 
+## Release Notes
+
+### Current Release: v0.3.0
+
+- Added runtime operations controls in Settings with healthy/degraded state visibility.
+- Added runtime source telemetry in Settings: latest source, source type, status, and fetched timestamp.
+- Added manual runtime status refresh action for operators.
+- Hardened runtime settings save/reset workflows with loading and error handling.
+
+Full release details:
+
+- [docs/changelog/v0.3.0.md](docs/changelog/v0.3.0.md)
+- [CHANGELOG.md](CHANGELOG.md)
+
 ## Features
 
 ### Completed
@@ -145,10 +159,6 @@ For issues, feature requests, or contributions:
 1. Document the issue with steps to reproduce
 2. Include relevant HS codes and product details
 3. Test with multiple product categories
-
-## License
-
-MIT
 
 ## Changelog
 
