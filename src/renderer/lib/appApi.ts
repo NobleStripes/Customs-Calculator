@@ -67,6 +67,24 @@ type ShipmentRow = {
   doxStampOthers: number
 }
 
+type BatchResultRow = ShipmentRow & {
+  scheduleCode: string
+  duty: { amount: number; surcharge: number; rate: number; notes?: string }
+  vat: { rate: number; amount: number }
+  costBase: {
+    fob: number; freight: number; insurance: number; taxableValue: number
+    brokerageFee: number; arrastreWharfage: number; doxStampOthers: number; vatBase: number
+  }
+  breakdown: {
+    itemTaxes: { cud: number; vat: number; totalItemTax: number }
+    globalFees: { transitCharge: number; ipc: number; csf: number; cds: number; irs: number; totalGlobalTax: number }
+    totalTaxAndFees: number
+  }
+  totalLandedCost: number
+  calculationCurrency: 'PHP'
+  fx: { applied: boolean; rateToPhp: number; inputCurrency: string; baseCurrency: 'PHP'; source?: string; timestamp?: string }
+}
+
 type ImportPreviewRow = {
   rowNumber: number
   raw: Record<string, unknown>
@@ -658,15 +676,10 @@ const getComplianceRequirementsRemote = async (payload: {
 }) => postApi<{ requiredDocuments: string[]; restrictions: string[]; warnings: string[] }>('/api/compliance/requirements', payload)
 
 const batchCalculateRemote = async (shipments: ShipmentRow[]) =>
-  postApi<Array<Record<string, unknown>>>('/api/calculate/batch', { shipments })
-
-const _previewHSCatalogImportRemote = async (payload: { csvText?: string; contentBase64?: string; fileName?: string; rows?: Record<string, unknown>[] }) =>
-  postApi('/api/import/hs-codes/preview', payload)
-
-const _importHSCatalogRemote = async (payload: Record<string, unknown>) => postApi('/api/import/hs-codes', payload)
+  postApi<BatchResultRow[]>('/api/calculate/batch', { shipments })
 
 const previewTariffImportRemote = async (payload: { csvText?: string; rows?: Record<string, unknown>[] }) =>
-  postApi('/api/import/tariff-rates/preview', payload)
+  postApi<{ totalRows: number; validRows: number; invalidRows: number; rows: ImportPreviewRow[] }>('/api/import/tariff-rates/preview', payload)
 
 const importTariffDataRemote = async (payload: Record<string, unknown>) =>
   postApi<TariffImportSummary>('/api/import/tariff-rates', payload)
@@ -747,7 +760,7 @@ export const appApi = {
     category?: string
     scheduleCode?: string
     limit?: number
-  }) => {
+  }): ApiResponse<Array<{ hsCode: string; scheduleCode: string; description: string; category: string; dutyRate: number; vatRate: number; surchargeRate: number; effectiveDate: string }>> => {
     const remoteResult = await getTariffCatalogRemote(payload || {})
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
@@ -819,7 +832,7 @@ export const appApi = {
     hsCode: string
     value: number
     destination: string
-  }) => {
+  }): ApiResponse<{ requiredDocuments: string[]; restrictions: string[]; warnings: string[] }> => {
     const remoteResult = await getComplianceRequirementsRemote(payload)
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
@@ -838,7 +851,7 @@ export const appApi = {
     toCurrency: string
   }) => getCurrencyConversion(payload.amount, payload.fromCurrency, payload.toCurrency),
 
-  batchCalculate: async (shipments: ShipmentRow[]) => {
+  batchCalculate: async (shipments: ShipmentRow[]): ApiResponse<BatchResultRow[]> => {
     const remoteResult = await batchCalculateRemote(shipments)
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
@@ -934,7 +947,7 @@ export const appApi = {
     }
   },
 
-  previewTariffImport: async (payload: { csvText?: string; rows?: Record<string, unknown>[] }) => {
+  previewTariffImport: async (payload: { csvText?: string; rows?: Record<string, unknown>[] }): ApiResponse<{ totalRows: number; validRows: number; invalidRows: number; rows: ImportPreviewRow[] }> => {
     const remoteResult = await previewTariffImportRemote(payload)
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
@@ -1029,7 +1042,7 @@ export const appApi = {
     return callApi(`/api/fetch-regulatory-updates?${params.toString()}`)
   },
 
-  generateCalculationDocument: async (payload: { formData: CalculationDocumentFormData; results: CalculationDocumentResults; format: 'pdf' | 'word' | 'excel' }) => {
+  generateCalculationDocument: async (payload: { formData: CalculationDocumentFormData; results: CalculationDocumentResults; format: 'pdf' | 'word' | 'excel' }): ApiResponse<{ path: string }> => {
     try {
       const baseFileName = `customs-calculation-${todayDate}`
 

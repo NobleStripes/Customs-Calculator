@@ -148,7 +148,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           </p>
           {results.fx?.applied && (
             <p className="detail fx-note">
-              FX applied: 1 {results.fx.inputCurrency} = {formatNumber(results.fx.rateToPhp)} PHP
+              FX applied: 1 {results.fx.inputCurrency} = {formatNumber(results.fx.rateToPhp ?? 0)} PHP
               {results.fx.source ? ` (${results.fx.source})` : ''}
               {results.fx.timestamp ? ` as of ${new Date(results.fx.timestamp).toLocaleString()}` : ''}
             </p>

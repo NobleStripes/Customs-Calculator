@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Calculator } from './pages/Calculator'
 import { BatchImport } from './pages/BatchImport'
 import { TariffBrowser } from './pages/TariffBrowser'

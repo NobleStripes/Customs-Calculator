@@ -33,11 +33,12 @@ interface CalculationResultsData {
     rate: number
     amount: number
   }
-  compliance: {
+  compliance?: {
     requiredDocuments?: string[]
+    requirements?: string[]
     restrictions?: string[]
     warnings?: string[]
-  } | null
+  }
   costBase: {
     fob: number
     freight: number
@@ -309,12 +310,7 @@ export const Calculator: React.FC = () => {
         destination: formData.destinationPort,
       })
 
-      const complianceData =
-        typeof complianceResult === 'object' &&
-        complianceResult !== null &&
-        'data' in complianceResult
-          ? complianceResult.data ?? null
-          : null
+      const complianceData = complianceResult.data
 
       const brokerageFeePhp = getBrokerageFeePhp(taxableValuePhp)
       const arrastreWharfagePhp = formData.arrastreWharfage
