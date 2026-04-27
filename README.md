@@ -6,6 +6,7 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
 - Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent, and missing tariff rows now fail explicitly instead of silently defaulting to zero.
+- New in 0.3.0: runtime operations controls in Settings, including runtime health state, latest source metadata, manual status refresh, and persisted save/reset behavior.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
 - Automated regulatory fetcher: cron-scheduled job discovers and ingests data files from BOC, BIR, and Tariff Commission pages; all auto-fetched rows go to the human review queue before being applied.
@@ -46,6 +47,7 @@ The project is in an active build-out phase: core calculation and operator workf
 - [x] Browser report export for calculation output
 - [x] HS catalog import pipeline for CSV/XLS sources into `hs_codes`
 - [x] Tariff data ingestion workflow stubbed in the website UI for future admin wiring
+- [x] Runtime settings operations panel (health state, latest source visibility, manual runtime refresh, and robust save/reset persistence)
 
 ### In Progress
 - [ ] Data management/admin UI for tariff source imports and review queue
@@ -57,7 +59,6 @@ The project is in an active build-out phase: core calculation and operator workf
 ### Planned
 - [ ] Automated historical tariff tracking and comparison dashboards
 - [ ] Data import/export tooling improvements (templates, mapping, conflict resolution UX)
-- [ ] Settings management
 - [ ] Offline mode enhancements
 
 ## Setup Instructions
@@ -108,6 +109,7 @@ Use this quick-start when running locally for website development.
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Calculation logic: [docs/calculation-logic.md](docs/calculation-logic.md)
 - Development guide: [docs/development-guide.md](docs/development-guide.md)
+- Changelog index: [CHANGELOG.md](CHANGELOG.md)
 
 ## Detailed Technical Notes
 
@@ -150,31 +152,12 @@ MIT
 
 ## Changelog
 
-### v0.2.0 (Current)
-- Added first-class tariff schedule support across the calculator, tariff browser, tariff import pipeline, batch shipment workflows, and exported calculation documents.
-- Added seeded tariff schedule metadata for MFN plus named FTA agreement options such as AANZFTA, ACFTA, AJCEPA, ATIGA, PJEPA, PH-KR FTA, PH-EFTA FTA variants, and RCEP.
-- Upgraded HS code search reliability with better normalization, ranking, input validation, and stale-result handling.
-- Added server-backed tariff-rate preview/import endpoints and schedule-aware tariff row storage using `schedule_code` on `tariff_rates`.
-- Improved tariff import normalization so percentage-style inputs like `1%` are stored correctly as decimal rates.
-- Added PDF/report output schedule metadata and surfaced schedule context in calculator and batch-import UX.
-- Replaced the vulnerable spreadsheet dependency path with an audit-clean XLSX reader flow for HS catalog imports.
-- Cleaned up backend TypeScript typing so lint, targeted tests, and build now pass cleanly.
-- Fixed silent `calculation_history` data-loss bug (wrong column names in INSERT).
-- Completed automated regulatory fetcher: daily cron job discovers `.csv`/`.xlsx` data files from BOC and Tariff Commission pages and imports them into the review queue.
-- Added rate limiting (10 req/min) to outbound website-fetch endpoints.
-- Unified single-item and batch fee calculations so all brokerage, IPC, CSF, and VAT-base logic runs exclusively server-side.
-- Compliance checker now surfaces a warning when the destination port is not a recognized Philippine port.
+The full changelog has moved out of this README into dedicated release-note files:
 
-### v0.1.0
-- Website-first React + TypeScript runtime
-- Seeded browser app API for calculation workflows
-- Express API for same-origin Customs/BIR/Tariff Commission website fetching
-- Duty and VAT engine with surcharge-aware taxable base
-- Currency conversion with fallback behavior in web mode
-- Ranked HS code search with keyboard navigation support
-- Calculator, Batch Import, and Tariff Browser pages
-- Compliance checks and browser report export
-- Legacy backend ingestion foundation retained for future server-side integration
+- Changelog index: [CHANGELOG.md](CHANGELOG.md)
+- 0.3.0 release notes: [docs/changelog/v0.3.0.md](docs/changelog/v0.3.0.md)
+- 0.2.0 release notes: [docs/changelog/v0.2.0.md](docs/changelog/v0.2.0.md)
+- 0.1.0 release notes: [docs/changelog/v0.1.0.md](docs/changelog/v0.1.0.md)
 
 ---
 

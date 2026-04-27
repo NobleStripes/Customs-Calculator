@@ -28,6 +28,13 @@ const SCHEDULE_OPTIONS = [
   { code: 'RCEP', displayName: 'RCEP' },
 ]
 
+const DEFAULT_SETTINGS = {
+  defaultScheduleCode: 'MFN',
+  defaultOriginCountry: '',
+  autoFetcherEnabled: true,
+  fxCacheTtlHours: 24,
+}
+
 export const Settings: React.FC = () => {
   const { settings, updateSettings, resetSettings } = useSettingsStore()
   const [localSettings, setLocalSettings] = useState(settings)
@@ -39,35 +46,42 @@ export const Settings: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  useEffect(() => {
-    const loadRuntimeState = async () => {
-      setIsRefreshingRuntime(true)
-      setRuntimeError(null)
+  const loadRuntimeState = async () => {
+    setIsRefreshingRuntime(true)
+    setRuntimeError(null)
 
-      try {
-        const [settingsResult, statusResult] = await Promise.all([
-          appApi.getRuntimeSettings(),
-          appApi.getRuntimeStatus(),
-        ])
+    try {
+      const [settingsResult, statusResult] = await Promise.all([
+        appApi.getRuntimeSettings(),
+        appApi.getRuntimeStatus(),
+      ])
 
-        if (settingsResult.success && settingsResult.data) {
-          const loadRuntimeState = async () => {
-          setLatestSource(statusResult.data.latestSource)
-          return
-            setIsRefreshingRuntime(true)
+      if (settingsResult.success && settingsResult.data) {
+        setLocalSettings(settingsResult.data)
+        updateSettings(settingsResult.data)
+      }
 
+      if (statusResult.success && statusResult.data) {
+        setAutoFetcherLastRun(statusResult.data.autoFetcherLastRun)
+        setLatestSource(statusResult.data.latestSource)
+      } else {
         setRuntimeError(statusResult.error || 'Runtime status is temporarily unavailable.')
-            setRuntimeError(null)
-        setRuntimeError('Runtime status is temporarily unavailable.')
-      } finally {
-        setIsRefreshingRuntime(false)
-            try {
-              const [settingsResult, statusResult] = await Promise.all([
-                appApi.getRuntimeSettings(),
-                appApi.getRuntimeStatus(),
-              ])
+      }
+    } catch {
+      setRuntimeError('Runtime status is temporarily unavailable.')
+    } finally {
+      setIsRefreshingRuntime(false)
+    }
+  }
 
-              if (settingsResult.success && settingsResult.data) {
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRuntimeState()
+    // initial load should run once and keep store sync from runtime endpoint
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleSave = async () => {
     setIsSaving(true)
     setSaveError(null)
 
@@ -90,38 +104,15 @@ export const Settings: React.FC = () => {
   }
 
   const handleRefreshRuntime = async () => {
-    setIsRefreshingRuntime(true)
-    setRuntimeError(null)
+    await loadRuntimeState()
+  }
 
-    try {
-      const statusResult = await appApi.getRuntimeStatus()
-      if (statusResult.success && statusResult.data) {
-        setAutoFetcherLastRun(statusResult.data.autoFetcherLastRun)
-        setLatestSource(statusResult.data.latestSource)
-        return
-      }
-
-      setRuntimeError(statusResult.error || 'Runtime status is temporarily unavailable.')
-    } catch {
-      setRuntimeError('Runtime status is temporarily unavailable.')
-    } finally {
-      setIsRefreshingRuntime(false)
-    }
-              if (statusResult.success && statusResult.data) {
-                setAutoFetcherLastRun(statusResult.data.autoFetcherLastRun)
   const handleReset = async () => {
     setIsSaving(true)
     setSaveError(null)
 
-    const defaultSettings = {
-
-              setRuntimeError(statusResult.error || 'Runtime status is temporarily unavailable.')
-            } catch {
-              setRuntimeError('Runtime status is temporarily unavailable.')
-    }
-
     try {
-      const result = await appApi.updateRuntimeSettings(defaultSettings)
+      const result = await appApi.updateRuntimeSettings(DEFAULT_SETTINGS)
       if (!result.success || !result.data) {
         setSaveError(result.error || 'Failed to reset runtime settings.')
         return
@@ -137,7 +128,7 @@ export const Settings: React.FC = () => {
     } finally {
       setIsSaving(false)
     }
-              setIsRefreshingRuntime(false)
+  }
 
   const latestSourceName = typeof latestSource?.source_name === 'string' ? latestSource.source_name : null
   const latestSourceType = typeof latestSource?.source_type === 'string' ? latestSource.source_type : null
@@ -151,95 +142,8 @@ export const Settings: React.FC = () => {
     if (Number.isNaN(date.getTime())) return 'N/A'
     return date.toLocaleString()
   }
-            }
-          }
 
-          void loadRuntimeState()
-
-  const handleReset = () => {
-    resetSettings()
-          setIsSaving(true)
-          setSaveError(null)
-
-          try {
-            const result = await appApi.updateRuntimeSettings(localSettings)
-            if (!result.success || !result.data) {
-              setSaveError(result.error || 'Failed to save runtime settings.')
-              return
-            }
-
-            updateSettings(result.data)
-            setLocalSettings(result.data)
-            setSaved(true)
-            setTimeout(() => setSaved(false), 2500)
-          } catch {
-            setSaveError('Failed to save runtime settings.')
-          } finally {
-            setIsSaving(false)
-          }
-      fxCacheTtlHours: 24,
-    })
-  }
-          setIsRefreshingRuntime(true)
-          setRuntimeError(null)
-
-          try {
-            const statusResult = await appApi.getRuntimeStatus()
-            if (statusResult.success && statusResult.data) {
-              setAutoFetcherLastRun(statusResult.data.autoFetcherLastRun)
-              setLatestSource(statusResult.data.latestSource)
-              return
-            }
-
-            setRuntimeError(statusResult.error || 'Runtime status is temporarily unavailable.')
-          } catch {
-            setRuntimeError('Runtime status is temporarily unavailable.')
-          } finally {
-            setIsRefreshingRuntime(false)
-          }
-        }
-
-        const handleReset = async () => {
-          setIsSaving(true)
-          setSaveError(null)
-
-          const defaultSettings = {
-            defaultScheduleCode: 'MFN',
-            defaultOriginCountry: '',
-            autoFetcherEnabled: true,
-            fxCacheTtlHours: 24,
-          }
-
-          try {
-            const result = await appApi.updateRuntimeSettings(defaultSettings)
-            if (!result.success || !result.data) {
-              setSaveError(result.error || 'Failed to reset runtime settings.')
-              return
-            }
-
-            resetSettings()
-            updateSettings(result.data)
-            setLocalSettings(result.data)
-            setSaved(true)
-            setTimeout(() => setSaved(false), 2500)
-          } catch {
-            setSaveError('Failed to reset runtime settings.')
-          } finally {
-            setIsSaving(false)
-          }
-        }
   return (
-        const latestSourceName = typeof latestSource?.source_name === 'string' ? latestSource.source_name : null
-        const latestSourceType = typeof latestSource?.source_type === 'string' ? latestSource.source_type : null
-        const latestSourceStatus = typeof latestSource?.status === 'string' ? latestSource.status : null
-        const latestSourceFetchedAt = typeof latestSource?.fetched_at === 'string' ? latestSource.fetched_at : null
-        const isRuntimeHealthy = !runtimeError && latestSourceStatus !== 'failed'
-
-        const formatDateTime = (value: string | null): string => {
-          if (!value) return 'N/A'
-          const date = new Date(value)
-          if (Number.isNaN(date.getTime())) return 'N/A'
-          return date.toLocaleString()
     <div className="settings-container">
       <header className="settings-header">
         <h1>Settings</h1>
@@ -258,7 +162,7 @@ export const Settings: React.FC = () => {
               onChange={(e) => setLocalSettings((prev) => ({ ...prev, defaultScheduleCode: e.target.value }))}
             >
               {SCHEDULE_OPTIONS.map((opt) => (
-                <option key={opt.code} value={opt.code}>{`${opt.code} — ${opt.displayName}`}</option>
+                <option key={opt.code} value={opt.code}>{`${opt.code} - ${opt.displayName}`}</option>
               ))}
             </select>
             <p className="settings-hint">Used as the pre-selected schedule on the Calculator page.</p>
@@ -353,30 +257,28 @@ export const Settings: React.FC = () => {
               Disable to pause automatic discovery.
             </p>
           </div>
-                      <button className="btn btn-primary" onClick={() => void handleSave()} disabled={isSaving}>
-                        {isSaving ? 'Saving...' : saved ? '✓ Saved' : 'Save Settings'}
+
+          {autoFetcherLastRun && (
             <p className="settings-last-run">
-                      <button className="btn btn-outline" onClick={() => void handleReset()} disabled={isSaving}>
+              Last auto-fetch run: <strong>{new Date(autoFetcherLastRun).toLocaleString()}</strong>
             </p>
           )}
           {!autoFetcherLastRun && (
-
-                    {saveError && <p className="settings-error">{saveError}</p>}
             <p className="settings-last-run">No auto-fetch records found (server may not have run yet).</p>
           )}
         </section>
 
         <div className="settings-actions">
-          <button className="btn btn-primary" onClick={handleSave}>
-            {saved ? '✓ Saved' : 'Save Settings'}
+          <button className="btn btn-primary" onClick={() => void handleSave()} disabled={isSaving}>
+            {isSaving ? 'Saving...' : saved ? 'Saved' : 'Save Settings'}
           </button>
-                <button className="btn btn-primary" onClick={() => void handleSave()} disabled={isSaving}>
-                  {isSaving ? 'Saving...' : saved ? '✓ Saved' : 'Save Settings'}
+          <button className="btn btn-outline" onClick={() => void handleReset()} disabled={isSaving}>
+            Reset to Defaults
           </button>
-                <button className="btn btn-outline" onClick={() => void handleReset()} disabled={isSaving}>
+        </div>
+
+        {saveError && <p className="settings-error">{saveError}</p>}
       </div>
     </div>
   )
-
-              {saveError && <p className="settings-error">{saveError}</p>}
 }
