@@ -326,6 +326,9 @@ The Express server in `src/server/index.ts` exposes a same-origin API for the br
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | Health check |
+| GET | `/api/runtime-settings` | Get runtime operational settings |
+| PUT | `/api/runtime-settings` | Update runtime operational settings |
+| GET | `/api/runtime-status` | Get runtime status and operational telemetry |
 | GET | `/api/hs-codes/search` | Search HS codes by query string |
 | GET | `/api/hs-codes/resolve` | Resolve a single HS code |
 | GET | `/api/tariff-catalog` | Paginated tariff catalog with schedule filter |
@@ -337,10 +340,10 @@ The Express server in `src/server/index.ts` exposes a same-origin API for the br
 | POST | `/api/calculate/vat` | Calculate VAT |
 | POST | `/api/calculate/batch` | Batch calculation across multiple shipments |
 | POST | `/api/compliance/requirements` | Compliance requirements for a shipment |
+| POST | `/api/import/hs-codes/preview` | Preview HS code import without committing |
+| POST | `/api/import/hs-codes` | Import HS code rows |
 | POST | `/api/import/tariff-rates/preview` | Preview tariff rate import without committing |
 | POST | `/api/import/tariff-rates` | Import tariff rates from CSV/rows |
-| POST | `/api/import/hs-catalog/preview` | Preview HS catalog import without committing |
-| POST | `/api/import/hs-catalog` | Import HS catalog rows |
 | GET | `/api/import-jobs` | List import job records |
 | GET | `/api/import-jobs/:importJobId/pending-review` | List pending review rows for a job |
 | PATCH | `/api/import-jobs/:importJobId/review-rows/:rowId` | Approve or reject a pending review row |

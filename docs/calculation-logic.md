@@ -60,10 +60,24 @@ Surcharge Amount = Taxable Value PHP × Surcharge Rate
 
 ### Brokerage Fee
 
-The current implementation uses the following fixed formula:
+The current implementation uses a tiered brokerage schedule based on taxable value in PHP:
 
 ```text
-Brokerage Fee PHP = ((Taxable Value PHP - 200000) × 0.00125) + 5300
+<= 50,000 PHP      => 1,000
+<= 75,000 PHP      => 1,500
+<= 100,000 PHP     => 2,000
+<= 150,000 PHP     => 2,500
+<= 200,000 PHP     => 3,000
+<= 250,000 PHP     => 3,500
+<= 300,000 PHP     => 4,000
+<= 400,000 PHP     => 4,500
+<= 500,000 PHP     => 5,000
+<= 750,000 PHP     => 5,500
+<= 1,000,000 PHP   => 6,000
+<= 1,500,000 PHP   => 7,000
+<= 2,000,000 PHP   => 8,000
+<= 5,000,000 PHP   => 9,000
+>  5,000,000 PHP   => 10,000
 ```
 
 ## Global Fees
@@ -162,15 +176,15 @@ This example uses the current implemented flow, not the older simplified duty-pl
 Taxable Value PHP = (1000 + 100 + 25) × 56 = 63000.00
 Duty Amount PHP = 63000.00 × 0.05 = 3150.00
 Surcharge Amount PHP = 0.00
-Brokerage Fee PHP = ((63000 - 200000) × 0.00125) + 5300 = 5128.75
+Brokerage Fee PHP = 5000.00
 CSF PHP = 5 USD × 56 = 280.00
 IPC PHP = 750.00
 CDS PHP = 100.00
 IRS PHP = 30.00
 Total Global Fees PHP = 0 + 750 + 280 + 100 + 30 = 1160.00
-VAT Base PHP = 63000 + 3150 + 0 + 5128.75 + 4500 + 265 + 1160 = 77203.75
-VAT Amount PHP = 77203.75 × 0.12 = 9264.45
-Total Landed Cost PHP = 77203.75 + 9264.45 = 86468.20
+VAT Base PHP = 63000 + 3150 + 0 + 5000 + 4500 + 265 + 1160 = 77075.00
+VAT Amount PHP = 77075.00 × 0.12 = 9249.00
+Total Landed Cost PHP = 77075.00 + 9249.00 = 86324.00
 ```
 
 ## Validation Rules
@@ -179,8 +193,9 @@ Total Landed Cost PHP = 77203.75 + 9264.45 = 86468.20
 - Typed HS codes are validated against known tariff rows.
 - Declared FOB value must be greater than 0.
 - Freight and insurance must be numeric when supplied.
-- Destination port is required for compliance checks and reporting.
+- Destination port is required for compliance checks and is normalized to supported Philippine port codes.
 - Unknown tariff codes return handled errors instead of partial silent results.
+- Missing approved tariff rows for the selected HS code and tariff schedule return handled errors instead of defaulting to zero.
 
 ## Output Rules
 
@@ -188,3 +203,4 @@ Total Landed Cost PHP = 77203.75 + 9264.45 = 86468.20
 - FX metadata is retained for traceability.
 - Duties, VAT, brokerage, global fees, VAT base, total tax and fees, and total landed cost are output in PHP.
 - Batch calculations follow the same rule: computed amounts are returned in PHP even when the row input currency is not PHP.
+- Outputs are estimate-only and should be validated against current BOC/BIR requirements before filing.

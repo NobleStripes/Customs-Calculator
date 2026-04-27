@@ -3,14 +3,12 @@ import path from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 let ComplianceCheckerClass: typeof import('./complianceChecker').ComplianceChecker
-let initializeDatabase: typeof import('../db/database').initializeDatabase
 
 beforeAll(async () => {
   process.env.APPDATA = path.join(os.tmpdir(), 'customs-calculator-compliance-vitest')
 
   const databaseModule = await import('../db/database')
   await databaseModule.initializeDatabase()
-  initializeDatabase = databaseModule.initializeDatabase
 
   const complianceModule = await import('./complianceChecker')
   ComplianceCheckerClass = complianceModule.ComplianceChecker
