@@ -64,11 +64,11 @@ Full release details:
 - [x] Runtime settings operations panel (health state, latest source visibility, manual runtime refresh, and robust save/reset persistence)
 
 ### In Progress
-- [ ] Data management/admin UI for tariff source imports and review queue
+- [x] Data management/admin UI for tariff source imports and review queue (single-row and bulk review actions, confidence filtering, and governance summaries)
 - [x] Server-side Customs/BIR/Tariff Commission website fetch proxy
 - [x] Automated cron-scheduled regulatory fetcher (BOC and Tariff Commission; fetched rows queued for human review)
-- [ ] Customs/BIR/Tariff Commission source adapters (HTML/CSV/PDF ingestion and structured extraction)
-- [ ] Tariff source governance views (import status, confidence, and rate change audit)
+- [x] Customs/BIR/Tariff Commission source adapters (HTML table extraction, linked CSV/XLS/XLSX autodetection, and PDF extraction path)
+- [x] Tariff source governance views (import status, confidence, and rate change audit)
 
 ### Planned
 - [ ] Automated historical tariff tracking and comparison dashboards
@@ -139,7 +139,7 @@ Contributor workflows, extension patterns, testing commands, and maintenance not
 ## Known Issues & Limitations
 
 1. **Exchange Rates:** Live rates are fetched from `exchangerate-api.com` (free tier, ~1,500 req/month) and cached for 24 hours in SQLite. Fallback hardcoded rates are used when the API is unavailable.
-2. **Structured Extraction:** The regulatory fetcher discovers and downloads `.csv`/`.xlsx` links from approved government sources and can extract simple HTML tariff tables, but deeper memo/PDF parsing is still incomplete.
+2. **Structured Extraction:** The regulatory fetcher discovers and downloads linked tabular files (`.csv`/`.xls`/`.xlsx`) from approved government sources, extracts structured HTML tariff tables, and includes a PDF extraction path. Deeply formatted/scanned PDF memo parsing may still need source-specific refinements.
 3. **Seeded Data Scope:** The built-in dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage. Import your own tariff schedules via the CSV/XLS import pipeline.
 4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress, though tariff source visibility is now surfaced in the admin page.
 5. **Estimate-Only Output:** The calculator is intended for planning/reference workflows. Verify the final tariff treatment, fees, and documentary requirements with current BOC/BIR issuances before filing.

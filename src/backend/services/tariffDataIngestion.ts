@@ -299,6 +299,78 @@ const normalizeRate = (value: string | number | undefined, fallback: number): nu
   return isPercentInput || numeric > 1 ? numeric / 100 : numeric
 }
 
+const decodePdfLikeText = (pdfBuffer: Buffer): string => {
+  const binary = pdfBuffer.toString('latin1')
+  const textLiterals: string[] = []
+
+  // Extract plain-text PDF text operators where available, e.g. (....) Tj / TJ
+  const textLiteralPattern = /\(([^)]{1,500})\)\s*TJ?/g
+  let match = textLiteralPattern.exec(binary)
+
+  while (match) {
+    const raw = String(match[1] || '')
+      .replace(/\\\(/g, '(')
+      .replace(/\\\)/g, ')')
+      .replace(/\\n/g, ' ')
+      .replace(/\\r/g, ' ')
+      .replace(/\\t/g, ' ')
+      .replace(/\\\\/g, '\\')
+
+    if (raw.trim()) {
+      textLiterals.push(raw)
+    }
+
+    match = textLiteralPattern.exec(binary)
+  }
+
+  if (textLiterals.length > 0) {
+    return textLiterals.join('\n')
+  }
+
+  // Fallback: keep printable ranges only.
+  return binary.replace(/[^\x20-\x7E\r\n\t]+/g, ' ')
+}
+
+const parseTariffRowsFromText = (text: string, sourceUrl: string): TariffImportRow[] => {
+  const rows: TariffImportRow[] = []
+  const seen = new Set<string>()
+
+  const normalizedText = text.replace(/\r/g, '\n').replace(/[\t ]+/g, ' ')
+
+  // Match patterns like "8471.30 ... 5%" or "847130 ... 0.05"
+  const rowPattern = /(\d{4}(?:[.\s]?\d{2}){0,3})[^\n]{0,180}?((?:\d{1,3}(?:\.\d{1,4})?)\s*%?)/g
+
+  let match = rowPattern.exec(normalizedText)
+  while (match) {
+    const hsCode = normalizeHsCode(String(match[1] || '').replace(/\s+/g, ''))
+    const dutyRateRaw = String(match[2] || '').trim()
+
+    const parsedRate = normalizeRate(dutyRateRaw, Number.NaN)
+    if (!Number.isFinite(parsedRate) || parsedRate < 0 || parsedRate > 1) {
+      match = rowPattern.exec(normalizedText)
+      continue
+    }
+
+    const dedupeKey = `${hsCode}:${parsedRate}`
+    if (seen.has(dedupeKey)) {
+      match = rowPattern.exec(normalizedText)
+      continue
+    }
+    seen.add(dedupeKey)
+
+    rows.push({
+      hsCode,
+      dutyRate: dutyRateRaw,
+      notes: `Extracted from PDF source ${sourceUrl}`,
+      confidenceScore: 45,
+    })
+
+    match = rowPattern.exec(normalizedText)
+  }
+
+  return rows
+}
+
 const normalizeHsCode = (hsCode: string): string => {
   const compact = hsCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
 
@@ -485,6 +557,13 @@ export class TariffDataIngestionService {
       description: getFieldValue(row, ['description', 'goodsdescription', 'productdescription', 'commoditydescription', 'commodity_description']),
       category: getFieldValue(row, ['category', 'section', 'chapterdescription', 'chapter_description']) || undefined,
     }))
+  }
+
+  async parsePdfTariffRows(payload: { contentBase64: string; sourceUrl: string }): Promise<TariffImportRow[]> {
+    const buffer = Buffer.from(payload.contentBase64, 'base64')
+    const extractedText = decodePdfLikeText(buffer)
+    const rows = parseTariffRowsFromText(extractedText, payload.sourceUrl)
+    return rows
   }
 
   previewRows(rows: TariffImportRow[]): TariffImportPreviewResult {

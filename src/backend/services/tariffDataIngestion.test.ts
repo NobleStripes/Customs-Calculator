@@ -131,4 +131,25 @@ describe('TariffDataIngestionService', () => {
       service.hasSourceReference('auto-fetch-tariff-rates-boc-tabular', 'https://example.gov.ph/file.csv')
     ).resolves.toBe(true)
   })
+
+  it('extracts tariff rows from PDF-like payload text', async () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const pseudoPdfText = [
+      '%PDF-1.4',
+      '1 0 obj << /Type /Page >> endobj',
+      '(8471.30 Portable computers 5%) Tj',
+      '(8708.30 Brake parts 10%) Tj',
+    ].join('\n')
+
+    const rows = await service.parsePdfTariffRows({
+      contentBase64: Buffer.from(pseudoPdfText, 'utf-8').toString('base64'),
+      sourceUrl: 'https://example.gov.ph/tariff.pdf',
+    })
+
+    expect(rows.length).toBeGreaterThanOrEqual(2)
+    expect(rows.some((row) => row.hsCode === '8471.30')).toBe(true)
+    expect(rows.some((row) => row.hsCode === '8708.30')).toBe(true)
+    expect(rows.every((row) => String(row.notes || '').includes('PDF source'))).toBe(true)
+  })
 })

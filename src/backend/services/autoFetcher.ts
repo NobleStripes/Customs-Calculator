@@ -6,10 +6,26 @@ import { getRuntimeSettings } from './runtimeSettings'
 
 const CRON_SCHEDULE = '0 2 * * *'
 
-const isDataFileUrl = (href: string): boolean => {
-  const lower = href.toLowerCase()
-  return lower.endsWith('.csv') || lower.endsWith('.xlsx') || lower.endsWith('.xls')
+const getFileExtensionFromUrl = (href: string): string => {
+  try {
+    const parsedUrl = new URL(href)
+    const pathSegment = parsedUrl.pathname.split('/').pop() || ''
+    const dotIndex = pathSegment.lastIndexOf('.')
+    return dotIndex >= 0 ? pathSegment.slice(dotIndex + 1).toLowerCase() : ''
+  } catch {
+    const cleanHref = href.split('?')[0].split('#')[0]
+    const pathSegment = cleanHref.split('/').pop() || ''
+    const dotIndex = pathSegment.lastIndexOf('.')
+    return dotIndex >= 0 ? pathSegment.slice(dotIndex + 1).toLowerCase() : ''
+  }
 }
+
+const isTabularDataFileUrl = (href: string): boolean => {
+  const extension = getFileExtensionFromUrl(href)
+  return extension === 'csv' || extension === 'xlsx' || extension === 'xls'
+}
+
+const isPdfFileUrl = (href: string): boolean => getFileExtensionFromUrl(href) === 'pdf'
 
 const getAutoFetchSourceType = (
   kind: 'tariff-rates' | 'hs-catalog',
@@ -34,7 +50,9 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
   for (const update of updates) {
     console.log(`[AutoFetcher] Scanning ${update.url} for data files...`)
 
-    const dataLinks = update.links.filter((link) => isDataFileUrl(link.href))
+    const tabularLinks = update.links.filter((link) => isTabularDataFileUrl(link.href))
+    const pdfLinks = update.links.filter((link) => isPdfFileUrl(link.href))
+    const dataLinks = [...tabularLinks, ...pdfLinks]
 
     if (dataLinks.length === 0) {
       // Attempt HTML table extraction from the page content
@@ -94,12 +112,41 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
       try {
         const tariffSourceType = getAutoFetchSourceType('tariff-rates', source, 'tabular')
         const hsCatalogSourceType = getAutoFetchSourceType('hs-catalog', source, 'tabular')
+        const tariffPdfSourceType = getAutoFetchSourceType('tariff-rates', source, 'pdf')
 
         if (
           await ingestion.hasSourceReference(tariffSourceType, link.href) ||
-          await ingestion.hasSourceReference(hsCatalogSourceType, link.href)
+          await ingestion.hasSourceReference(hsCatalogSourceType, link.href) ||
+          await ingestion.hasSourceReference(tariffPdfSourceType, link.href)
         ) {
           console.log(`[AutoFetcher] Skipping previously imported source ${link.href}`)
+          continue
+        }
+
+        if (isPdfFileUrl(link.href)) {
+          const pdfRows = await ingestion.parsePdfTariffRows({
+            contentBase64,
+            sourceUrl: link.href,
+          })
+
+          if (pdfRows.length === 0) {
+            console.log(`[AutoFetcher] No tariff rows extracted from PDF ${fileName}`)
+            continue
+          }
+
+          const summary = await ingestion.importRows({
+            sourceName: `auto-fetch-pdf:${source}`,
+            sourceType: tariffPdfSourceType,
+            sourceReference: link.href,
+            rows: pdfRows,
+            autoApproveThreshold: 100,
+          })
+
+          console.log(
+            `[AutoFetcher] Imported PDF rows from ${fileName}: ${summary.importedRows} rows imported, ` +
+            `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors`
+          )
+
           continue
         }
 

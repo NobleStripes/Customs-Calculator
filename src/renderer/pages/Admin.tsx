@@ -757,7 +757,7 @@ export const Admin: React.FC = () => {
                 disabled={auditOffset === 0}
                 onClick={() => setAuditOffset((prev) => Math.max(0, prev - PAGE_SIZE))}
               >
-                <- Prev
+                Prev
               </button>
               <span>Page {Math.floor(auditOffset / PAGE_SIZE) + 1}</span>
               <button
@@ -765,7 +765,7 @@ export const Admin: React.FC = () => {
                 disabled={auditRows.length < PAGE_SIZE}
                 onClick={() => setAuditOffset((prev) => prev + PAGE_SIZE)}
               >
-                Next ->
+                Next
               </button>
             </div>
           )}
