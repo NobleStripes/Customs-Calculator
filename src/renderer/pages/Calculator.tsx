@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { HSCodeSearch } from '../components/HSCodeSearch'
 import { CalculationResults } from '../components/CalculationResults'
-import { appApi } from '../lib/appApi'
+import { appApi, type AppHsCodeRow } from '../lib/appApi'
 import { useSettingsStore } from '../lib/settingsStore'
 import './Calculator.css'
 
@@ -136,6 +136,7 @@ export const Calculator: React.FC = () => {
   ])
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyExpanded, setHistoryExpanded] = useState(false)
+  const [selectedLookupRow, setSelectedLookupRow] = useState<AppHsCodeRow | null>(null)
 
   const reloadHistory = async () => {
     try {
@@ -228,6 +229,8 @@ export const Calculator: React.FC = () => {
     let cancelled = false
     const normalizedInput = formData.hsCode.trim()
     const compactInput = normalizedInput.replace(/\./g, '')
+    const selectedLookupMatchesInput =
+      selectedLookupRow?.code.replace(/\./g, '').toUpperCase() === compactInput.toUpperCase()
 
     if (!normalizedInput) {
       return
@@ -247,7 +250,9 @@ export const Calculator: React.FC = () => {
       setHsCodeValidationMessage(
         result.success && result.data
           ? null
-          : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
+          : selectedLookupMatchesInput
+            ? 'Matched an official Tariff Commission Finder result. Calculation will still require an approved local tariff row.'
+            : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
       )
     }, 250)
 
@@ -255,10 +260,11 @@ export const Calculator: React.FC = () => {
       cancelled = true
       clearTimeout(validateHandle)
     }
-  }, [formData.hsCode])
+  }, [formData.hsCode, selectedLookupRow])
 
-  const handleHSCodeSelect = (code: string) => {
+  const handleHSCodeSelect = (code: string, selection?: AppHsCodeRow) => {
     setHsCodeValidationMessage(null)
+    setSelectedLookupRow(selection || null)
     setFormData((prev) => ({ ...prev, hsCode: code }))
   }
 
@@ -272,8 +278,16 @@ export const Calculator: React.FC = () => {
     const resolvedCode = resolvedResult.success ? resolvedResult.data : null
 
     if (!resolvedCode) {
-      setError('Typed HS code does not resolve to a known tariff code. Choose a suggestion or enter a full valid HS code before calculating.')
-      setHsCodeValidationMessage('Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.')
+      setError(
+        selectedLookupRow?.sourceType === 'official-site' || selectedLookupRow?.sourceType === 'official-site-cache'
+          ? 'The official tariff finder matched this HS code, but there is no approved local tariff row for calculation yet. Import or review the tariff data first.'
+          : 'Typed HS code does not resolve to a known tariff code. Choose a suggestion or enter a full valid HS code before calculating.'
+      )
+      setHsCodeValidationMessage(
+        selectedLookupRow?.sourceType === 'official-site' || selectedLookupRow?.sourceType === 'official-site-cache'
+          ? 'Official tariff finder match selected. Calculation still depends on approved local tariff data.'
+          : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
+      )
       return
     }
 
@@ -329,7 +343,15 @@ export const Calculator: React.FC = () => {
       // Refresh history after successful calculation
       reloadHistory()
     } catch (err) {
-      setError(String(err))
+      const errorMessage = String(err)
+      if (
+        (selectedLookupRow?.sourceType === 'official-site' || selectedLookupRow?.sourceType === 'official-site-cache') &&
+        (errorMessage.includes('Unknown HS code') || errorMessage.includes('No approved tariff rate found'))
+      ) {
+        setError('Official tariff finder lookup succeeded, but calculation still requires approved local tariff data for this HS code and schedule.')
+      } else {
+        setError(errorMessage)
+      }
     } finally {
       setLoading(false)
     }

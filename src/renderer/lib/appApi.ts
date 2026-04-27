@@ -1,3 +1,9 @@
+import {
+  FALLBACK_CONFIDENCE_SCORE,
+  LOCAL_CATALOG_CONFIDENCE_SCORE,
+  isCodeLikeQuery,
+} from '../../shared/hsLookupQuery'
+
 type ApiResponse<T> = Promise<{ success: boolean; data?: T; error?: string }>
 
 type DutyResult = {
@@ -27,6 +33,25 @@ type HSCodeRow = {
   code: string
   description: string
   category: string
+  confidence?: number
+  sourceType?: 'local-catalog' | 'local-fallback' | 'official-site' | 'official-site-cache'
+  sourceLabel?: string
+  sourceUrl?: string
+  matchedBy?: 'code' | 'description' | 'mixed'
+  officialDutyRate?: number
+  officialVatRate?: number
+  officialScheduleCode?: string
+}
+
+type LiveHSLookupResponse = {
+  query: string
+  sourceUrl: string
+  status: 'live' | 'cache' | 'fallback'
+  fetchedAt: string
+  cacheExpiresAt: string
+  fallbackUsed: boolean
+  message?: string
+  results: HSCodeRow[]
 }
 
 type TariffRateRow = {
@@ -421,6 +446,60 @@ const searchHSRows = (query: string): HSCodeRow[] => {
     .slice(0, 20)
 }
 
+const createLocalLookupRows = (
+  rows: HSCodeRow[],
+  sourceType: HSCodeRow['sourceType'],
+  sourceLabel: string,
+  query: string
+): HSCodeRow[] => {
+  const fallbackConfidenceScore =
+    sourceType === 'local-fallback'
+      ? FALLBACK_CONFIDENCE_SCORE
+      : LOCAL_CATALOG_CONFIDENCE_SCORE
+
+  return rows.map((row) => ({
+    ...row,
+    sourceType,
+    sourceLabel,
+    sourceUrl: '',
+    confidence: row.confidence ?? fallbackConfidenceScore,
+    matchedBy: isCodeLikeQuery(query) ? 'code' : 'description',
+  }))
+}
+
+const wrapLocalLiveLookupFallback = (
+  query: string,
+  rows: HSCodeRow[],
+  message: string,
+  sourceType: HSCodeRow['sourceType']
+): LiveHSLookupResponse => ({
+  query: query.trim(),
+  sourceUrl: '',
+  status: 'fallback',
+  fetchedAt: new Date().toISOString(),
+  cacheExpiresAt: new Date().toISOString(),
+  fallbackUsed: true,
+  message,
+  results: createLocalLookupRows(
+    rows,
+    sourceType,
+    sourceType === 'local-fallback' ? 'Local browser fallback catalog' : 'Approved local tariff catalog',
+    query
+  ),
+})
+
+const findExactHsMatch = (rows: HSCodeRow[], code: string): HSCodeRow | null => {
+  const normalizedCode = normalizeHSCode(code)
+  const compactCode = normalizedCode.replace(/\./g, '')
+
+  const normalizedMatch = rows.find((row) => normalizeHSCode(row.code) === normalizedCode)
+  if (normalizedMatch) {
+    return normalizedMatch
+  }
+
+  return rows.find((row) => normalizeHSCode(row.code).replace(/\./g, '') === compactCode) || null
+}
+
 const getRequirements = (hsCode: string, value: number): {
   requiredDocuments: string[]
   restrictions: string[]
@@ -686,6 +765,14 @@ const searchHSCodesRemote = async (query: string, limit?: number): ApiResponse<H
   return callApi<HSCodeRow[]>(`/api/hs-codes/search?${params.toString()}`)
 }
 
+const searchLiveHSCodesRemote = async (query: string, limit?: number): ApiResponse<LiveHSLookupResponse> => {
+  const params = new URLSearchParams({ query: query.trim() })
+  if (typeof limit === 'number' && Number.isFinite(limit)) {
+    params.set('limit', String(Math.max(5, Math.min(100, Math.floor(limit)))))
+  }
+  return callApi<LiveHSLookupResponse>(`/api/hs-codes/live-search?${params.toString()}`)
+}
+
 const getTariffCatalogRemote = async (payload: { query?: string; category?: string; scheduleCode?: string; limit?: number }) => {
   const params = new URLSearchParams()
 
@@ -804,11 +891,21 @@ export const appApi = {
 
   resolveHSCode: async (code: string): ApiResponse<HSCodeRow | null> => {
     const remoteResult = await resolveHSCodeRemote(code)
-    if (remoteResult.success) {
+    if (remoteResult.success && remoteResult.data) {
       return remoteResult
     }
 
-    return makeSuccess(resolveKnownHSCode(code))
+    const localMatch = resolveKnownHSCode(code)
+    if (localMatch) {
+      return makeSuccess(localMatch)
+    }
+
+    const liveLookupResult = await appApi.searchLiveHSCodes(code, { limit: 10 })
+    if (liveLookupResult.success && liveLookupResult.data) {
+      return makeSuccess(findExactHsMatch(liveLookupResult.data.results, code))
+    }
+
+    return makeSuccess(null)
   },
 
   searchHSCodes: async (query: string, options?: { limit?: number }): ApiResponse<HSCodeRow[]> => {
@@ -818,6 +915,23 @@ export const appApi = {
     }
 
     return makeSuccess(searchHSRows(query))
+  },
+
+  searchLiveHSCodes: async (query: string, options?: { limit?: number }): ApiResponse<LiveHSLookupResponse> => {
+    const remoteResult = await searchLiveHSCodesRemote(query, options?.limit)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
+    const fallbackRows = searchHSRows(query)
+    return makeSuccess(
+      wrapLocalLiveLookupFallback(
+        query,
+        fallbackRows,
+        remoteResult.error || 'Official tariff lookup is unavailable. Showing local browser fallback results instead.',
+        'local-fallback'
+      )
+    )
   },
 
   getTariffCatalog: async (payload: {
@@ -1234,6 +1348,8 @@ export const appApi = {
 }
 
 export type AppApi = typeof appApi
+export type AppHsCodeRow = HSCodeRow
+export type AppLiveHSLookupResponse = LiveHSLookupResponse
 
 export const hsCodeLookup = {
   normalizeHSCode,

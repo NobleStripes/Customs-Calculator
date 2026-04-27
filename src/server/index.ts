@@ -8,6 +8,12 @@ import { TariffDataIngestionService } from '../backend/services/tariffDataIngest
 import { TariffCalculator } from '../backend/services/tariffCalculator'
 import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { DocumentGenerator } from '../backend/services/documentGenerator'
+import { OfficialHsLookupService } from '../backend/services/officialHsLookup'
+import {
+  FALLBACK_CONFIDENCE_SCORE,
+  LOCAL_CATALOG_CONFIDENCE_SCORE,
+  isCodeLikeQuery,
+} from '../shared/hsLookupQuery'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
 import { startAutoFetching } from '../backend/services/autoFetcher'
 import {
@@ -28,6 +34,7 @@ const tariffDataIngestion = new TariffDataIngestionService()
 const tariffCalculator = new TariffCalculator()
 const currencyConverter = new CurrencyConverter()
 const documentGenerator = new DocumentGenerator()
+const officialHsLookup = new OfficialHsLookupService()
 const port = Number(process.env.PORT || 8787)
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -45,8 +52,6 @@ const fetchLimiter = rateLimit({
 
 const MIN_HS_SEARCH_QUERY_LENGTH = 2
 const MAX_HS_SEARCH_QUERY_LENGTH = 100
-
-const isCodeLikeQuery = (value: string): boolean => /^[\d.]+$/.test(value.trim())
 
 const normalizeScheduleCode = (value: unknown): string => {
   if (typeof value !== 'string') {
@@ -437,6 +442,80 @@ app.get('/api/hs-codes/search', async (request, response) => {
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => {
+  const normalizedQuery = normalizeHsSearchQuery(request.query.query)
+
+  if (!normalizedQuery) {
+    return sendError(
+      response,
+      400,
+      `Query parameter "query" must be code-like with at least 1 character, or text with at least ${MIN_HS_SEARCH_QUERY_LENGTH} characters, and at most ${MAX_HS_SEARCH_QUERY_LENGTH} characters`
+    )
+  }
+
+  try {
+    const lookupResult = await officialHsLookup.search(normalizedQuery)
+
+    if (lookupResult.results.length > 0) {
+      return response.json({
+        success: true,
+        data: {
+          ...lookupResult,
+          fallbackUsed: false,
+          message: lookupResult.status === 'cache'
+            ? 'Showing cached Tariff Commission Finder results.'
+            : 'Showing live Tariff Commission Finder results.',
+        },
+      })
+    }
+
+    const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: 20 })
+    return response.json({
+      success: true,
+      data: {
+        ...lookupResult,
+        status: 'fallback',
+        fallbackUsed: true,
+        message: 'No official Tariff Commission Finder matches were parsed. Showing local catalog results instead.',
+        results: fallbackResults.map((row) => ({
+          ...row,
+          confidence: LOCAL_CATALOG_CONFIDENCE_SCORE,
+          sourceType: 'local-catalog',
+          sourceLabel: 'Approved local tariff catalog',
+          sourceUrl: '',
+          matchedBy: isCodeLikeQuery(normalizedQuery) ? 'code' : 'description',
+        })),
+      },
+    })
+  } catch (error) {
+    try {
+      const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: 20 })
+      return response.json({
+        success: true,
+        data: {
+          query: normalizedQuery,
+          sourceUrl: '',
+          status: 'fallback',
+          fetchedAt: new Date().toISOString(),
+          cacheExpiresAt: new Date().toISOString(),
+          fallbackUsed: true,
+          message: `Official tariff lookup is unavailable. Showing local catalog fallback. ${error instanceof Error ? error.message : String(error)}`,
+          results: fallbackResults.map((row) => ({
+            ...row,
+            confidence: FALLBACK_CONFIDENCE_SCORE,
+            sourceType: 'local-catalog',
+            sourceLabel: 'Approved local tariff catalog',
+            sourceUrl: '',
+            matchedBy: isCodeLikeQuery(normalizedQuery) ? 'code' : 'description',
+          })),
+        },
+      })
+    } catch (fallbackError) {
+      return sendError(response, 502, fallbackError instanceof Error ? fallbackError : String(fallbackError))
+    }
   }
 })
 

@@ -8,6 +8,7 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 - Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent, and missing tariff rows now fail explicitly instead of silently defaulting to zero.
 - New in 0.3.0: runtime operations controls in Settings, including runtime health state, latest source metadata, manual status refresh, and persisted save/reset behavior.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
+- Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions and local fallback results.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
 - Automated regulatory fetcher: cron-scheduled job discovers and ingests data files from BOC, BIR, and Tariff Commission pages; all auto-fetched rows go to the human review queue before being applied.
 - Current focus: admin data-management UI and automated Customs/BIR source adapters.
@@ -54,6 +55,7 @@ Full release details:
 - [x] HS code catalog auto-search by code and description (adaptive code/text query thresholds)
 - [x] HS code search ranking and normalization (supports code searches with/without dots)
 - [x] HS code keyboard navigation (Arrow Up/Down, Enter, Escape)
+- [x] Remote-first official HS lookup suggestions via Tariff Commission Finder, with cached server responses and local fallback
 - [x] Compliance requirement checks by HS code/category/value
 - [x] Calculator page with real-time results and FX context display
 - [x] Batch Import page with CSV parse, preview, calculate, and export
@@ -167,7 +169,8 @@ Contributor workflows, extension patterns, testing commands, and maintenance not
 2. **Structured Extraction:** The regulatory fetcher discovers and downloads linked tabular files (`.csv`/`.xls`/`.xlsx`) from approved government sources, extracts structured HTML tariff tables, and includes a PDF extraction path. Deeply formatted/scanned PDF memo parsing may still need source-specific refinements.
 3. **Seeded Data Scope:** The built-in dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage. Import your own tariff schedules via the CSV/XLS import pipeline.
 4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress, though tariff source visibility is now surfaced in the admin page.
-5. **Estimate-Only Output:** The calculator is intended for planning/reference workflows. Verify the final tariff treatment, fees, and documentary requirements with current BOC/BIR issuances before filing.
+5. **Official Lookup Scope:** Live Tariff Commission Finder matches improve HS code suggestion quality, but calculations still rely on approved local tariff rows unless operators import/review newer tariff data.
+6. **Estimate-Only Output:** The calculator is intended for planning/reference workflows. Verify the final tariff treatment, fees, and documentary requirements with current BOC/BIR issuances before filing.
 
 ## Future Enhancements
 

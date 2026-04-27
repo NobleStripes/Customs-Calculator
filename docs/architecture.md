@@ -39,6 +39,7 @@ customs-calculator/
 │   │   │   └── database.ts        # SQLite setup, migrations, seed sync, duplicate cleanup
 │   │   └── services/
 │   │       ├── tariffCalculator.ts
+│   │       ├── officialHsLookup.ts # Tariff Commission Finder live HS lookup + cache
 │   │       ├── complianceChecker.ts
 │   │       ├── currencyConverter.ts
 │   │       ├── documentGenerator.ts
@@ -220,6 +221,14 @@ CREATE TABLE rate_change_audit (
 - `getHSCodeDetails(code)` resolves exact codes.
 - `getTariffCatalog(query, category, scheduleCode, limit)` returns one latest active approved rate row per HS code for the given schedule.
 
+### `OfficialHsLookupService`
+
+- Targets `https://finder.tariffcommission.gov.ph/search-by-code` as the official lookup page.
+- Uses `ahtn` for code-like searches and `keyword` for text searches.
+- Parses live Tariff Commission Finder HTML into the app HS lookup shape with source metadata and optional official duty/VAT values when present in the page.
+- Caches repeated keystroke lookups server-side for 5 minutes to reduce load on the official website.
+- Search-only in the current rollout: it does not silently persist or apply official-site tariff data to approved tariff tables.
+
 ### `ComplianceChecker`
 
 - `getRequirements(hsCode, value, destination)` returns required documents, restrictions, and warnings.
@@ -293,6 +302,7 @@ The website uses `src/renderer/lib/appApi.ts` as the browser-facing API layer.
 - `calculateVAT`
 - `searchHSCodes`
 - `resolveHSCode`
+- `searchLiveHSCodes`
 - `getTariffCatalog`
 - `getTariffCategories`
 - `getTariffSchedules`
@@ -330,6 +340,7 @@ The Express server in `src/server/index.ts` exposes a same-origin API for the br
 | PUT | `/api/runtime-settings` | Update runtime operational settings |
 | GET | `/api/runtime-status` | Get runtime status and operational telemetry |
 | GET | `/api/hs-codes/search` | Search HS codes by query string |
+| GET | `/api/hs-codes/live-search` | Remote-first HS lookup through Tariff Commission Finder with local fallback |
 | GET | `/api/hs-codes/resolve` | Resolve a single HS code |
 | GET | `/api/tariff-catalog` | Paginated tariff catalog with schedule filter |
 | GET | `/api/tariff-categories` | Distinct HS code categories |
@@ -359,6 +370,8 @@ The Express server in `src/server/index.ts` exposes a same-origin API for the br
 ### Calculator (`Calculator.tsx`)
 
 Single-item duty and VAT calculator. Inputs include HS code, tariff schedule, FOB value, currency, freight, insurance, origin country, destination port, declaration type, and container size. Outputs include full cost breakdown with arrastre/wharfage, brokerage fee, IPC, CSF, CDS, IRS, VAT, and total landed cost.
+
+The calculator’s HS code field now uses remote-first live suggestions from Tariff Commission Finder through the backend, surfaces whether results are live, cached, or local fallback, and still validates final calculation against approved local tariff data.
 
 ### Batch Import (`BatchImport.tsx`)
 
