@@ -11,6 +11,19 @@ export const OFFICIAL_TARIFF_LOOKUP_CONFIG = {
   cacheTtlMs: 5 * 60 * 1000,
 } as const
 
+const TRADE_AGREEMENT_CODES = [
+  'MFN',
+  'AANZFTA',
+  'ACFTA',
+  'AHKFTA',
+  'AIFTA',
+  'AJCEPA',
+  'AKFTA',
+  'ATIGA',
+  'RCEP',
+  'PJEPA',
+]
+
 export type OfficialHsLookupResultSource = 'official-site' | 'official-site-cache'
 
 export interface OfficialHsLookupResult {
@@ -151,7 +164,7 @@ const rankParsedRows = (query: string, rows: ParsedLookupRow[]): ParsedLookupRow
   })
 }
 
-const headerMatchesAnyPattern = (header: string, patterns: RegExp[]): boolean =>
+const matchesAny = (header: string, patterns: RegExp[]): boolean =>
   patterns.some((pattern) => pattern.test(header))
 
 export const extractOfficialHsLookupRows = (
@@ -217,17 +230,17 @@ export const extractOfficialHsLookupRows = (
         }
 
         const hsColIndex = headers.findIndex((header) =>
-          headerMatchesAnyPattern(header, [/\bahtn\b/, /\bhs\b/, /\bhs code\b/, /\bcode\b/, /\bcommodity\b/])
+          matchesAny(header, [/\bahtn\b/, /\bhs\b/, /\bhs code\b/, /\bcode\b/, /\bcommodity\b/])
         )
         const descColIndex = headers.findIndex((header) =>
-          headerMatchesAnyPattern(header, [/\bdescription\b/, /\barticle\b/, /\bproduct\b/])
+          matchesAny(header, [/\bdescription\b/, /\barticle\b/, /\bproduct\b/])
         )
         const dutyColIndex = headers.findIndex((header) =>
-          headerMatchesAnyPattern(header, [/\bduty\b/, /\brate\b/, /\btariff\b/])
+          matchesAny(header, [/\bduty\b/, /\brate\b/, /\btariff\b/])
         )
-        const vatColIndex = headers.findIndex((header) => headerMatchesAnyPattern(header, [/\bvat\b/]))
+        const vatColIndex = headers.findIndex((header) => matchesAny(header, [/\bvat\b/]))
         const scheduleColIndex = headers.findIndex((header) =>
-          headerMatchesAnyPattern(header, [/\bschedule\b/, /\bfta\b/, /\bagreement\b/])
+          matchesAny(header, [/\bschedule\b/, /\bfta\b/, /\bagreement\b/])
         )
 
         const hsValue = hsColIndex >= 0 ? cells[hsColIndex] : cells[0]
@@ -278,13 +291,13 @@ export const extractOfficialHsLookupRows = (
     }
 
     const normalizedCode = normalizeHSCode(matchedCode)
-    const description = normalizeSpaces(
-      block
-        .replace(matchedCode, ' ')
-        .replace(/\b(?:MFN|AANZFTA|ACFTA|AHKFTA|AIFTA|AJCEPA|AKFTA|ATIGA|RCEP|PJEPA)\b/gi, ' ')
-        .replace(/\d{1,3}(?:\.\d{1,4})?\s*%/g, ' ')
-        .replace(/\s+-\s+/g, ' ')
-    )
+        const description = normalizeSpaces(
+          block
+            .replace(matchedCode, ' ')
+            .replace(new RegExp(`\\b(?:${TRADE_AGREEMENT_CODES.join('|')})\\b`, 'gi'), ' ')
+            .replace(/\d{1,3}(?:\.\d{1,4})?\s*%/g, ' ')
+            .replace(/\s+-\s+/g, ' ')
+        )
 
     if (!description) {
       continue

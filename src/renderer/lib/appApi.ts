@@ -492,10 +492,12 @@ const findExactHsMatch = (rows: HSCodeRow[], code: string): HSCodeRow | null => 
   const normalizedCode = normalizeHSCode(code)
   const compactCode = normalizedCode.replace(/\./g, '')
 
-  return rows.find((row) => {
-    const rowCode = normalizeHSCode(row.code)
-    return rowCode === normalizedCode || rowCode.replace(/\./g, '') === compactCode
-  }) || null
+  const normalizedMatch = rows.find((row) => normalizeHSCode(row.code) === normalizedCode)
+  if (normalizedMatch) {
+    return normalizedMatch
+  }
+
+  return rows.find((row) => normalizeHSCode(row.code).replace(/\./g, '') === compactCode) || null
 }
 
 const getRequirements = (hsCode: string, value: number): {
