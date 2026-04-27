@@ -148,12 +148,26 @@ export class TariffCalculator {
     })
   }
 
+  private async requireCurrentTariffRateRow(
+    hsCode: string,
+    fields: string,
+    scheduleCode: string = 'MFN'
+  ): Promise<Record<string, unknown>> {
+    const row = await this.getCurrentTariffRateRow(hsCode, fields, scheduleCode)
+    if (row) {
+      return row
+    }
+
+    const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
+    throw new Error(`No approved tariff rate found for HS code ${hsCode} under schedule ${normalizedScheduleCode}`)
+  }
+
   /**
    * Calculate import duty for a product
    */
   async calculateDuty(value: number, hsCode: string, _originCountry: string, scheduleCode: string = 'MFN'): Promise<DutyResult> {
     try {
-      const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes', scheduleCode) as DutyRateRow | null
+      const row = await this.requireCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes', scheduleCode) as DutyRateRow
 
       const dutyRate = row?.duty_rate || 0
       const surchargeRate = row?.surcharge_rate || 0
@@ -175,7 +189,7 @@ export class TariffCalculator {
    */
   async calculateVAT(dutiableValue: number, hsCode: string, scheduleCode: string = 'MFN'): Promise<VATResult> {
     try {
-      const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes', scheduleCode) as VatRateRow | null
+      const row = await this.requireCurrentTariffRateRow(hsCode, 'vat_rate, notes', scheduleCode) as VatRateRow
       const vatRate = row?.vat_rate || 0.12
 
       return {
@@ -515,4 +529,3 @@ export class TariffCalculator {
     })
   }
 }
-

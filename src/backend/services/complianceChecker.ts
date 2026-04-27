@@ -1,4 +1,5 @@
 import { getDatabase } from '../db/database'
+import { PHILIPPINE_PORT_CODES, normalizeDestinationPort } from './customsRules'
 
 type ComplianceRuleRow = {
   required_documents?: string | null
@@ -27,49 +28,6 @@ export interface ComplianceRequirement {
 export class ComplianceChecker {
   private db = getDatabase()
 
-  /**
-   * Get compliance requirements for a product
-   */
-  // Full list of BOC-designated Philippine ports of entry
-  private static readonly PH_PORT_CODES = new Set([
-    // Metro Manila / Luzon
-    'MNL',  // Manila (Port of Manila)
-    'NAIA', // Ninoy Aquino International Airport
-    'SFS',  // Subic Bay Freeport (Clark Freeport also uses SFS area)
-    'SUB',  // Subic
-    'CLA',  // Clark
-    'BAT',  // Batangas
-    'LEG',  // Legazpi (Legaspi)
-    'SAN',  // San Fernando, La Union
-    'CAL',  // Calamba
-    'OLO',  // Olo / Bataan
-    // Visayas
-    'CEB',  // Cebu
-    'ILO',  // Iloilo
-    'BAC',  // Bacolod
-    'TAC',  // Tacloban
-    'OZM',  // Ozamiz
-    'CBO',  // Cotabato
-    'TGN',  // Tagbilaran
-    'DUM',  // Dumaguete
-    'RXS',  // Roxas City
-    // Mindanao
-    'DVO',  // Davao
-    'CGY',  // Cagayan de Oro
-    'ZAM',  // Zamboanga
-    'GEN',  // General Santos
-    'IAO',  // Siargao
-    'BXU',  // Butuan
-    'CDO',  // Cagayan de Oro alternate
-    'SUG',  // Surigao
-    'DAP',  // Dapitan
-    'KOT',  // Cotabato alt
-    // Other international entry
-    'PPS',  // Puerto Princesa (Palawan)
-    'CYP',  // Calayan
-    'LGP',  // Legaspi alt
-  ])
-
   async getRequirements(
     hsCode: string,
     value: number,
@@ -80,8 +38,8 @@ export class ComplianceChecker {
       const restrictions: string[] = []
       const warnings: string[] = []
 
-      const normalizedDest = destination.trim().toUpperCase()
-      if (normalizedDest && !ComplianceChecker.PH_PORT_CODES.has(normalizedDest)) {
+      const normalizedDest = normalizeDestinationPort(destination)
+      if (normalizedDest && !PHILIPPINE_PORT_CODES.has(normalizedDest)) {
         warnings.push('Compliance rules are calibrated for Philippine import — verify requirements for other destinations')
       }
 
@@ -269,4 +227,3 @@ export class ComplianceChecker {
     })
   }
 }
-

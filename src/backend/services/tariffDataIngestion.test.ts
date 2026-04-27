@@ -97,4 +97,38 @@ describe('TariffDataIngestionService', () => {
       },
     ])
   })
+
+  it('parses tariff rows from workbook uploads and detects duplicate source references', async () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const rows = await service.parseTariffRows({
+      rows: [
+        {
+          hs_code: '8471.30',
+          duty_rate: '5%',
+          vat_rate: '12%',
+          schedule_code: 'MFN',
+        },
+      ],
+    })
+
+    expect(rows[0]).toMatchObject({
+      hsCode: '8471.30',
+      dutyRate: '5%',
+      vatRate: '12%',
+      scheduleCode: 'MFN',
+    })
+
+    await service.importRows({
+      sourceName: 'Duplicate Reference Test',
+      sourceType: 'auto-fetch-tariff-rates-boc-tabular',
+      sourceReference: 'https://example.gov.ph/file.csv',
+      rows,
+      forceApprove: true,
+    })
+
+    await expect(
+      service.hasSourceReference('auto-fetch-tariff-rates-boc-tabular', 'https://example.gov.ph/file.csv')
+    ).resolves.toBe(true)
+  })
 })

@@ -105,4 +105,12 @@ describe('TariffCalculator.searchHSCodes', () => {
       )
     ).toBe(true)
   })
+
+  it('throws a handled error when a selected tariff schedule has no approved row', async () => {
+    const tariffCalculator = new TariffCalculatorClass()
+
+    await expect(
+      tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'NON-EXISTENT')
+    ).rejects.toThrow('No approved tariff rate found')
+  })
 })

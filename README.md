@@ -5,10 +5,10 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 ## Quick Summary
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
-- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent.
+- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent, and missing tariff rows now fail explicitly instead of silently defaulting to zero.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
-- Automated regulatory fetcher: cron-scheduled job discovers and ingests data files from BOC and Tariff Commission pages; all auto-fetched rows go to the human review queue before being applied.
+- Automated regulatory fetcher: cron-scheduled job discovers and ingests data files from BOC, BIR, and Tariff Commission pages; all auto-fetched rows go to the human review queue before being applied.
 - Current focus: admin data-management UI and automated Customs/BIR source adapters.
 
 ## Project Overview
@@ -123,10 +123,10 @@ Contributor workflows, extension patterns, testing commands, and maintenance not
 ## Known Issues & Limitations
 
 1. **Exchange Rates:** Live rates are fetched from `exchangerate-api.com` (free tier, ~1,500 req/month) and cached for 24 hours in SQLite. Fallback hardcoded rates are used when the API is unavailable.
-2. **Structured Extraction:** The regulatory fetcher discovers and downloads `.csv`/`.xlsx` links from BOC/Tariff Commission pages; unstructured HTML content is not yet parsed into tariff rows.
+2. **Structured Extraction:** The regulatory fetcher discovers and downloads `.csv`/`.xlsx` links from approved government sources and can extract simple HTML tariff tables, but deeper memo/PDF parsing is still incomplete.
 3. **Seeded Data Scope:** The built-in dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage. Import your own tariff schedules via the CSV/XLS import pipeline.
-4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress.
-5. **Brokerage Fee Formula:** The current brokerage calculation uses a simplified linear formula. Verify against the current BOC brokerage schedule before filing.
+4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress, though tariff source visibility is now surfaced in the admin page.
+5. **Estimate-Only Output:** The calculator is intended for planning/reference workflows. Verify the final tariff treatment, fees, and documentary requirements with current BOC/BIR issuances before filing.
 
 ## Future Enhancements
 

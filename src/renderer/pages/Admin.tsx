@@ -39,7 +39,17 @@ type AuditEntry = {
   changed_at: string
 }
 
-type Tab = 'review' | 'jobs' | 'audit'
+type TariffSource = {
+  id: number
+  source_name: string
+  source_type: string
+  source_reference: string | null
+  status: string
+  fetched_at: string
+  imported_at: string | null
+}
+
+type Tab = 'review' | 'jobs' | 'audit' | 'sources'
 
 const formatPct = (v: number | null): string =>
   v !== null ? `${(v * 100).toFixed(2)}%` : '—'
@@ -68,6 +78,9 @@ export const Admin: React.FC = () => {
   // Import Jobs state
   const [jobsLoading, setJobsLoading] = useState(false)
   const [jobsError, setJobsError] = useState<string | null>(null)
+  const [sources, setSources] = useState<TariffSource[]>([])
+  const [sourcesLoading, setSourcesLoading] = useState(false)
+  const [sourcesError, setSourcesError] = useState<string | null>(null)
 
   // Audit state
   const [auditRows, setAuditRows] = useState<AuditEntry[]>([])
@@ -121,15 +134,43 @@ export const Admin: React.FC = () => {
     }
   }, [])
 
-  useEffect(() => {
-    loadJobs()
-  }, [loadJobs])
+  const loadSources = useCallback(async () => {
+    setSourcesLoading(true)
+    setSourcesError(null)
+    try {
+      const result = await appApi.getTariffSources(50)
+      if (result.success && result.data) {
+        setSources(result.data as TariffSource[])
+      }
+    } catch (err) {
+      setSourcesError(String(err))
+    } finally {
+      setSourcesLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    if (tab === 'audit') {
-      loadAudit(auditHsFilter, auditOffset)
-    }
-  }, [tab, auditHsFilter, auditOffset, loadAudit])
+    const handle = setTimeout(() => {
+      void loadJobs()
+      void loadSources()
+    }, 0)
+
+    return () => clearTimeout(handle)
+  }, [loadJobs, loadSources])
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      if (tab === 'audit') {
+        void loadAudit(auditHsFilter, auditOffset)
+      }
+
+      if (tab === 'sources') {
+        void loadSources()
+      }
+    }, 0)
+
+    return () => clearTimeout(handle)
+  }, [tab, auditHsFilter, auditOffset, loadAudit, loadSources])
 
   const handleSelectJob = (jobId: number) => {
     setSelectedJobId(jobId)
@@ -170,6 +211,9 @@ export const Admin: React.FC = () => {
         </button>
         <button className={`admin-tab ${tab === 'audit' ? 'active' : ''}`} onClick={() => setTab('audit')}>
           Rate Change Audit
+        </button>
+        <button className={`admin-tab ${tab === 'sources' ? 'active' : ''}`} onClick={() => setTab('sources')}>
+          Tariff Sources
         </button>
       </div>
 
@@ -394,6 +438,42 @@ export const Admin: React.FC = () => {
               >
                 Next →
               </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'sources' && (
+        <div className="admin-panel">
+          {sourcesError && <div className="admin-error">{sourcesError}</div>}
+          {sourcesLoading && <p className="admin-loading">Loading tariff sources...</p>}
+          {!sourcesLoading && sources.length === 0 && <p className="admin-empty">No tariff sources found.</p>}
+          {!sourcesLoading && sources.length > 0 && (
+            <div className="table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Source</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Reference</th>
+                    <th>Fetched</th>
+                    <th>Imported</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sources.map((source) => (
+                    <tr key={source.id}>
+                      <td>{source.source_name}</td>
+                      <td>{source.source_type}</td>
+                      <td>{source.status}</td>
+                      <td>{source.source_reference || '—'}</td>
+                      <td>{formatDate(source.fetched_at)}</td>
+                      <td>{source.imported_at ? formatDate(source.imported_at) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

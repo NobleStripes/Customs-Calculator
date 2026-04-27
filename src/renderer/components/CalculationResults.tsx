@@ -174,7 +174,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
             {formatCurrency(costBase.brokerageFee || 0, calculationCurrency)}
           </p>
           <p className="detail">
-            Formula: (Taxable Value in Peso - 200,000) x 0.00125 + 5,300
+            Tiered BOC brokerage schedule based on taxable value in PHP
           </p>
         </div>
 
@@ -226,7 +226,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
             </div>
           </div>
           <p className="detail breakdown-note">
-            Taxable Value (PHP) uses FOB + Freight + Insurance. VAT Base equals the landed-cost base before VAT. CSF uses USD 5 for 20-foot containers and USD 10 for 40-foot containers. IPC, CSF, CDS, and IRS are treated as global taxes.
+            Taxable Value (PHP) uses FOB + Freight + Insurance. VAT Base equals the landed-cost base before VAT. CSF uses USD 5 for 20-foot containers and USD 10 for 40-foot containers. IPC, CSF, CDS, and IRS are treated as global taxes. Estimates should still be validated with BOC before filing.
           </p>
         </div>
 

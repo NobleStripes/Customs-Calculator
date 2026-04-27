@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { HSCodeSearch } from '../components/HSCodeSearch'
 import { CalculationResults } from '../components/CalculationResults'
 import { appApi } from '../lib/appApi'
+import { useSettingsStore } from '../lib/settingsStore'
 import './Calculator.css'
 
 interface CalculationPayload {
@@ -104,20 +105,21 @@ const formatCurrency = (amount: number, currency = 'PHP') =>
   }).format(amount)
 
 export const Calculator: React.FC = () => {
-  const [formData, setFormData] = useState<CalculationPayload>({
+  const settings = useSettingsStore((state) => state.settings)
+  const [formData, setFormData] = useState<CalculationPayload>(() => ({
     value: 0,
     freight: 0,
     insurance: 0,
     hsCode: '',
-    scheduleCode: 'MFN',
-    originCountry: '',
-    destinationPort: 'MNL', // Manila by default
+    scheduleCode: settings.defaultScheduleCode || 'MFN',
+    originCountry: settings.defaultOriginCountry || '',
+    destinationPort: 'MNL',
     currency: 'USD',
     containerSize: '20ft',
     arrastreWharfage: 0,
     doxStampOthers: 0,
     declarationType: 'consumption',
-  })
+  }))
 
   const [results, setResults] = useState<CalculationResultsData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -147,7 +149,11 @@ export const Calculator: React.FC = () => {
   }
 
   useEffect(() => {
-    reloadHistory()
+    const handle = setTimeout(() => {
+      void reloadHistory()
+    }, 0)
+
+    return () => clearTimeout(handle)
   }, [])
 
   useEffect(() => {
@@ -285,6 +291,7 @@ export const Calculator: React.FC = () => {
         freight: formData.freight,
         insurance: formData.insurance,
         originCountry: formData.originCountry,
+        destinationPort: formData.destinationPort,
         currency: formData.currency,
         declarationType: formData.declarationType,
         containerSize: formData.containerSize,
@@ -333,6 +340,7 @@ export const Calculator: React.FC = () => {
       <header className="calculator-header">
         <h1>Customs Duty Calculator</h1>
         <p>Calculate import duties, VAT, and compliance requirements</p>
+        <p>Estimate only — validate rates, fees, and documentary requirements with BOC before filing.</p>
       </header>
 
       <div className="calculator-grid">
@@ -499,13 +507,13 @@ export const Calculator: React.FC = () => {
                   }
                 >
                   <option value="MNL">Manila (MNL)</option>
-                  <option value="CEBU">Cebu (CEBU)</option>
-                  <option value="DAVAO">Davao (DAVAO)</option>
-                  <option value="ILOILO">Iloilo (ILOILO)</option>
-                  <option value="SUBIC">Subic (SUBIC)</option>
-                </select>
+                    <option value="CEB">Cebu (CEB)</option>
+                    <option value="DVO">Davao (DVO)</option>
+                    <option value="ILO">Iloilo (ILO)</option>
+                    <option value="SUB">Subic (SUB)</option>
+                  </select>
+                </div>
               </div>
-            </div>
 
             <div className="form-row">
               <div className="form-group">
