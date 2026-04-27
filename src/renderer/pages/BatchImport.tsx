@@ -103,8 +103,7 @@ const parseCsvText = (input: string): { rows: ShipmentRow[]; columnWarnings: str
   const hasHeader =
     firstRowParts.includes('hscode') ||
     firstRowParts.includes('hs_code') ||
-    firstRowParts.includes('value') ||
-    firstRowParts.includes('hscode')
+    firstRowParts.includes('value')
 
   const columnWarnings = hasHeader ? detectMissingColumns(lines[0]) : []
   const dataLines = hasHeader ? lines.slice(1) : lines

@@ -1050,7 +1050,7 @@ export class TariffDataIngestionService {
         const dutyRaw = $(cells[dutyColIndex]).text().trim()
 
         const compactHs = hsRaw.replace(/[^0-9]/g, '')
-        if (compactHs.length < 4 || !HS_CODE_PATTERN.test(hsRaw.replace(/\s/g, ''))) {
+        if (compactHs.length < 4 || !HS_CODE_PATTERN.test(compactHs)) {
           return
         }
 
