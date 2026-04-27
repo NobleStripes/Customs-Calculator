@@ -5,9 +5,10 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 ## Quick Summary
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
-- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP.
+- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
+- Automated regulatory fetcher: cron-scheduled job discovers and ingests data files from BOC and Tariff Commission pages; all auto-fetched rows go to the human review queue before being applied.
 - Current focus: admin data-management UI and automated Customs/BIR source adapters.
 
 ## Project Overview
@@ -49,6 +50,7 @@ The project is in an active build-out phase: core calculation and operator workf
 ### In Progress
 - [ ] Data management/admin UI for tariff source imports and review queue
 - [x] Server-side Customs/BIR/Tariff Commission website fetch proxy
+- [x] Automated cron-scheduled regulatory fetcher (BOC and Tariff Commission; fetched rows queued for human review)
 - [ ] Customs/BIR/Tariff Commission source adapters (HTML/CSV/PDF ingestion and structured extraction)
 - [ ] Tariff source governance views (import status, confidence, and rate change audit)
 
@@ -120,10 +122,11 @@ Contributor workflows, extension patterns, testing commands, and maintenance not
 
 ## Known Issues & Limitations
 
-1. **Exchange Rates:** Current website mode uses fallback FX data; live-rate refresh is part of the future server-side phase.
-2. **Structured Extraction:** The current proxy returns sanitized page content and discovery results, but not issuer-specific structured parsing yet.
-3. **Seeded Data Scope:** The current browser dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage.
+1. **Exchange Rates:** Live rates are fetched from `exchangerate-api.com` (free tier, ~1,500 req/month) and cached for 24 hours in SQLite. Fallback hardcoded rates are used when the API is unavailable.
+2. **Structured Extraction:** The regulatory fetcher discovers and downloads `.csv`/`.xlsx` links from BOC/Tariff Commission pages; unstructured HTML content is not yet parsed into tariff rows.
+3. **Seeded Data Scope:** The built-in dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage. Import your own tariff schedules via the CSV/XLS import pipeline.
 4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress.
+5. **Brokerage Fee Formula:** The current brokerage calculation uses a simplified linear formula. Verify against the current BOC brokerage schedule before filing.
 
 ## Future Enhancements
 
@@ -156,6 +159,11 @@ MIT
 - Added PDF/report output schedule metadata and surfaced schedule context in calculator and batch-import UX.
 - Replaced the vulnerable spreadsheet dependency path with an audit-clean XLSX reader flow for HS catalog imports.
 - Cleaned up backend TypeScript typing so lint, targeted tests, and build now pass cleanly.
+- Fixed silent `calculation_history` data-loss bug (wrong column names in INSERT).
+- Completed automated regulatory fetcher: daily cron job discovers `.csv`/`.xlsx` data files from BOC and Tariff Commission pages and imports them into the review queue.
+- Added rate limiting (10 req/min) to outbound website-fetch endpoints.
+- Unified single-item and batch fee calculations so all brokerage, IPC, CSF, and VAT-base logic runs exclusively server-side.
+- Compliance checker now surfaces a warning when the destination port is not a recognized Philippine port.
 
 ### v0.1.0
 - Website-first React + TypeScript runtime
@@ -170,4 +178,4 @@ MIT
 
 ---
 
-**Last Updated:** April 23, 2026
+**Last Updated:** April 27, 2026
