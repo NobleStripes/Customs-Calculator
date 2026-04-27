@@ -1,34 +1,85 @@
-import { WebsiteFetcherService, RegulatorySource } from './websiteFetcher'
+import axios from 'axios'
 import cron from 'node-cron'
+import { WebsiteFetcherService, type RegulatorySource } from './websiteFetcher'
+import { TariffDataIngestionService } from './tariffDataIngestion'
 
-// Schedule: every day at 2am
 const CRON_SCHEDULE = '0 2 * * *'
 
-const fetchAndIngest = async (source: RegulatorySource) => {
-  const fetcher = new WebsiteFetcherService()
-  try {
-    console.log(`[AutoFetcher] Fetching updates for ${source}...`)
-    const updates = await fetcher.fetchRegulatoryUpdates(source)
-    for (const update of updates) {
-      // TODO: Parse update.textContent and map to tariff/compliance data
-      // Example: await importTariffData(parsedRows, { sourceName: source, sourceReference: update.url })
-      console.log(`[AutoFetcher] Fetched from ${update.url} (title: ${update.title})`)
-    }
-    console.log(`[AutoFetcher] Completed fetching for ${source}`)
-  } catch (err) {
-    console.error(`[AutoFetcher] Error fetching for ${source}:`, err)
-  }
+const isDataFileUrl = (href: string): boolean => {
+  const lower = href.toLowerCase()
+  return lower.endsWith('.csv') || lower.endsWith('.xlsx') || lower.endsWith('.xls')
 }
 
-export const startAutoFetching = () => {
+const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
+  const fetcher = new WebsiteFetcherService()
+  const ingestion = new TariffDataIngestionService()
+
+  console.log(`[AutoFetcher] Starting fetch for ${source}...`)
+
+  let updates
+  try {
+    updates = await fetcher.fetchRegulatoryUpdates(source)
+  } catch (err) {
+    console.error(`[AutoFetcher] Failed to fetch regulatory updates for ${source}:`, err)
+    return
+  }
+
+  for (const update of updates) {
+    console.log(`[AutoFetcher] Scanning ${update.url} for data files...`)
+
+    const dataLinks = update.links.filter((link) => isDataFileUrl(link.href))
+    if (dataLinks.length === 0) {
+      console.log(`[AutoFetcher] No data files found on ${update.url}`)
+      continue
+    }
+
+    for (const link of dataLinks) {
+      const fileName = link.href.split('/').pop() || link.href
+      console.log(`[AutoFetcher] Downloading ${fileName} from ${link.href}`)
+
+      let contentBase64: string
+      try {
+        const fileResponse = await axios.get<ArrayBuffer>(link.href, {
+          responseType: 'arraybuffer',
+          timeout: 15000,
+        })
+        contentBase64 = Buffer.from(fileResponse.data).toString('base64')
+      } catch (err) {
+        console.warn(`[AutoFetcher] Could not download ${link.href}:`, err)
+        continue
+      }
+
+      try {
+        const rows = await ingestion.parseHSCatalogRows({ contentBase64, fileName })
+        if (rows.length === 0) {
+          console.log(`[AutoFetcher] No rows parsed from ${fileName}`)
+          continue
+        }
+
+        const summary = await ingestion.importHSCatalog({
+          sourceName: `auto-fetch:${source}`,
+          sourceType: 'auto-fetch',
+          sourceReference: link.href,
+          rows,
+        })
+
+        console.log(
+          `[AutoFetcher] Imported ${fileName}: ${summary.importedRows} rows imported, ` +
+          `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors`
+        )
+      } catch (err) {
+        console.error(`[AutoFetcher] Import failed for ${fileName}:`, err)
+      }
+    }
+  }
+
+  console.log(`[AutoFetcher] Completed fetch for ${source}`)
+}
+
+export const startAutoFetching = (): void => {
   cron.schedule(CRON_SCHEDULE, async () => {
     await fetchAndIngest('boc')
-    // Add more sources as needed
+    await fetchAndIngest('tariff-commission')
   })
-  console.log(`[AutoFetcher] Scheduled auto-fetching with cron: ${CRON_SCHEDULE}`)
-}
-
-// For manual run (dev/testing)
-if (require.main === module) {
-  startAutoFetching()
+  console.log(`[AutoFetcher] Scheduled with cron: ${CRON_SCHEDULE}`)
 }

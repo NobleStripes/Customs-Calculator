@@ -1,4 +1,5 @@
 import express from 'express'
+import rateLimit from 'express-rate-limit'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { initializeDatabase } from '../backend/db/database'
@@ -8,6 +9,7 @@ import { TariffCalculator } from '../backend/services/tariffCalculator'
 import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { DocumentGenerator } from '../backend/services/documentGenerator'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
+import { startAutoFetching } from '../backend/services/autoFetcher'
 
 const app = express()
 const websiteFetcher = new WebsiteFetcherService()
@@ -44,6 +46,14 @@ const getContainerSecurityFeeUsd = (containerSize: string): number => {
 
 const getBrokerageFeePhp = (taxableValuePhp: number): number =>
   ((taxableValuePhp - 200000) * 0.00125) + 5300
+
+const fetchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests — try again in a minute' },
+})
 
 const MIN_HS_SEARCH_QUERY_LENGTH = 2
 const MAX_HS_SEARCH_QUERY_LENGTH = 100
@@ -475,7 +485,7 @@ app.get('/api/currency/rate', async (request, response) => {
   }
 })
 
-app.get('/api/fetch-website-content', async (request, response) => {
+app.get('/api/fetch-website-content', fetchLimiter, async (request, response) => {
   const { url, query } = request.query
 
   if (typeof url !== 'string' || !url.trim()) {
@@ -494,7 +504,7 @@ app.get('/api/fetch-website-content', async (request, response) => {
   }
 })
 
-app.get('/api/fetch-regulatory-updates', async (request, response) => {
+app.get('/api/fetch-regulatory-updates', fetchLimiter, async (request, response) => {
   const { source, query } = request.query
 
   if (typeof source !== 'string' || !regulatorySources.has(source as RegulatorySource)) {
@@ -544,6 +554,7 @@ app.get('*', (_request, response) => {
 const startServer = async () => {
   await initializeDatabase()
   currencyConverter.clearOldCache()
+  startAutoFetching()
 
   app.listen(port, () => {
     console.log(`Customs Calculator server listening on http://127.0.0.1:${port}`)
