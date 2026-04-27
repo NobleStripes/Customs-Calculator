@@ -2,8 +2,8 @@ import React from 'react'
 import './Sidebar.css'
 
 interface SidebarProps {
-  currentPage: 'calculator' | 'batch' | 'tariff-browser'
-  onPageChange: (page: 'calculator' | 'batch' | 'tariff-browser') => void
+  currentPage: 'calculator' | 'batch' | 'tariff-browser' | 'admin' | 'settings'
+  onPageChange: (page: 'calculator' | 'batch' | 'tariff-browser' | 'admin' | 'settings') => void
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onPageChange }) => {
@@ -38,10 +38,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onPageChange }) =
           <span className="icon">🗂️</span>
           <span>Tariff Browser</span>
         </button>
+
+        <button
+          className={`nav-item ${currentPage === 'admin' ? 'active' : ''}`}
+          onClick={() => onPageChange('admin')}
+        >
+          <span className="icon">🛠️</span>
+          <span>Admin</span>
+        </button>
+
+        <button
+          className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
+          onClick={() => onPageChange('settings')}
+        >
+          <span className="icon">⚙️</span>
+          <span>Settings</span>
+        </button>
       </nav>
 
       <div className="sidebar-footer">
-        <p className="version">v0.1.0</p>
+        <p className="version">v0.3.0</p>
       </div>
     </aside>
   )

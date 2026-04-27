@@ -806,4 +806,269 @@ export class TariffDataIngestionService {
       [importJobId]
     )
   }
+
+  async approveReviewRow(importJobId: number, rowId: number, notes?: string): Promise<void> {
+    const row = await get<{
+      id: number
+      source_id: number
+      normalized_payload: string | null
+      confidence_score: number
+    }>(
+      'SELECT id, source_id, normalized_payload, confidence_score FROM extracted_rows_review WHERE id = ? AND import_job_id = ?',
+      [rowId, importJobId]
+    )
+
+    if (!row) {
+      throw new Error(`Review row ${rowId} not found for job ${importJobId}`)
+    }
+
+    if (!row.normalized_payload) {
+      throw new Error(`Review row ${rowId} has no normalized payload and cannot be approved`)
+    }
+
+    let normalized: {
+      hsCode: string
+      scheduleCode: string
+      description: string
+      category: string
+      dutyRate: number
+      vatRate: number
+      surchargeRate: number
+      effectiveDate: string
+      endDate: string | null
+      notes: string
+      confidenceScore: number
+    }
+
+    try {
+      normalized = JSON.parse(row.normalized_payload)
+    } catch {
+      throw new Error(`Review row ${rowId} has invalid normalized payload JSON`)
+    }
+
+    await run(
+      'INSERT OR IGNORE INTO hs_codes (code, description, category) VALUES (?, ?, ?)',
+      [normalized.hsCode, normalized.description, normalized.category]
+    )
+
+    const existingRate = await get<{
+      id: number
+      duty_rate: number
+      vat_rate: number
+      surcharge_rate: number
+    }>(
+      `SELECT id, duty_rate, vat_rate, surcharge_rate
+       FROM tariff_rates
+       WHERE hs_code = ? AND COALESCE(schedule_code, 'MFN') = ? AND (end_date IS NULL OR end_date > date('now'))
+       ORDER BY effective_date DESC LIMIT 1`,
+      [normalized.hsCode, normalized.scheduleCode]
+    )
+
+    if (existingRate) {
+      await run('UPDATE tariff_rates SET end_date = ?, last_modified_at = CURRENT_TIMESTAMP WHERE id = ?', [
+        normalized.effectiveDate,
+        existingRate.id,
+      ])
+    }
+
+    await run(
+      `INSERT INTO tariff_rates
+       (hs_code, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date, end_date, notes, source_id, confidence_score, import_status, last_modified_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', CURRENT_TIMESTAMP)`,
+      [
+        normalized.hsCode,
+        normalized.scheduleCode,
+        normalized.dutyRate,
+        normalized.vatRate,
+        normalized.surchargeRate,
+        normalized.effectiveDate,
+        normalized.endDate,
+        normalized.notes,
+        row.source_id,
+        normalized.confidenceScore,
+      ]
+    )
+
+    await run(
+      `INSERT INTO rate_change_audit
+       (hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate, old_surcharge_rate, new_surcharge_rate, reason, source_id, import_job_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        normalized.hsCode,
+        existingRate?.duty_rate ?? null,
+        normalized.dutyRate,
+        existingRate?.vat_rate ?? null,
+        normalized.vatRate,
+        existingRate?.surcharge_rate ?? null,
+        normalized.surchargeRate,
+        `Manual review approval (${normalized.scheduleCode})`,
+        row.source_id,
+        importJobId,
+      ]
+    )
+
+    await run(
+      `UPDATE extracted_rows_review
+       SET review_status = 'approved', review_notes = ?, reviewed_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [notes ?? null, rowId]
+    )
+  }
+
+  async rejectReviewRow(importJobId: number, rowId: number, notes?: string): Promise<void> {
+    const exists = await get<{ id: number }>(
+      'SELECT id FROM extracted_rows_review WHERE id = ? AND import_job_id = ?',
+      [rowId, importJobId]
+    )
+
+    if (!exists) {
+      throw new Error(`Review row ${rowId} not found for job ${importJobId}`)
+    }
+
+    await run(
+      `UPDATE extracted_rows_review
+       SET review_status = 'rejected', review_notes = ?, reviewed_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [notes ?? null, rowId]
+    )
+  }
+
+  async getRateChangeAudit(hsCode?: string, limit: number = 50, offset: number = 0): Promise<Array<{
+    id: number
+    hs_code: string
+    old_duty_rate: number | null
+    new_duty_rate: number | null
+    old_vat_rate: number | null
+    new_vat_rate: number | null
+    old_surcharge_rate: number | null
+    new_surcharge_rate: number | null
+    reason: string | null
+    source_id: number | null
+    import_job_id: number | null
+    changed_at: string
+  }>> {
+    if (hsCode) {
+      return all(
+        `SELECT id, hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate,
+                old_surcharge_rate, new_surcharge_rate, reason, source_id, import_job_id, changed_at
+         FROM rate_change_audit
+         WHERE hs_code = ?
+         ORDER BY changed_at DESC
+         LIMIT ? OFFSET ?`,
+        [hsCode, limit, offset]
+      )
+    }
+
+    return all(
+      `SELECT id, hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate,
+              old_surcharge_rate, new_surcharge_rate, reason, source_id, import_job_id, changed_at
+       FROM rate_change_audit
+       ORDER BY changed_at DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    )
+  }
+
+  async getTariffSources(limit: number = 50): Promise<Array<{
+    id: number
+    source_name: string
+    source_type: string
+    source_reference: string | null
+    status: string
+    fetched_at: string
+    imported_at: string | null
+    notes: string | null
+    created_at: string
+  }>> {
+    return all(
+      `SELECT id, source_name, source_type, source_reference, status, fetched_at, imported_at, notes, created_at
+       FROM tariff_sources
+       ORDER BY fetched_at DESC
+       LIMIT ?`,
+      [limit]
+    )
+  }
+
+  async getCalculationHistory(limit: number = 50): Promise<Array<{
+    id: number
+    hs_code: string
+    value: number
+    currency: string
+    duty_amount: number
+    vat_amount: number
+    total_landed_cost: number
+    created_at: string
+  }>> {
+    return all(
+      `SELECT id, hs_code, value, currency, duty_amount, vat_amount, total_landed_cost, created_at
+       FROM calculation_history
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      [limit]
+    )
+  }
+
+  async parseHtmlTables(htmlContent: string, sourceUrl: string): Promise<{
+    rows: TariffImportRow[]
+    confidence: number
+  }> {
+    const { load } = await import('cheerio')
+    const $ = load(htmlContent)
+    const extractedRows: TariffImportRow[] = []
+
+    const HS_CODE_PATTERN = /^\d{4}[\.\d]*$/
+
+    $('table').each((_tableIndex, tableEl) => {
+      const headers: string[] = []
+
+      $(tableEl).find('thead tr th, thead tr td').each((_i, el) => {
+        headers.push($(el).text().trim().toLowerCase())
+      })
+
+      if (headers.length === 0) {
+        $(tableEl).find('tr').first().find('th, td').each((_i, el) => {
+          headers.push($(el).text().trim().toLowerCase())
+        })
+      }
+
+      const hsColIndex = headers.findIndex((h) =>
+        h.includes('hs') || h.includes('tariff') || h.includes('code') || h.includes('commodity')
+      )
+      const dutyColIndex = headers.findIndex((h) =>
+        h.includes('duty') || h.includes('rate') || h.includes('%')
+      )
+
+      if (hsColIndex < 0 || dutyColIndex < 0) {
+        return
+      }
+
+      $(tableEl).find('tbody tr, tr').each((_rowIndex, rowEl) => {
+        const cells = $(rowEl).find('td')
+        if (cells.length === 0) return
+
+        const hsRaw = $(cells[hsColIndex]).text().trim()
+        const dutyRaw = $(cells[dutyColIndex]).text().trim()
+
+        const compactHs = hsRaw.replace(/[^0-9]/g, '')
+        if (compactHs.length < 4 || !HS_CODE_PATTERN.test(hsRaw.replace(/\s/g, ''))) {
+          return
+        }
+
+        const descColIndex = headers.findIndex((h) => h.includes('desc'))
+        const description = descColIndex >= 0 ? $(cells[descColIndex]).text().trim() : undefined
+
+        extractedRows.push({
+          hsCode: hsRaw,
+          dutyRate: dutyRaw,
+          description: description || undefined,
+          notes: `Extracted from HTML table at ${sourceUrl}`,
+        })
+      })
+    })
+
+    return {
+      rows: extractedRows,
+      confidence: 60,
+    }
+  }
 }

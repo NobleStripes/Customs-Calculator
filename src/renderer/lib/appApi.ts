@@ -267,8 +267,24 @@ const getContainerSecurityFeeUsd = (containerSize: ShipmentRow['containerSize'])
   return 0
 }
 
-const getBrokerageFeePhp = (taxableValuePhp: number): number =>
-  ((taxableValuePhp - 200000) * 0.00125) + 5300
+const getBrokerageFeePhp = (taxableValuePhp: number): number => {
+  // Tiered schedule based on BOC CMO 11-2014 brokerage fee schedule
+  if (taxableValuePhp <= 50000) return 1000
+  if (taxableValuePhp <= 75000) return 1500
+  if (taxableValuePhp <= 100000) return 2000
+  if (taxableValuePhp <= 150000) return 2500
+  if (taxableValuePhp <= 200000) return 3000
+  if (taxableValuePhp <= 250000) return 3500
+  if (taxableValuePhp <= 300000) return 4000
+  if (taxableValuePhp <= 400000) return 4500
+  if (taxableValuePhp <= 500000) return 5000
+  if (taxableValuePhp <= 750000) return 5500
+  if (taxableValuePhp <= 1000000) return 6000
+  if (taxableValuePhp <= 1500000) return 7000
+  if (taxableValuePhp <= 2000000) return 8000
+  if (taxableValuePhp <= 5000000) return 9000
+  return 10000
+}
 
 const importJobs: Array<Record<string, unknown>> = []
 const pendingReviewRows: Record<number, Array<Record<string, unknown>>> = {}
@@ -1065,6 +1081,41 @@ export const appApi = {
     } catch (error) {
       return makeError(error)
     }
+  },
+
+  getCalculationHistory: async (limit: number = 50) => {
+    const remoteResult = await callApi<Array<Record<string, unknown>>>(`/api/calculation-history?limit=${limit}`)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+    return makeSuccess([])
+  },
+
+  getTariffSources: async (limit: number = 50) => {
+    const remoteResult = await callApi<Array<Record<string, unknown>>>(`/api/tariff-sources?limit=${limit}`)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+    return makeSuccess([])
+  },
+
+  getRateChangeAudit: async (payload: { hsCode?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams()
+    if (payload.hsCode?.trim()) params.set('hs_code', payload.hsCode.trim())
+    if (typeof payload.limit === 'number') params.set('limit', String(payload.limit))
+    if (typeof payload.offset === 'number') params.set('offset', String(payload.offset))
+    const remoteResult = await callApi<Array<Record<string, unknown>>>(`/api/rate-change-audit?${params.toString()}`)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+    return makeSuccess([])
+  },
+
+  reviewRow: async (payload: { importJobId: number; rowId: number; action: 'approve' | 'reject'; notes?: string }) => {
+    return callApi<undefined>(`/api/import-jobs/${payload.importJobId}/review-rows/${payload.rowId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: payload.action, notes: payload.notes }),
+    })
   },
 }
 

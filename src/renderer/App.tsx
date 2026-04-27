@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { Calculator } from './pages/Calculator'
 import { BatchImport } from './pages/BatchImport'
 import { TariffBrowser } from './pages/TariffBrowser'
+import { Admin } from './pages/Admin'
+import { Settings } from './pages/Settings'
 import { Sidebar } from './components/Sidebar'
 import { appApi } from './lib/appApi'
 import './App.css'
@@ -9,7 +11,7 @@ import './App.css'
 function App() {
   const [initialized, setInitialized] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [currentPage, setCurrentPage] = useState<'calculator' | 'batch' | 'tariff-browser'>('calculator')
+  const [currentPage, setCurrentPage] = useState<'calculator' | 'batch' | 'tariff-browser' | 'admin' | 'settings'>('calculator')
 
   useEffect(() => {
     const initApp = async () => {
@@ -52,6 +54,8 @@ function App() {
         {currentPage === 'calculator' && <Calculator />}
         {currentPage === 'batch' && <BatchImport />}
         {currentPage === 'tariff-browser' && <TariffBrowser />}
+        {currentPage === 'admin' && <Admin />}
+        {currentPage === 'settings' && <Settings />}
       </main>
     </div>
   )

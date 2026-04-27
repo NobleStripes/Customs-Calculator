@@ -28,8 +28,37 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
     console.log(`[AutoFetcher] Scanning ${update.url} for data files...`)
 
     const dataLinks = update.links.filter((link) => isDataFileUrl(link.href))
+
     if (dataLinks.length === 0) {
-      console.log(`[AutoFetcher] No data files found on ${update.url}`)
+      // Attempt HTML table extraction from the page content
+      if (update.rawHtml) {
+        console.log(`[AutoFetcher] No data files found on ${update.url} — attempting HTML table extraction`)
+        try {
+          const { rows, confidence } = await ingestion.parseHtmlTables(update.rawHtml, update.url)
+          if (rows.length === 0) {
+            console.log(`[AutoFetcher] No HS-code/rate tables found in HTML on ${update.url}`)
+            continue
+          }
+
+          const rowsWithConfidence = rows.map((r) => ({ ...r, confidenceScore: confidence }))
+          const summary = await ingestion.importRows({
+            sourceName: `auto-fetch-html:${source}`,
+            sourceType: 'auto-fetch-html',
+            sourceReference: update.url,
+            rows: rowsWithConfidence,
+            autoApproveThreshold: 100,
+          })
+
+          console.log(
+            `[AutoFetcher] HTML import for ${update.url}: ${summary.importedRows} imported, ` +
+            `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors`
+          )
+        } catch (err) {
+          console.error(`[AutoFetcher] HTML table extraction failed for ${update.url}:`, err)
+        }
+      } else {
+        console.log(`[AutoFetcher] No data files found on ${update.url}`)
+      }
       continue
     }
 
