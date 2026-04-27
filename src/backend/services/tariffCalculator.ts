@@ -52,12 +52,6 @@ type HSCodeLookupRow = {
   category: string
 }
 
-type TariffsByCategoryRow = {
-  hs_code: string
-  duty_rate: number
-  vat_rate: number
-}
-
 type TariffCatalogDbRow = {
   hs_code: string
   schedule_code: string
@@ -312,40 +306,6 @@ export class TariffCalculator {
   }
 
   /**
-   * Get all tariff rates for a product category
-   */
-  getTariffsByCategory(category: string, scheduleCode: string = 'MFN'): Promise<Array<{ hs_code: string; duty_rate: number; vat_rate: number }>> {
-    return new Promise((resolve, reject) => {
-      const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
-      const sql = `
-        SELECT DISTINCT tr.hs_code, tr.duty_rate, tr.vat_rate
-        FROM tariff_rates tr
-        JOIN hs_codes hc ON tr.hs_code = hc.code
-        WHERE hc.category = ? AND tr.effective_date <= date('now')
-        AND COALESCE(tr.schedule_code, 'MFN') = ?
-        AND (tr.end_date IS NULL OR tr.end_date > date('now'))
-        ORDER BY tr.hs_code
-      `
-
-      this.db.all(sql, [category, normalizedScheduleCode], (err, rows: TariffsByCategoryRow[]) => {
-        if (err) {
-          console.error('Error fetching tariffs by category:', err)
-          reject(new Error(`Failed to fetch tariffs: ${err.message}`))
-          return
-        }
-
-        resolve(
-          rows?.map((r) => ({
-            hs_code: r.hs_code,
-            duty_rate: r.duty_rate,
-            vat_rate: r.vat_rate,
-          })) || []
-        )
-      })
-    })
-  }
-
-  /**
    * Get tariff catalog rows for browser view
    */
   getTariffCatalog(
@@ -492,26 +452,24 @@ export class TariffCalculator {
    */
   saveCalculationHistory(data: {
     hsCode: string
-    productValue: number
+    value: number
     currency: string
-    originCountry: string
     dutyAmount: number
     vatAmount: number
     totalLandedCost: number
   }): void {
     const sql = `
       INSERT INTO calculation_history
-      (hs_code, product_value, currency, origin_country, duty_amount, vat_amount, total_landed_cost)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      (hs_code, value, currency, duty_amount, vat_amount, total_landed_cost)
+      VALUES (?, ?, ?, ?, ?, ?)
     `
 
     this.db.run(
       sql,
       [
         data.hsCode,
-        data.productValue,
+        data.value,
         data.currency,
-        data.originCountry,
         data.dutyAmount,
         data.vatAmount,
         data.totalLandedCost,

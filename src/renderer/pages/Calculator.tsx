@@ -81,29 +81,6 @@ type TariffScheduleOption = {
   displayName: string
 }
 
-const TRANSIT_CHARGE_PHP = 1000
-const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
-const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
-const VAT_RATE = 0.12
-
-const getContainerSecurityFeeUsd = (containerSize: CalculationPayload['containerSize']): number => {
-  if (containerSize === '40ft') return 10
-  if (containerSize === '20ft') return 5
-  return 0
-}
-
-const getBrokerageFeePhp = (taxableValuePhp: number): number =>
-  ((taxableValuePhp - 200000) * 0.00125) + 5300
-
-const getImportProcessingChargePhp = (dutiableValuePhp: number): number => {
-  if (dutiableValuePhp <= 25000) return 250
-  if (dutiableValuePhp <= 50000) return 500
-  if (dutiableValuePhp <= 250000) return 750
-  if (dutiableValuePhp <= 500000) return 1000
-  if (dutiableValuePhp <= 750000) return 1500
-  return 2000
-}
-
 export const Calculator: React.FC = () => {
   const [formData, setFormData] = useState<CalculationPayload>({
     value: 0,
@@ -255,151 +232,53 @@ export const Calculator: React.FC = () => {
       return
     }
 
+    const canonicalHsCode = resolvedCode.code
+    setFormData((prev) => ({ ...prev, hsCode: canonicalHsCode }))
     setLoading(true)
     setError(null)
     setHsCodeValidationMessage(null)
 
     try {
-      const canonicalHsCode = resolvedCode.code
-      setFormData((prev) => ({ ...prev, hsCode: canonicalHsCode }))
-      let taxableValuePhp = formData.value + formData.freight + formData.insurance
-      let fxRateToPhp = 1
-      const inputCurrency = formData.currency.toUpperCase()
-
-      if (inputCurrency !== 'PHP') {
-        const conversionResult = await appApi.convertCurrency({
-          amount: formData.value + formData.freight + formData.insurance,
-          fromCurrency: inputCurrency,
-          toCurrency: 'PHP',
-        })
-
-        if (!conversionResult.success || !conversionResult.data) {
-          throw new Error(conversionResult.error || 'Currency conversion failed')
-        }
-
-        taxableValuePhp = conversionResult.data.convertedAmount
-        fxRateToPhp = conversionResult.data.rate
-      }
-
-      // Calculate duty
-      const dutyResult = await appApi.calculateDuty({
-        value: taxableValuePhp,
+      const batchResult = await appApi.batchCalculate([{
         hsCode: canonicalHsCode,
-        originCountry: formData.originCountry,
         scheduleCode: formData.scheduleCode,
-      })
+        value: formData.value,
+        freight: formData.freight,
+        insurance: formData.insurance,
+        originCountry: formData.originCountry,
+        currency: formData.currency,
+        declarationType: formData.declarationType,
+        containerSize: formData.containerSize,
+        arrastreWharfage: formData.arrastreWharfage,
+        doxStampOthers: formData.doxStampOthers,
+      }])
 
-      if (!dutyResult.success) {
-        throw new Error(dutyResult.error)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const batchResultAny = batchResult as any
+      if (!batchResultAny.success || !batchResultAny.data?.[0]) {
+        throw new Error(batchResultAny.error || 'Calculation returned no data')
       }
 
-      if (!dutyResult.data) {
-        throw new Error('Duty calculation returned no data')
-      }
-
-      const dutyData = dutyResult.data
-
-      const dutyAmount = dutyData.amount
-      const surchargeAmount = dutyData.surcharge || 0
-
-      // Get compliance requirements
-      const complianceResult = await appApi.getComplianceRequirements({
-        hsCode: canonicalHsCode,
-        value: taxableValuePhp,
-        destination: formData.destinationPort,
-      })
-
-      const complianceData =
-        typeof complianceResult === 'object' &&
-        complianceResult !== null &&
-        'data' in complianceResult
-          ? complianceResult.data ?? null
-          : null
-
-      const brokerageFeePhp = getBrokerageFeePhp(taxableValuePhp)
-      const arrastreWharfagePhp = formData.arrastreWharfage
-      const doxStampOthersPhp = formData.doxStampOthers
-      const csfUsd = getContainerSecurityFeeUsd(formData.containerSize)
-      let csfPhp = 0
-
-      if (csfUsd > 0) {
-        const csfConversion = await appApi.convertCurrency({
-          amount: csfUsd,
-          fromCurrency: 'USD',
-          toCurrency: 'PHP',
-        })
-
-        if (!csfConversion.success || !csfConversion.data) {
-          throw new Error(csfConversion.error || 'CSF conversion failed')
-        }
-
-        csfPhp = csfConversion.data.convertedAmount
-      }
-
-      const transitChargePhp = formData.declarationType === 'transit' ? TRANSIT_CHARGE_PHP : 0
-      const ipcPhp = formData.declarationType === 'transit' ? 250 : getImportProcessingChargePhp(taxableValuePhp)
-      const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
-      const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
-      const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp
-      const vatBasePhp =
-        taxableValuePhp +
-        dutyAmount +
-        surchargeAmount +
-        brokerageFeePhp +
-        arrastreWharfagePhp +
-        doxStampOthersPhp +
-        totalGlobalFeesPhp
-      const vatAmountPhp = vatBasePhp * VAT_RATE
-      const totalTaxAndFeesPhp = dutyAmount + vatAmountPhp + totalGlobalFeesPhp
-
+      const r = batchResultAny.data[0]
       setResults({
-        duty: {
-          ...dutyData,
-          amount: dutyAmount,
-          surcharge: surchargeAmount,
-        },
-        tariff: {
-          scheduleCode: formData.scheduleCode,
-        },
-        vat: {
-          rate: VAT_RATE * 100,
-          amount: vatAmountPhp,
-        },
-        compliance: complianceData,
+        duty: r.duty,
+        tariff: { scheduleCode: r.scheduleCode },
+        vat: r.vat,
+        compliance: r.compliance,
         costBase: {
           fob: formData.value,
           freight: formData.freight,
           insurance: formData.insurance,
-          taxableValue: taxableValuePhp,
-          brokerageFee: brokerageFeePhp,
-          arrastreWharfage: arrastreWharfagePhp,
-          doxStampOthers: doxStampOthersPhp,
-          vatBase: vatBasePhp,
+          taxableValue: r.costBase.taxableValue,
+          brokerageFee: r.costBase.brokerageFee,
+          arrastreWharfage: r.costBase.arrastreWharfage,
+          doxStampOthers: r.costBase.doxStampOthers,
+          vatBase: r.costBase.vatBase,
         },
-        breakdown: {
-          itemTaxes: {
-            cud: dutyAmount,
-            vat: vatAmountPhp,
-            totalItemTax: dutyAmount + vatAmountPhp,
-          },
-          globalFees: {
-            transitCharge: transitChargePhp,
-            ipc: ipcPhp,
-            csf: csfPhp,
-            cds: cdsPhp,
-            irs: irsPhp,
-            totalGlobalTax: totalGlobalFeesPhp,
-          },
-          totalTaxAndFees: totalTaxAndFeesPhp,
-        },
-        totalLandedCost: vatBasePhp + vatAmountPhp,
+        breakdown: r.breakdown,
+        totalLandedCost: r.totalLandedCost,
         calculationCurrency: 'PHP',
-        fx: {
-          applied: inputCurrency !== 'PHP',
-          rateToPhp: fxRateToPhp,
-          inputCurrency,
-          baseCurrency: 'PHP',
-        },
+        fx: r.fx,
       })
     } catch (err) {
       setError(String(err))
