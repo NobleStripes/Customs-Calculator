@@ -30,15 +30,24 @@ export class ComplianceChecker {
   /**
    * Get compliance requirements for a product
    */
+  private static readonly PH_PORT_CODES = new Set([
+    'MNL', 'CEB', 'DVO', 'ILO', 'CGY', 'ZAM', 'GEN', 'BAT', 'SFS', 'SUB',
+  ])
+
   async getRequirements(
     hsCode: string,
     value: number,
-    _destination: string
+    destination: string
   ): Promise<ComplianceRequirement> {
     return new Promise((resolve) => {
       const requiredDocuments: string[] = []
       const restrictions: string[] = []
       const warnings: string[] = []
+
+      const normalizedDest = destination.trim().toUpperCase()
+      if (normalizedDest && !ComplianceChecker.PH_PORT_CODES.has(normalizedDest)) {
+        warnings.push('Compliance rules are calibrated for Philippine import — verify requirements for other destinations')
+      }
 
       // Get compliance rules for this HS code
       this.db.get(
