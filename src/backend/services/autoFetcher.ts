@@ -2,6 +2,7 @@ import axios from 'axios'
 import cron from 'node-cron'
 import { WebsiteFetcherService, type RegulatorySource } from './websiteFetcher'
 import { TariffDataIngestionService } from './tariffDataIngestion'
+import { getRuntimeSettings } from './runtimeSettings'
 
 const CRON_SCHEDULE = '0 2 * * *'
 
@@ -9,6 +10,12 @@ const isDataFileUrl = (href: string): boolean => {
   const lower = href.toLowerCase()
   return lower.endsWith('.csv') || lower.endsWith('.xlsx') || lower.endsWith('.xls')
 }
+
+const getAutoFetchSourceType = (
+  kind: 'tariff-rates' | 'hs-catalog',
+  source: RegulatorySource,
+  method: 'html' | 'tabular'
+): string => `auto-fetch-${kind}-${source}-${method}`
 
 const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
   const fetcher = new WebsiteFetcherService()
@@ -41,9 +48,15 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
           }
 
           const rowsWithConfidence = rows.map((r) => ({ ...r, confidenceScore: confidence }))
+          const sourceType = getAutoFetchSourceType('tariff-rates', source, 'html')
+          if (await ingestion.hasSourceReference(sourceType, update.url)) {
+            console.log(`[AutoFetcher] Skipping previously imported HTML source ${update.url}`)
+            continue
+          }
+
           const summary = await ingestion.importRows({
             sourceName: `auto-fetch-html:${source}`,
-            sourceType: 'auto-fetch-html',
+            sourceType,
             sourceReference: update.url,
             rows: rowsWithConfidence,
             autoApproveThreshold: 100,
@@ -79,6 +92,38 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
       }
 
       try {
+        const tariffSourceType = getAutoFetchSourceType('tariff-rates', source, 'tabular')
+        const hsCatalogSourceType = getAutoFetchSourceType('hs-catalog', source, 'tabular')
+
+        if (
+          await ingestion.hasSourceReference(tariffSourceType, link.href) ||
+          await ingestion.hasSourceReference(hsCatalogSourceType, link.href)
+        ) {
+          console.log(`[AutoFetcher] Skipping previously imported source ${link.href}`)
+          continue
+        }
+
+        const tariffRows = await ingestion.parseTariffRows({ contentBase64, fileName })
+        const tariffPreview = ingestion.previewRows(tariffRows)
+        if (tariffPreview.validRows > 0) {
+          const summary = await ingestion.importRows({
+            sourceName: `auto-fetch:${source}`,
+            sourceType: tariffSourceType,
+            sourceReference: link.href,
+            rows: tariffRows.map((row) => ({
+              ...row,
+              notes: [row.notes, `Auto-fetched from ${link.href}`].filter(Boolean).join(' | '),
+            })),
+            autoApproveThreshold: 100,
+          })
+
+          console.log(
+            `[AutoFetcher] Imported tariff rows from ${fileName}: ${summary.importedRows} rows imported, ` +
+            `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors`
+          )
+          continue
+        }
+
         const rows = await ingestion.parseHSCatalogRows({ contentBase64, fileName })
         if (rows.length === 0) {
           console.log(`[AutoFetcher] No rows parsed from ${fileName}`)
@@ -87,7 +132,7 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
 
         const summary = await ingestion.importHSCatalog({
           sourceName: `auto-fetch:${source}`,
-          sourceType: 'auto-fetch',
+          sourceType: hsCatalogSourceType,
           sourceReference: link.href,
           rows,
         })
@@ -107,7 +152,13 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
 
 export const startAutoFetching = (): void => {
   cron.schedule(CRON_SCHEDULE, async () => {
+    if (!getRuntimeSettings().autoFetcherEnabled) {
+      console.log('[AutoFetcher] Skipping scheduled run because runtime settings disabled it')
+      return
+    }
+
     await fetchAndIngest('boc')
+    await fetchAndIngest('bir')
     await fetchAndIngest('tariff-commission')
   })
   console.log(`[AutoFetcher] Scheduled with cron: ${CRON_SCHEDULE}`)

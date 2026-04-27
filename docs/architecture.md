@@ -273,6 +273,9 @@ The Express server in `src/server/index.ts` exposes a same-origin API for the br
 - `GET /api/hs-codes/resolve`
 - `GET /api/tariff-catalog`
 - `GET /api/tariff-categories`
+- `GET /api/runtime-settings`
+- `PUT /api/runtime-settings`
+- `GET /api/runtime-status`
 - `GET /api/currency/convert?amount=...&from=USD&to=PHP`
 - `GET /api/currency/rate?from=USD&to=PHP`
 - `POST /api/import/hs-codes/preview`

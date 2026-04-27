@@ -4,14 +4,12 @@ import { beforeAll, describe, expect, it, vi, afterEach } from 'vitest'
 import axios from 'axios'
 
 let CurrencyConverterClass: typeof import('./currencyConverter').CurrencyConverter
-let initializeDatabase: typeof import('../db/database').initializeDatabase
 
 beforeAll(async () => {
   process.env.APPDATA = path.join(os.tmpdir(), 'customs-calculator-currency-vitest')
 
   const databaseModule = await import('../db/database')
   await databaseModule.initializeDatabase()
-  initializeDatabase = databaseModule.initializeDatabase
 
   const converterModule = await import('./currencyConverter')
   CurrencyConverterClass = converterModule.CurrencyConverter

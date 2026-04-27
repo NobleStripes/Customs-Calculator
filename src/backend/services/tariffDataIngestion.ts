@@ -208,6 +208,22 @@ const getFieldValue = (row: Record<string, unknown>, aliases: string[]): string 
   return ''
 }
 
+const mapTabularRecordToTariffImportRow = (row: Record<string, unknown>): TariffImportRow => ({
+  hsCode: getFieldValue(row, ['hscode', 'hs_code', 'code']),
+  scheduleCode: getFieldValue(row, ['schedulecode', 'schedule_code', 'tariffschedule', 'tariff_schedule', 'schedule']) || undefined,
+  description: getFieldValue(row, ['description', 'goodsdescription', 'productdescription']) || undefined,
+  category: getFieldValue(row, ['category', 'section', 'chapterdescription']) || undefined,
+  dutyRate: getFieldValue(row, ['dutyrate', 'dutyratepercent', 'duty_rate', 'duty']) || '',
+  vatRate: getFieldValue(row, ['vatrate', 'vat_rate', 'vat']) || undefined,
+  surchargeRate: getFieldValue(row, ['surchargerate', 'surcharge_rate', 'surcharge']) || undefined,
+  effectiveDate: getFieldValue(row, ['effectivedate', 'effective_date']) || undefined,
+  endDate: getFieldValue(row, ['enddate', 'end_date']) || undefined,
+  notes: getFieldValue(row, ['notes', 'remark', 'remarks']) || undefined,
+  confidenceScore: getFieldValue(row, ['confidencescore', 'confidence_score'])
+    ? Number(getFieldValue(row, ['confidencescore', 'confidence_score']))
+    : undefined,
+})
+
 const run = (sql: string, params: Array<string | number | null> = []): Promise<{ lastID: number; changes: number }> => {
   const db = getDatabase()
   return new Promise((resolve, reject) => {
@@ -453,21 +469,12 @@ export class TariffDataIngestionService {
   parseCsvText(input: string): TariffImportRow[] {
     const rows = parseCsvRecords(input)
 
-    return rows.map((row) => ({
-      hsCode: getFieldValue(row, ['hscode', 'hscode', 'hscode', 'hs_code', 'code']),
-      scheduleCode: getFieldValue(row, ['schedulecode', 'schedule_code', 'tariffschedule', 'tariff_schedule', 'schedule']) || undefined,
-      description: getFieldValue(row, ['description', 'goodsdescription', 'productdescription']) || undefined,
-      category: getFieldValue(row, ['category', 'section', 'chapterdescription']) || undefined,
-      dutyRate: getFieldValue(row, ['dutyrate', 'dutyratepercent', 'duty_rate', 'duty']) || '',
-      vatRate: getFieldValue(row, ['vatrate', 'vat_rate', 'vat']) || undefined,
-      surchargeRate: getFieldValue(row, ['surchargerate', 'surcharge_rate', 'surcharge']) || undefined,
-      effectiveDate: getFieldValue(row, ['effectivedate', 'effective_date']) || undefined,
-      endDate: getFieldValue(row, ['enddate', 'end_date']) || undefined,
-      notes: getFieldValue(row, ['notes', 'remark', 'remarks']) || undefined,
-      confidenceScore: getFieldValue(row, ['confidencescore', 'confidence_score'])
-        ? Number(getFieldValue(row, ['confidencescore', 'confidence_score']))
-        : undefined,
-    }))
+    return rows.map(mapTabularRecordToTariffImportRow)
+  }
+
+  async parseTariffRows(payload: TabularImportPayload): Promise<TariffImportRow[]> {
+    const rows = await this.readTabularRows(payload)
+    return rows.map(mapTabularRecordToTariffImportRow)
   }
 
   async parseHSCatalogRows(payload: TabularImportPayload): Promise<HSCatalogImportRow[]> {
@@ -989,6 +996,22 @@ export class TariffDataIngestionService {
     )
   }
 
+  async hasSourceReference(sourceType: string, sourceReference: string): Promise<boolean> {
+    if (!sourceReference.trim()) {
+      return false
+    }
+
+    const row = await get<{ id: number }>(
+      `SELECT id
+       FROM tariff_sources
+       WHERE source_type = ? AND source_reference = ?
+       LIMIT 1`,
+      [sourceType, sourceReference]
+    )
+
+    return Boolean(row)
+  }
+
   async getCalculationHistory(limit: number = 50): Promise<Array<{
     id: number
     hs_code: string
@@ -1016,7 +1039,7 @@ export class TariffDataIngestionService {
     const $ = load(htmlContent)
     const extractedRows: TariffImportRow[] = []
 
-    const HS_CODE_PATTERN = /^\d{4}[\.\d]*$/
+    const HS_CODE_PATTERN = /^\d{4}[.\d]*$/
 
     $('table').each((_tableIndex, tableEl) => {
       const headers: string[] = []

@@ -11,6 +11,7 @@ type ShipmentRow = {
   freight: number
   insurance: number
   originCountry: string
+  destinationPort: string
   currency: string
   declarationType: 'consumption' | 'warehousing' | 'transit'
   containerSize: 'none' | '20ft' | '40ft'
@@ -45,10 +46,10 @@ type BatchResultRow = ShipmentRow & {
 const DEFAULT_CURRENCY = 'USD'
 const RESULT_CURRENCY = 'PHP'
 
-const CSV_TEMPLATE_HEADER = 'hsCode,value,freight,insurance,scheduleCode,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers'
-const CSV_TEMPLATE_EXAMPLE = '8471.30,1000,100,25,MFN,CHN,USD,consumption,20ft,4500,265\n8517.62,2500,200,30,MFN,USA,USD,transit,40ft,6000,300'
+const CSV_TEMPLATE_HEADER = 'hsCode,value,freight,insurance,scheduleCode,originCountry,destinationPort,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers'
+const CSV_TEMPLATE_EXAMPLE = '8471.30,1000,100,25,MFN,CHN,MNL,USD,consumption,20ft,4500,265\n8517.62,2500,200,30,MFN,USA,CEB,USD,transit,40ft,6000,300'
 
-const EXPECTED_COLUMNS = ['hsCode', 'value', 'freight', 'insurance', 'scheduleCode', 'originCountry', 'currency', 'declarationType', 'containerSize', 'arrastreWharfage', 'doxStampOthers']
+const EXPECTED_COLUMNS = ['hsCode', 'value', 'freight', 'insurance', 'scheduleCode', 'originCountry', 'destinationPort', 'currency', 'declarationType', 'containerSize', 'arrastreWharfage', 'doxStampOthers']
 const COLUMN_ALIASES: Record<string, string[]> = {
   hsCode: ['hscode', 'hs_code', 'code'],
   value: ['value', 'fobvalue', 'fob'],
@@ -56,6 +57,7 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   insurance: ['insurance'],
   scheduleCode: ['schedulecode', 'schedule_code', 'schedule'],
   originCountry: ['origincountry', 'origin_country', 'origin', 'country'],
+  destinationPort: ['destinationport', 'destination_port', 'port', 'destination'],
   currency: ['currency', 'curr'],
   declarationType: ['declarationtype', 'declaration_type', 'declaration'],
   containerSize: ['containersize', 'container_size', 'container'],
@@ -122,13 +124,14 @@ const parseCsvText = (input: string): { rows: ShipmentRow[]; columnWarnings: str
     const insurance = Number(parts[3] || 0)
     const scheduleCode = (parts[4] || 'MFN').toUpperCase()
     const originCountry = (parts[5] || '').toUpperCase()
-    const currency = (parts[6] || DEFAULT_CURRENCY).toUpperCase()
-    const declarationType = (parts[7] || 'consumption').toLowerCase() as ShipmentRow['declarationType']
-    const containerSize = (parts[8] || '20ft').toLowerCase() as ShipmentRow['containerSize']
-    const arrastreWharfage = Number(parts[9] || 0)
-    const doxStampOthers = Number(parts[10] || 0)
+    const destinationPort = (parts[6] || 'MNL').toUpperCase()
+    const currency = (parts[7] || DEFAULT_CURRENCY).toUpperCase()
+    const declarationType = (parts[8] || 'consumption').toLowerCase() as ShipmentRow['declarationType']
+    const containerSize = (parts[9] || '20ft').toLowerCase() as ShipmentRow['containerSize']
+    const arrastreWharfage = Number(parts[10] || 0)
+    const doxStampOthers = Number(parts[11] || 0)
 
-    if (!hsCode || Number.isNaN(value) || value <= 0 || Number.isNaN(freight) || Number.isNaN(insurance) || !originCountry || Number.isNaN(arrastreWharfage) || Number.isNaN(doxStampOthers)) {
+    if (!hsCode || Number.isNaN(value) || value <= 0 || Number.isNaN(freight) || Number.isNaN(insurance) || !originCountry || !destinationPort || Number.isNaN(arrastreWharfage) || Number.isNaN(doxStampOthers)) {
       continue
     }
 
@@ -139,6 +142,7 @@ const parseCsvText = (input: string): { rows: ShipmentRow[]; columnWarnings: str
       freight,
       insurance,
       originCountry,
+      destinationPort,
       currency,
       declarationType: declarationType === 'consumption' || declarationType === 'warehousing' || declarationType === 'transit' ? declarationType : 'consumption',
       containerSize: containerSize === '40ft' || containerSize === '20ft' || containerSize === 'none' ? containerSize : '20ft',
@@ -158,6 +162,7 @@ const toCsv = (rows: BatchResultRow[]): string => {
     'freight',
     'insurance',
     'originCountry',
+    'destinationPort',
     'currency',
     'declarationType',
     'containerSize',
@@ -182,6 +187,7 @@ const toCsv = (rows: BatchResultRow[]): string => {
       row.freight.toFixed(2),
       row.insurance.toFixed(2),
       row.originCountry,
+      row.destinationPort,
       row.currency,
       row.declarationType,
       row.containerSize,

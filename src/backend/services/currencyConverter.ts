@@ -1,8 +1,8 @@
 import { getDatabase } from '../db/database'
 import axios from 'axios'
+import { getRuntimeSettings } from './runtimeSettings'
 
 const EXCHANGE_RATES_API = 'https://api.exchangerate-api.com/v4/latest'
-const CACHE_DURATION = 24 * 60 * 60 * 1000 // 24 hours in milliseconds
 
 type ExchangeRateCacheRow = {
   rate: number
@@ -11,6 +11,10 @@ type ExchangeRateCacheRow = {
 
 export class CurrencyConverter {
   private db = getDatabase()
+
+  private getCacheDurationMs(): number {
+    return getRuntimeSettings().fxCacheTtlHours * 60 * 60 * 1000
+  }
 
   private normalizeCurrencyCode(currency: string): string {
     return currency.trim().toUpperCase()
@@ -115,7 +119,7 @@ export class CurrencyConverter {
 
           if (row) {
             const cacheAge = Date.now() - new Date(row.last_updated).getTime()
-            if (cacheAge < CACHE_DURATION) {
+            if (cacheAge < this.getCacheDurationMs()) {
               resolve({ rate: row.rate, source: 'cache' })
               return
             }
@@ -241,7 +245,7 @@ export class CurrencyConverter {
    */
   clearOldCache(): void {
     try {
-      const maxAge = CACHE_DURATION / 1000 // Convert to seconds
+      const maxAge = this.getCacheDurationMs() / 1000
       this.db.run(
         `DELETE FROM exchange_rates WHERE julianday('now') - julianday(last_updated) > ?`,
         [maxAge / 86400], // Convert to days

@@ -10,6 +10,16 @@ import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { DocumentGenerator } from '../backend/services/documentGenerator'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
 import { startAutoFetching } from '../backend/services/autoFetcher'
+import {
+  BIR_DOCUMENTARY_STAMP_TAX_PHP,
+  CUSTOMS_DOCUMENTARY_STAMP_PHP,
+  TRANSIT_CHARGE_PHP,
+  getBrokerageFeePhp,
+  getContainerSecurityFeeUsd,
+  getImportProcessingChargePhp,
+  normalizeDestinationPort,
+} from '../backend/services/customsRules'
+import { getRuntimeSettings, updateRuntimeSettings } from '../backend/services/runtimeSettings'
 
 const app = express()
 const websiteFetcher = new WebsiteFetcherService()
@@ -24,44 +34,6 @@ const __dirname = path.dirname(__filename)
 const rendererDistPath = path.resolve(__dirname, '../renderer')
 
 const regulatorySources = new Set<RegulatorySource>(['boc', 'bir', 'tariff-commission'])
-const TRANSIT_CHARGE_PHP = 1000
-const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
-const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
-const VAT_RATE = 0.12
-
-const getImportProcessingChargePhp = (dutiableValuePhp: number): number => {
-  if (dutiableValuePhp <= 25000) return 250
-  if (dutiableValuePhp <= 50000) return 500
-  if (dutiableValuePhp <= 250000) return 750
-  if (dutiableValuePhp <= 500000) return 1000
-  if (dutiableValuePhp <= 750000) return 1500
-  return 2000
-}
-
-const getContainerSecurityFeeUsd = (containerSize: string): number => {
-  if (containerSize === '40ft') return 10
-  if (containerSize === '20ft') return 5
-  return 0
-}
-
-const getBrokerageFeePhp = (taxableValuePhp: number): number => {
-  // Tiered schedule based on BOC CMO 11-2014 brokerage fee schedule
-  if (taxableValuePhp <= 50000) return 1000
-  if (taxableValuePhp <= 75000) return 1500
-  if (taxableValuePhp <= 100000) return 2000
-  if (taxableValuePhp <= 150000) return 2500
-  if (taxableValuePhp <= 200000) return 3000
-  if (taxableValuePhp <= 250000) return 3500
-  if (taxableValuePhp <= 300000) return 4000
-  if (taxableValuePhp <= 400000) return 4500
-  if (taxableValuePhp <= 500000) return 5000
-  if (taxableValuePhp <= 750000) return 5500
-  if (taxableValuePhp <= 1000000) return 6000
-  if (taxableValuePhp <= 1500000) return 7000
-  if (taxableValuePhp <= 2000000) return 8000
-  if (taxableValuePhp <= 5000000) return 9000
-  return 10000
-}
 
 const fetchLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -117,6 +89,44 @@ app.get('/api/health', (_request, response) => {
       service: 'customs-calculator-api',
     },
   })
+})
+
+app.get('/api/runtime-settings', (_request, response) => {
+  response.json({
+    success: true,
+    data: getRuntimeSettings(),
+  })
+})
+
+app.put('/api/runtime-settings', (request, response) => {
+  try {
+    const nextSettings = updateRuntimeSettings(request.body || {})
+    currencyConverter.clearOldCache()
+    return response.json({ success: true, data: nextSettings })
+  } catch (error) {
+    return sendError(response, 400, error)
+  }
+})
+
+app.get('/api/runtime-status', async (_request, response) => {
+  try {
+    const sources = await tariffDataIngestion.getTariffSources(25)
+    const [latestSource] = sources
+    const latestAutoFetchSource = sources.find((source) =>
+      source.source_type.startsWith('auto-fetch')
+    )
+
+    return response.json({
+      success: true,
+      data: {
+        settings: getRuntimeSettings(),
+        latestSource: latestSource || null,
+        autoFetcherLastRun: latestAutoFetchSource?.fetched_at || null,
+      },
+    })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
 })
 
 app.post('/api/calculate/duty', async (request, response) => {
@@ -214,6 +224,7 @@ app.post('/api/calculate/batch', async (request, response) => {
 
       const shipmentCurrency = String(shipment.currency || 'USD').trim().toUpperCase()
       const scheduleCode = normalizeScheduleCode(shipment.scheduleCode)
+      const destinationPort = normalizeDestinationPort(typeof shipment.destinationPort === 'string' ? shipment.destinationPort : 'MNL')
       const taxableInputAmount = Number(shipment.value) + Number(shipment.freight || 0) + Number(shipment.insurance || 0)
       const conversionResult = await currencyConverter.convert(taxableInputAmount, shipmentCurrency, 'PHP')
       const valueInPhp = shipmentCurrency === 'PHP' ? taxableInputAmount : conversionResult.convertedAmount
@@ -234,12 +245,14 @@ app.post('/api/calculate/batch', async (request, response) => {
       const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
       const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp
       const vatBasePhp = valueInPhp + dutyResult.amount + dutyResult.surcharge + brokerageFeePhp + Number(shipment.arrastreWharfage || 0) + Number(shipment.doxStampOthers || 0) + totalGlobalFeesPhp
-      const vatAmountPhp = vatBasePhp * VAT_RATE
-      const complianceResult = await complianceChecker.getRequirements(resolvedCode.code, valueInPhp, 'MNL')
+      const vatResult = await tariffCalculator.calculateVAT(vatBasePhp, resolvedCode.code, scheduleCode)
+      const vatAmountPhp = vatResult.amount
+      const complianceResult = await complianceChecker.getRequirements(resolvedCode.code, valueInPhp, destinationPort)
       results.push({
         ...shipment,
         hsCode: resolvedCode.code,
         scheduleCode,
+        destinationPort,
         duty: {
           amount: dutyResult.amount,
           surcharge: dutyResult.surcharge,
@@ -248,7 +261,7 @@ app.post('/api/calculate/batch', async (request, response) => {
         },
         vat: {
           amount: vatAmountPhp,
-          rate: VAT_RATE * 100,
+          rate: vatResult.rate,
         },
         compliance: complianceResult,
         costBase: {

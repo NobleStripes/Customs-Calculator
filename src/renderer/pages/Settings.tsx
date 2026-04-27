@@ -35,29 +35,32 @@ export const Settings: React.FC = () => {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    setLocalSettings(settings)
-  }, [settings])
-
-  useEffect(() => {
-    const loadLastRun = async () => {
+    const loadRuntimeState = async () => {
       try {
-        const result = await appApi.getTariffSources(1)
-        if (result.success && result.data && result.data.length > 0) {
-          const latest = result.data[0] as { fetched_at?: string; source_type?: string }
-          if (latest.source_type?.startsWith('auto-fetch')) {
-            setAutoFetcherLastRun(latest.fetched_at ?? null)
-          }
+        const [settingsResult, statusResult] = await Promise.all([
+          appApi.getRuntimeSettings(),
+          appApi.getRuntimeStatus(),
+        ])
+
+        if (settingsResult.success && settingsResult.data) {
+          setLocalSettings(settingsResult.data)
+          updateSettings(settingsResult.data)
+        }
+
+        if (statusResult.success && statusResult.data) {
+          setAutoFetcherLastRun(statusResult.data.autoFetcherLastRun)
         }
       } catch {
         // non-critical
       }
     }
 
-    loadLastRun()
-  }, [])
+    void loadRuntimeState()
+  }, [updateSettings])
 
-  const handleSave = () => {
+  const handleSave = async () => {
     updateSettings(localSettings)
+    await appApi.updateRuntimeSettings(localSettings)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
