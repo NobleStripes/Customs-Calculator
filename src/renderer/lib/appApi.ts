@@ -451,19 +451,21 @@ const createLocalLookupRows = (
   sourceType: HSCodeRow['sourceType'],
   sourceLabel: string,
   query: string
-): HSCodeRow[] =>
-  rows.map((row) => ({
+): HSCodeRow[] => {
+  const fallbackConfidenceScore =
+    sourceType === 'local-fallback'
+      ? FALLBACK_CONFIDENCE_SCORE
+      : LOCAL_CATALOG_CONFIDENCE_SCORE
+
+  return rows.map((row) => ({
     ...row,
     sourceType,
     sourceLabel,
     sourceUrl: '',
-    confidence: row.confidence ?? (
-      sourceType === 'local-fallback'
-        ? FALLBACK_CONFIDENCE_SCORE
-        : LOCAL_CATALOG_CONFIDENCE_SCORE
-    ),
+    confidence: row.confidence ?? fallbackConfidenceScore,
     matchedBy: isCodeLikeQuery(query) ? 'code' : 'description',
   }))
+}
 
 const wrapLocalLiveLookupFallback = (
   query: string,

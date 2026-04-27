@@ -160,7 +160,7 @@ export const extractOfficialHsLookupRows = (
   sourceUrl: string
 ): OfficialHsLookupResult[] => {
   const tableRows: ParsedLookupRow[] = []
-  const textRows: ParsedLookupRow[] = []
+  const normalizedRows: ParsedLookupRow[] = []
   const seen = new Set<string>()
 
   const pushRow = (row: ParsedLookupRow): void => {
@@ -179,7 +179,7 @@ export const extractOfficialHsLookupRows = (
     const matchedBy = getMatchType(query, { code, description })
     const confidence = matchedBy === 'code' ? 96 : matchedBy === 'mixed' ? 92 : 88
 
-    textRows.push({
+    normalizedRows.push({
       ...row,
       code,
       description,
@@ -191,10 +191,10 @@ export const extractOfficialHsLookupRows = (
 
   const codePattern = /(\d{4}(?:[.\s]?\d{2}){0,3}|\d{6,10})/g
 
-  const safeHtml = rawHtml || ''
-  if (safeHtml.includes('<table')) {
+  const normalizedHtml = rawHtml || ''
+  if (normalizedHtml.includes('<table')) {
     const tablePattern = /<table[\s\S]*?<\/table>/gi
-    const tables = safeHtml.match(tablePattern) || []
+    const tables = normalizedHtml.match(tablePattern) || []
 
     for (const table of tables) {
       const rowPattern = /<tr[\s\S]*?<\/tr>/gi
@@ -261,7 +261,7 @@ export const extractOfficialHsLookupRows = (
     }
   }
 
-  const $ = load(safeHtml)
+  const $ = load(normalizedHtml)
   $('script, style').remove()
   const textBlocks = $('li, p, div, span, a')
     .map((_index, element) => normalizeSpaces($(element).text()))
@@ -300,7 +300,7 @@ export const extractOfficialHsLookupRows = (
     })
   }
 
-  return rankParsedRows(query, textRows)
+  return rankParsedRows(query, normalizedRows)
     .slice(0, OFFICIAL_TARIFF_LOOKUP_CONFIG.maxResults)
     .map((row) => ({
       ...row,

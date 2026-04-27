@@ -514,7 +514,7 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
         },
       })
     } catch (fallbackError) {
-      return sendError(response, 502, fallbackError instanceof Error ? fallbackError : error)
+      return sendError(response, 502, fallbackError instanceof Error ? fallbackError : String(fallbackError))
     }
   }
 })
