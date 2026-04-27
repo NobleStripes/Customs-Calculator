@@ -156,8 +156,8 @@ describe('appApi.batchCalculate', () => {
     expect(result.data?.[0]?.breakdown?.globalFees?.transitCharge).toBeCloseTo(1000)
     expect(result.data?.[0]?.breakdown?.globalFees?.ipc).toBeCloseTo(250)
     expect(result.data?.[0]?.breakdown?.globalFees?.totalGlobalTax).toBeCloseTo(1380)
-    expect(result.data?.[0]?.costBase?.vatBase).toBeCloseTo(38567.5)
-    expect(result.data?.[0]?.vat?.amount).toBeCloseTo(4628.1)
+    expect(result.data?.[0]?.costBase?.vatBase).toBeCloseTo(34480)
+    expect(result.data?.[0]?.vat?.amount).toBeCloseTo(4137.6)
   })
 
   it('keeps transit totals distinct from consumption totals for the same shipment', async () => {
@@ -197,8 +197,8 @@ describe('appApi.batchCalculate', () => {
     expect(result.data).toHaveLength(2)
     expect(consumptionRow?.breakdown?.globalFees?.transitCharge).toBeCloseTo(0)
     expect(consumptionRow?.breakdown?.globalFees?.ipc).toBeCloseTo(500)
-    expect(consumptionRow?.totalLandedCost).toBeCloseTo(42355.6)
-    expect(transitRow?.totalLandedCost).toBeCloseTo(43195.6)
+    expect(consumptionRow?.totalLandedCost).toBeCloseTo(37777.6)
+    expect(transitRow?.totalLandedCost).toBeCloseTo(38617.6)
     expect((transitRow?.totalLandedCost || 0) - (consumptionRow?.totalLandedCost || 0)).toBeCloseTo(840)
   })
 
@@ -227,8 +227,8 @@ describe('appApi.batchCalculate', () => {
     expect(row?.fx?.baseCurrency).toBe('PHP')
     expect(row?.costBase?.taxableValue).toBeCloseTo(5600)
     expect(row?.duty?.amount).toBeCloseTo(392)
-    expect(row?.vat?.amount).toBeCloseTo(1371.48)
-    expect(row?.totalLandedCost).toBeCloseTo(12800.48)
+    expect(row?.vat?.amount).toBeCloseTo(884.64)
+    expect(row?.totalLandedCost).toBeCloseTo(8256.64)
   })
 })
 

@@ -30,8 +30,44 @@ export class ComplianceChecker {
   /**
    * Get compliance requirements for a product
    */
+  // Full list of BOC-designated Philippine ports of entry
   private static readonly PH_PORT_CODES = new Set([
-    'MNL', 'CEB', 'DVO', 'ILO', 'CGY', 'ZAM', 'GEN', 'BAT', 'SFS', 'SUB',
+    // Metro Manila / Luzon
+    'MNL',  // Manila (Port of Manila)
+    'NAIA', // Ninoy Aquino International Airport
+    'SFS',  // Subic Bay Freeport (Clark Freeport also uses SFS area)
+    'SUB',  // Subic
+    'CLA',  // Clark
+    'BAT',  // Batangas
+    'LEG',  // Legazpi (Legaspi)
+    'SAN',  // San Fernando, La Union
+    'CAL',  // Calamba
+    'OLO',  // Olo / Bataan
+    // Visayas
+    'CEB',  // Cebu
+    'ILO',  // Iloilo
+    'BAC',  // Bacolod
+    'TAC',  // Tacloban
+    'OZM',  // Ozamiz
+    'CBO',  // Cotabato
+    'TGN',  // Tagbilaran
+    'DUM',  // Dumaguete
+    'RXS',  // Roxas City
+    // Mindanao
+    'DVO',  // Davao
+    'CGY',  // Cagayan de Oro
+    'ZAM',  // Zamboanga
+    'GEN',  // General Santos
+    'IAO',  // Siargao
+    'BXU',  // Butuan
+    'CDO',  // Cagayan de Oro alternate
+    'SUG',  // Surigao
+    'DAP',  // Dapitan
+    'KOT',  // Cotabato alt
+    // Other international entry
+    'PPS',  // Puerto Princesa (Palawan)
+    'CYP',  // Calayan
+    'LGP',  // Legaspi alt
   ])
 
   async getRequirements(

@@ -82,6 +82,27 @@ type TariffScheduleOption = {
   displayName: string
 }
 
+type HistoryEntry = {
+  id: number
+  hs_code: string
+  value: number
+  currency: string
+  duty_amount: number
+  vat_amount: number
+  total_landed_cost: number
+  created_at: string
+}
+
+const HISTORY_LIMIT = 10
+
+const formatCurrency = (amount: number, currency = 'PHP') =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)
+
 export const Calculator: React.FC = () => {
   const [formData, setFormData] = useState<CalculationPayload>({
     value: 0,
@@ -111,6 +132,23 @@ export const Calculator: React.FC = () => {
   const [tariffSchedules, setTariffSchedules] = useState<TariffScheduleOption[]>([
     { code: 'MFN', displayName: 'Most-Favored-Nation' },
   ])
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [historyExpanded, setHistoryExpanded] = useState(false)
+
+  const reloadHistory = async () => {
+    try {
+      const result = await appApi.getCalculationHistory(HISTORY_LIMIT)
+      if (result.success && result.data) {
+        setHistory(result.data as HistoryEntry[])
+      }
+    } catch {
+      // non-critical
+    }
+  }
+
+  useEffect(() => {
+    reloadHistory()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -281,6 +319,8 @@ export const Calculator: React.FC = () => {
         calculationCurrency: 'PHP',
         fx: r.fx,
       })
+      // Refresh history after successful calculation
+      reloadHistory()
     } catch (err) {
       setError(String(err))
     } finally {
@@ -577,6 +617,49 @@ export const Calculator: React.FC = () => {
           )}
         </div>
       </div>
+
+      {history.length > 0 && (
+        <section className="history-panel">
+          <button
+            className="history-toggle"
+            onClick={() => setHistoryExpanded((prev) => !prev)}
+          >
+            🕒 Calculation History ({history.length} recent)
+            <span className="history-toggle-icon">{historyExpanded ? '▲' : '▼'}</span>
+          </button>
+
+          {historyExpanded && (
+            <div className="history-table-wrap">
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th>HS Code</th>
+                    <th>FOB Value</th>
+                    <th>Currency</th>
+                    <th>Duty (PHP)</th>
+                    <th>VAT (PHP)</th>
+                    <th>Total Landed (PHP)</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>{entry.hs_code}</td>
+                      <td>{entry.value.toLocaleString()}</td>
+                      <td>{entry.currency}</td>
+                      <td>{formatCurrency(entry.duty_amount)}</td>
+                      <td>{formatCurrency(entry.vat_amount)}</td>
+                      <td>{formatCurrency(entry.total_landed_cost)}</td>
+                      <td>{new Date(entry.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }

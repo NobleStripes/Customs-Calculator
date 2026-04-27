@@ -44,8 +44,24 @@ const getContainerSecurityFeeUsd = (containerSize: string): number => {
   return 0
 }
 
-const getBrokerageFeePhp = (taxableValuePhp: number): number =>
-  ((taxableValuePhp - 200000) * 0.00125) + 5300
+const getBrokerageFeePhp = (taxableValuePhp: number): number => {
+  // Tiered schedule based on BOC CMO 11-2014 brokerage fee schedule
+  if (taxableValuePhp <= 50000) return 1000
+  if (taxableValuePhp <= 75000) return 1500
+  if (taxableValuePhp <= 100000) return 2000
+  if (taxableValuePhp <= 150000) return 2500
+  if (taxableValuePhp <= 200000) return 3000
+  if (taxableValuePhp <= 250000) return 3500
+  if (taxableValuePhp <= 300000) return 4000
+  if (taxableValuePhp <= 400000) return 4500
+  if (taxableValuePhp <= 500000) return 5000
+  if (taxableValuePhp <= 750000) return 5500
+  if (taxableValuePhp <= 1000000) return 6000
+  if (taxableValuePhp <= 1500000) return 7000
+  if (taxableValuePhp <= 2000000) return 8000
+  if (taxableValuePhp <= 5000000) return 9000
+  return 10000
+}
 
 const fetchLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -540,6 +556,77 @@ app.post('/api/export/calculation-document/pdf', async (request, response) => {
     response.setHeader('Content-Type', 'application/pdf')
     response.setHeader('Content-Disposition', 'attachment; filename="customs-calculation-report.pdf"')
     return response.send(pdfBuffer)
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/calculation-history', async (request, response) => {
+  const parsedLimit = typeof request.query.limit === 'string' ? Number(request.query.limit) : 50
+
+  try {
+    const result = await tariffDataIngestion.getCalculationHistory(Number.isFinite(parsedLimit) ? parsedLimit : 50)
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/tariff-sources', async (request, response) => {
+  const parsedLimit = typeof request.query.limit === 'string' ? Number(request.query.limit) : 50
+
+  try {
+    const result = await tariffDataIngestion.getTariffSources(Number.isFinite(parsedLimit) ? parsedLimit : 50)
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/rate-change-audit', async (request, response) => {
+  const parsedLimit = typeof request.query.limit === 'string' ? Number(request.query.limit) : 50
+  const parsedOffset = typeof request.query.offset === 'string' ? Number(request.query.offset) : 0
+  const hsCode = typeof request.query.hs_code === 'string' && request.query.hs_code.trim()
+    ? request.query.hs_code.trim()
+    : undefined
+
+  try {
+    const result = await tariffDataIngestion.getRateChangeAudit(
+      hsCode,
+      Number.isFinite(parsedLimit) ? parsedLimit : 50,
+      Number.isFinite(parsedOffset) ? parsedOffset : 0
+    )
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.patch('/api/import-jobs/:importJobId/review-rows/:rowId', async (request, response) => {
+  const importJobId = Number(request.params.importJobId)
+  const rowId = Number(request.params.rowId)
+
+  if (!Number.isFinite(importJobId)) {
+    return sendError(response, 400, 'Route parameter "importJobId" must be a valid number')
+  }
+
+  if (!Number.isFinite(rowId)) {
+    return sendError(response, 400, 'Route parameter "rowId" must be a valid number')
+  }
+
+  const { action, notes } = request.body || {}
+
+  if (action !== 'approve' && action !== 'reject') {
+    return sendError(response, 400, 'Request body field "action" must be "approve" or "reject"')
+  }
+
+  try {
+    if (action === 'approve') {
+      await tariffDataIngestion.approveReviewRow(importJobId, rowId, typeof notes === 'string' ? notes : undefined)
+    } else {
+      await tariffDataIngestion.rejectReviewRow(importJobId, rowId, typeof notes === 'string' ? notes : undefined)
+    }
+    return response.json({ success: true })
   } catch (error) {
     return sendError(response, 502, error)
   }

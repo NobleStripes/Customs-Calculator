@@ -78,6 +78,7 @@ export interface WebsiteFetchResult {
   matchedSnippets: string[]
   links: Array<{ href: string; text: string }>
   fetchedAt: string
+  rawHtml?: string
 }
 
 interface RawFetchResult {
@@ -278,6 +279,7 @@ export class WebsiteFetcherService {
       matchedSnippets,
       links,
       fetchedAt: new Date().toISOString(),
+      rawHtml: rawResult.rawHtml,
     }
   }
 
