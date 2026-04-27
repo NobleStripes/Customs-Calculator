@@ -1,4 +1,5 @@
 import { WebsiteFetcherService } from './websiteFetcher'
+import { isCodeLikeQuery } from '../../shared/hsLookupQuery'
 
 export const OFFICIAL_TARIFF_LOOKUP_CONFIG = {
   host: 'finder.tariffcommission.gov.ph',
@@ -44,8 +45,6 @@ type TariffLookupFetcher = Pick<WebsiteFetcherService, 'fetchWebsite'>
 type ParsedLookupRow = Omit<OfficialHsLookupResult, 'sourceType' | 'sourceLabel' | 'sourceUrl'>
 
 const normalizeSpaces = (value: string): string => value.replace(/\s+/g, ' ').trim()
-
-const isCodeLikeQuery = (value: string): boolean => /^[\d.\s]+$/.test(value.trim())
 
 const normalizeHSCode = (value: string): string => {
   const compact = value.trim().toUpperCase().replace(/[^0-9A-Z]/g, '')
@@ -253,8 +252,8 @@ export const extractOfficialHsLookupRows = (
 
   const textBlocks = Array.from(
     safeHtml
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
       .matchAll(/<(?:li|p|div|span|a)[^>]*>([\s\S]*?)<\/(?:li|p|div|span|a)>/gi)
   ).map((match) => normalizeSpaces(match[1].replace(/<[^>]+>/g, ' ')))
 
@@ -295,7 +294,7 @@ export const extractOfficialHsLookupRows = (
     .slice(0, OFFICIAL_TARIFF_LOOKUP_CONFIG.maxResults)
     .map((row) => ({
       ...row,
-      sourceLabel: `Tariff Commission Finder (${sourceUrl})`,
+      sourceLabel: 'Tariff Commission Finder',
       sourceType: 'official-site',
       sourceUrl,
     }))

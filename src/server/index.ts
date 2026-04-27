@@ -9,6 +9,7 @@ import { TariffCalculator } from '../backend/services/tariffCalculator'
 import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { DocumentGenerator } from '../backend/services/documentGenerator'
 import { OfficialHsLookupService } from '../backend/services/officialHsLookup'
+import { isCodeLikeQuery } from '../shared/hsLookupQuery'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
 import { startAutoFetching } from '../backend/services/autoFetcher'
 import {
@@ -47,8 +48,6 @@ const fetchLimiter = rateLimit({
 
 const MIN_HS_SEARCH_QUERY_LENGTH = 2
 const MAX_HS_SEARCH_QUERY_LENGTH = 100
-
-const isCodeLikeQuery = (value: string): boolean => /^[\d.]+$/.test(value.trim())
 
 const normalizeScheduleCode = (value: unknown): string => {
   if (typeof value !== 'string') {

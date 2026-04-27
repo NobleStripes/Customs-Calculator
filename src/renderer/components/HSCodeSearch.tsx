@@ -1,13 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { appApi, type AppHsCodeRow } from '../lib/appApi'
+import { isCodeLikeQuery } from '../../shared/hsLookupQuery'
 import './HSCodeSearch.css'
 
 interface HSCodeSearchProps {
   onSelect: (code: string, selection?: AppHsCodeRow) => void
   selectedCode: string
 }
-
-const isCodeLikeQuery = (value: string): boolean => /^[\d.]+$/.test(value.trim())
 
 export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
   onSelect,

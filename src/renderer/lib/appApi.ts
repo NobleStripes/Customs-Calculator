@@ -1,3 +1,5 @@
+import { isCodeLikeQuery } from '../../shared/hsLookupQuery'
+
 type ApiResponse<T> = Promise<{ success: boolean; data?: T; error?: string }>
 
 type DutyResult = {
@@ -377,8 +379,6 @@ const normalizeHSCode = (value: string): string => {
 
   return normalizedValue
 }
-
-const isCodeLikeQuery = (value: string): boolean => /^[\d.\s]+$/.test(value.trim())
 
 const resolveKnownHSCode = (value: string): HSCodeRow | null => {
   const normalizedCode = normalizeHSCode(value)
