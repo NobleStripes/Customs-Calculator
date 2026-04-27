@@ -72,8 +72,7 @@ type BatchResultRow = ShipmentRow & {
   duty: { amount: number; surcharge: number; rate: number; notes?: string }
   vat: { rate: number; amount: number }
   costBase: {
-    fob: number; freight: number; insurance: number; taxableValue: number
-    brokerageFee: number; arrastreWharfage: number; doxStampOthers: number; vatBase: number
+    taxableValue: number; brokerageFee: number; arrastreWharfage: number; doxStampOthers: number; vatBase: number
   }
   breakdown: {
     itemTaxes: { cud: number; vat: number; totalItemTax: number }
@@ -858,7 +857,7 @@ export const appApi = {
     }
 
     try {
-      const results = []
+      const results: BatchResultRow[] = []
       for (const shipment of shipments) {
         const shipmentCurrency = shipment.currency.toUpperCase()
         const scheduleCode = normalizeScheduleCode(shipment.scheduleCode)
