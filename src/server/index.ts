@@ -9,7 +9,11 @@ import { TariffCalculator } from '../backend/services/tariffCalculator'
 import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { DocumentGenerator } from '../backend/services/documentGenerator'
 import { OfficialHsLookupService } from '../backend/services/officialHsLookup'
-import { isCodeLikeQuery } from '../shared/hsLookupQuery'
+import {
+  FALLBACK_CONFIDENCE_SCORE,
+  LOCAL_CATALOG_CONFIDENCE_SCORE,
+  isCodeLikeQuery,
+} from '../shared/hsLookupQuery'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
 import { startAutoFetching } from '../backend/services/autoFetcher'
 import {
@@ -478,7 +482,7 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
         message: 'No official Tariff Commission Finder matches were parsed. Showing local catalog results instead.',
         results: fallbackResults.map((row) => ({
           ...row,
-          confidence: 82,
+          confidence: LOCAL_CATALOG_CONFIDENCE_SCORE,
           sourceType: 'local-catalog',
           sourceLabel: 'Approved local tariff catalog',
           sourceUrl: '',
@@ -501,7 +505,7 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
           message: `Official tariff lookup is unavailable. Showing local catalog fallback. ${error instanceof Error ? error.message : String(error)}`,
           results: fallbackResults.map((row) => ({
             ...row,
-            confidence: 78,
+            confidence: FALLBACK_CONFIDENCE_SCORE,
             sourceType: 'local-catalog',
             sourceLabel: 'Approved local tariff catalog',
             sourceUrl: '',

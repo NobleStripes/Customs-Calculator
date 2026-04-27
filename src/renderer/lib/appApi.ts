@@ -1,4 +1,8 @@
-import { isCodeLikeQuery } from '../../shared/hsLookupQuery'
+import {
+  FALLBACK_CONFIDENCE_SCORE,
+  LOCAL_CATALOG_CONFIDENCE_SCORE,
+  isCodeLikeQuery,
+} from '../../shared/hsLookupQuery'
 
 type ApiResponse<T> = Promise<{ success: boolean; data?: T; error?: string }>
 
@@ -453,7 +457,11 @@ const createLocalLookupRows = (
     sourceType,
     sourceLabel,
     sourceUrl: '',
-    confidence: row.confidence ?? (sourceType === 'local-fallback' ? 78 : 82),
+    confidence: row.confidence ?? (
+      sourceType === 'local-fallback'
+        ? FALLBACK_CONFIDENCE_SCORE
+        : LOCAL_CATALOG_CONFIDENCE_SCORE
+    ),
     matchedBy: isCodeLikeQuery(query) ? 'code' : 'description',
   }))
 

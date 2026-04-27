@@ -182,7 +182,7 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
           )}
           {suggestions.map((item, index) => (
             <button
-              key={`${item.code}-${item.sourceType || 'unknown'}-${index}`}
+              key={`${item.code}-${item.sourceType || 'unknown'}-${item.description}`}
               className={`suggestion-item ${activeIndex === index ? 'active' : ''}`}
               onClick={() => handleSelect(item)}
               onMouseEnter={() => setActiveIndex(index)}

@@ -1,3 +1,4 @@
+import { load } from 'cheerio'
 import { WebsiteFetcherService } from './websiteFetcher'
 import { isCodeLikeQuery } from '../../shared/hsLookupQuery'
 
@@ -71,6 +72,7 @@ const normalizeHSCode = (value: string): string => {
 const compactHSCode = (value: string): string => normalizeHSCode(value).replace(/\./g, '')
 
 const normalizeRate = (value: string): number | undefined => {
+  const WHOLE_PERCENT_THRESHOLD = 1
   const normalizedValue = value.trim()
   if (!normalizedValue) {
     return undefined
@@ -81,7 +83,7 @@ const normalizeRate = (value: string): number | undefined => {
     return undefined
   }
 
-  return numeric > 1 ? numeric / 100 : numeric
+  return numeric > WHOLE_PERCENT_THRESHOLD ? numeric / 100 : numeric
 }
 
 const extractRateFromText = (value: string): number | undefined => {
@@ -149,6 +151,9 @@ const rankParsedRows = (query: string, rows: ParsedLookupRow[]): ParsedLookupRow
   })
 }
 
+const headerMatchesAnyPattern = (header: string, patterns: RegExp[]): boolean =>
+  patterns.some((pattern) => pattern.test(header))
+
 export const extractOfficialHsLookupRows = (
   rawHtml: string,
   query: string,
@@ -212,12 +217,18 @@ export const extractOfficialHsLookupRows = (
         }
 
         const hsColIndex = headers.findIndex((header) =>
-          header.includes('ahtn') || header.includes('hs') || header.includes('code') || header.includes('commodity')
+          headerMatchesAnyPattern(header, [/\bahtn\b/, /\bhs\b/, /\bhs code\b/, /\bcode\b/, /\bcommodity\b/])
         )
-        const descColIndex = headers.findIndex((header) => header.includes('description') || header.includes('article'))
-        const dutyColIndex = headers.findIndex((header) => header.includes('duty') || header.includes('rate'))
-        const vatColIndex = headers.findIndex((header) => header.includes('vat'))
-        const scheduleColIndex = headers.findIndex((header) => header.includes('schedule') || header.includes('fta'))
+        const descColIndex = headers.findIndex((header) =>
+          headerMatchesAnyPattern(header, [/\bdescription\b/, /\barticle\b/, /\bproduct\b/])
+        )
+        const dutyColIndex = headers.findIndex((header) =>
+          headerMatchesAnyPattern(header, [/\bduty\b/, /\brate\b/, /\btariff\b/])
+        )
+        const vatColIndex = headers.findIndex((header) => headerMatchesAnyPattern(header, [/\bvat\b/]))
+        const scheduleColIndex = headers.findIndex((header) =>
+          headerMatchesAnyPattern(header, [/\bschedule\b/, /\bfta\b/, /\bagreement\b/])
+        )
 
         const hsValue = hsColIndex >= 0 ? cells[hsColIndex] : cells[0]
         const matchedCode = hsValue.match(codePattern)?.[0]
@@ -250,12 +261,11 @@ export const extractOfficialHsLookupRows = (
     }
   }
 
-  const textBlocks = Array.from(
-    safeHtml
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
-      .matchAll(/<(?:li|p|div|span|a)[^>]*>([\s\S]*?)<\/(?:li|p|div|span|a)>/gi)
-  ).map((match) => normalizeSpaces(match[1].replace(/<[^>]+>/g, ' ')))
+  const $ = load(safeHtml)
+  $('script, style').remove()
+  const textBlocks = $('li, p, div, span, a')
+    .map((_index, element) => normalizeSpaces($(element).text()))
+    .get()
 
   for (const block of textBlocks) {
     if (!block) {
