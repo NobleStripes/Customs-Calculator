@@ -102,6 +102,18 @@ export interface TariffImportSummary {
   status: 'completed' | 'completed_with_errors' | 'failed'
 }
 
+export interface BatchedHSCatalogImportSummary extends TariffImportSummary {
+  batchSize: number
+  totalBatches: number
+  processedBatches: number
+  batchResults: Array<
+    TariffImportSummary & {
+      batchNumber: number
+      batchRows: number
+    }
+  >
+}
+
 const DEFAULT_THRESHOLD = 85
 
 const normalizeHeaderKey = (value: string): string => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
@@ -671,6 +683,65 @@ export class TariffDataIngestionService {
       await updateImportJobStatus(importJobId, 'failed', importedRows, pendingReviewRows, errorRows + 1, String(error))
       throw error
     }
+  }
+
+  async importHSCatalogBatched(
+    request: HSCatalogImportRequest & { batchSize?: number }
+  ): Promise<BatchedHSCatalogImportSummary> {
+    const normalizedBatchSize = Math.max(1, Math.floor(request.batchSize || 1000))
+    const totalRows = request.rows.length
+    const totalBatches = Math.max(1, Math.ceil(totalRows / normalizedBatchSize))
+
+    const aggregate: BatchedHSCatalogImportSummary = {
+      sourceId: 0,
+      importJobId: 0,
+      totalRows,
+      importedRows: 0,
+      pendingReviewRows: 0,
+      errorRows: 0,
+      status: 'completed',
+      batchSize: normalizedBatchSize,
+      totalBatches,
+      processedBatches: 0,
+      batchResults: [],
+    }
+
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex += 1) {
+      const start = batchIndex * normalizedBatchSize
+      const end = Math.min(start + normalizedBatchSize, totalRows)
+      const batchRows = request.rows.slice(start, end)
+      const batchNumber = batchIndex + 1
+
+      const summary = await this.importHSCatalog({
+        sourceName: `${request.sourceName} [batch ${batchNumber}/${totalBatches}]`,
+        sourceType: request.sourceType || 'hs-catalog-batch',
+        sourceReference: request.sourceReference
+          ? `${request.sourceReference}#batch-${batchNumber}`
+          : `batch-${batchNumber}`,
+        rows: batchRows,
+      })
+
+      aggregate.sourceId = summary.sourceId
+      aggregate.importJobId = summary.importJobId
+      aggregate.importedRows += summary.importedRows
+      aggregate.pendingReviewRows += summary.pendingReviewRows
+      aggregate.errorRows += summary.errorRows
+      aggregate.processedBatches += 1
+
+      if (summary.status === 'failed') {
+        aggregate.status = 'failed'
+      } else if (summary.status === 'completed_with_errors' && aggregate.status !== 'failed') {
+        aggregate.status = 'completed_with_errors'
+      }
+
+      aggregate.batchResults.push({
+        ...summary,
+        batchNumber,
+        batchRows: batchRows.length,
+      })
+    }
+
+    return aggregate
   }
 
   async importRows(request: TariffImportRequest): Promise<TariffImportSummary> {

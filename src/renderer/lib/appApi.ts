@@ -678,8 +678,11 @@ const resolveHSCodeRemote = async (code: string): ApiResponse<HSCodeRow | null> 
   return callApi<HSCodeRow | null>(`/api/hs-codes/resolve?${params.toString()}`)
 }
 
-const searchHSCodesRemote = async (query: string): ApiResponse<HSCodeRow[]> => {
+const searchHSCodesRemote = async (query: string, limit?: number): ApiResponse<HSCodeRow[]> => {
   const params = new URLSearchParams({ query: query.trim() })
+  if (typeof limit === 'number' && Number.isFinite(limit)) {
+    params.set('limit', String(Math.max(5, Math.min(100, Math.floor(limit)))))
+  }
   return callApi<HSCodeRow[]>(`/api/hs-codes/search?${params.toString()}`)
 }
 
@@ -808,8 +811,8 @@ export const appApi = {
     return makeSuccess(resolveKnownHSCode(code))
   },
 
-  searchHSCodes: async (query: string): ApiResponse<HSCodeRow[]> => {
-    const remoteResult = await searchHSCodesRemote(query)
+  searchHSCodes: async (query: string, options?: { limit?: number }): ApiResponse<HSCodeRow[]> => {
+    const remoteResult = await searchHSCodesRemote(query, options?.limit)
     if (remoteResult.success && remoteResult.data) {
       return remoteResult
     }

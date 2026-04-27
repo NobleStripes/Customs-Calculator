@@ -46,6 +46,8 @@ const fetchLimiter = rateLimit({
 const MIN_HS_SEARCH_QUERY_LENGTH = 2
 const MAX_HS_SEARCH_QUERY_LENGTH = 100
 
+const isCodeLikeQuery = (value: string): boolean => /^[\d.]+$/.test(value.trim())
+
 const normalizeScheduleCode = (value: unknown): string => {
   if (typeof value !== 'string') {
     return 'MFN'
@@ -65,7 +67,9 @@ const normalizeHsSearchQuery = (value: unknown): string | null => {
     return null
   }
 
-  if (normalizedQuery.length < MIN_HS_SEARCH_QUERY_LENGTH || normalizedQuery.length > MAX_HS_SEARCH_QUERY_LENGTH) {
+  const minLength = isCodeLikeQuery(normalizedQuery) ? 1 : MIN_HS_SEARCH_QUERY_LENGTH
+
+  if (normalizedQuery.length < minLength || normalizedQuery.length > MAX_HS_SEARCH_QUERY_LENGTH) {
     return null
   }
 
@@ -325,12 +329,24 @@ app.post('/api/import/hs-codes', async (request, response) => {
 
   try {
     const rows = await tariffDataIngestion.parseHSCatalogRows(payload)
-    const result = await tariffDataIngestion.importHSCatalog({
-      sourceName: payload.sourceName,
-      sourceType: typeof payload.sourceType === 'string' ? payload.sourceType : 'hs-catalog',
-      sourceReference: typeof payload.sourceReference === 'string' ? payload.sourceReference : payload.fileName,
-      rows,
-    })
+    const batchSize = typeof payload.batchSize === 'number' && Number.isFinite(payload.batchSize)
+      ? Math.max(1, Math.floor(payload.batchSize))
+      : undefined
+
+    const result = batchSize
+      ? await tariffDataIngestion.importHSCatalogBatched({
+          sourceName: payload.sourceName,
+          sourceType: typeof payload.sourceType === 'string' ? payload.sourceType : 'hs-catalog',
+          sourceReference: typeof payload.sourceReference === 'string' ? payload.sourceReference : payload.fileName,
+          rows,
+          batchSize,
+        })
+      : await tariffDataIngestion.importHSCatalog({
+          sourceName: payload.sourceName,
+          sourceType: typeof payload.sourceType === 'string' ? payload.sourceType : 'hs-catalog',
+          sourceReference: typeof payload.sourceReference === 'string' ? payload.sourceReference : payload.fileName,
+          rows,
+        })
 
     return response.json({ success: true, data: result })
   } catch (error) {
@@ -403,17 +419,21 @@ app.get('/api/import-jobs/:importJobId/pending-review', async (request, response
 
 app.get('/api/hs-codes/search', async (request, response) => {
   const normalizedQuery = normalizeHsSearchQuery(request.query.query)
+  const parsedLimit = typeof request.query.limit === 'string' ? Number(request.query.limit) : undefined
+  const normalizedLimit = Number.isFinite(parsedLimit)
+    ? Math.max(5, Math.min(100, Math.floor(parsedLimit as number)))
+    : 20
 
   if (!normalizedQuery) {
     return sendError(
       response,
       400,
-      `Query parameter "query" must be between ${MIN_HS_SEARCH_QUERY_LENGTH} and ${MAX_HS_SEARCH_QUERY_LENGTH} characters`
+      `Query parameter "query" must be code-like with at least 1 character, or text with at least ${MIN_HS_SEARCH_QUERY_LENGTH} characters, and at most ${MAX_HS_SEARCH_QUERY_LENGTH} characters`
     )
   }
 
   try {
-    const result = await tariffCalculator.searchHSCodes(normalizedQuery)
+    const result = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: normalizedLimit })
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)

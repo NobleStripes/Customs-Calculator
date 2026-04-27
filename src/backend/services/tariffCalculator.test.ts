@@ -43,6 +43,15 @@ describe('TariffCalculator.searchHSCodes', () => {
     expect(results).toEqual([])
   })
 
+  it('respects configurable HS search limits', async () => {
+    const tariffCalculator = new TariffCalculatorClass()
+
+    const results = await tariffCalculator.searchHSCodes('8', { limit: 5 })
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results.length).toBeLessThanOrEqual(5)
+  })
+
   it('selects schedule-specific tariff rates when a non-default schedule is requested', async () => {
     const database = getDatabase()
     const tariffCalculator = new TariffCalculatorClass()

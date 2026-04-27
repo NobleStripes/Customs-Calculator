@@ -25,10 +25,14 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
   const [searchError, setSearchError] = useState<string | null>(null)
   const latestRequestIdRef = useRef(0)
 
+  const isCodeLikeQuery = (value: string): boolean => /^[\d.]+$/.test(value.trim())
+
   useEffect(() => {
     const searchHS = async () => {
       const normalizedQuery = query.trim()
-      if (normalizedQuery.length < 2) {
+      const minQueryLength = isCodeLikeQuery(normalizedQuery) ? 1 : 2
+
+      if (normalizedQuery.length < minQueryLength) {
         setSuggestions([])
         setActiveIndex(-1)
         setSearchError(null)
@@ -41,7 +45,7 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
       setSearchError(null)
 
       try {
-        const result = await appApi.searchHSCodes(normalizedQuery)
+        const result = await appApi.searchHSCodes(normalizedQuery, { limit: 50 })
 
         if (latestRequestIdRef.current !== requestId) {
           return
@@ -196,7 +200,7 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
         </div>
       )}
 
-      {isOpen && query.trim().length >= 2 && suggestions.length === 0 && !loading && !searchError && (
+      {isOpen && query.trim().length >= (isCodeLikeQuery(query.trim()) ? 1 : 2) && suggestions.length === 0 && !loading && !searchError && (
         <div className="suggestions-dropdown">
           <div className="suggestion-item no-results">
             No HS codes found for &quot;{query}&quot;

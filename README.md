@@ -51,7 +51,7 @@ Full release details:
 - [x] VAT taxable base calculation includes surcharge
 - [x] Multi-currency calculator flow (converts shipment values to PHP for computation while computed outputs stay in PHP)
 - [x] Currency conversion flow with live, cached, and fallback FX behavior in website mode
-- [x] HS code autocomplete search by code and description
+- [x] HS code catalog auto-search by code and description (adaptive code/text query thresholds)
 - [x] HS code search ranking and normalization (supports code searches with/without dots)
 - [x] HS code keyboard navigation (Arrow Up/Down, Enter, Escape)
 - [x] Compliance requirement checks by HS code/category/value
@@ -117,6 +117,31 @@ Use this quick-start when running locally for website development.
    - Open `http://127.0.0.1:8787` in your browser for the production-style app.
    - The API is served from the same origin, for example `http://127.0.0.1:8787/api/health`.
    - Currency conversion is served from the same origin, for example `http://127.0.0.1:8787/api/currency/convert?amount=1&from=USD&to=PHP`.
+
+### Full HS Catalog Import (Batch Mode)
+
+For complete HS code catalog loads, use batch mode to avoid oversized single imports.
+
+- Endpoint: `POST /api/import/hs-codes`
+- Key payload fields:
+   - `sourceName` (required)
+   - One of `rows`, `csvText`, or `contentBase64` + `fileName`
+   - `batchSize` (optional, recommended for large uploads)
+
+Example payload:
+
+```json
+{
+   "sourceName": "PH HS Catalog 2026",
+   "sourceType": "hs-catalog",
+   "sourceReference": "ph-hs-catalog-2026.xlsx",
+   "contentBase64": "<base64-file-content>",
+   "fileName": "ph-hs-catalog-2026.xlsx",
+   "batchSize": 1000
+}
+```
+
+Batch mode returns aggregate import metadata including `totalBatches`, `processedBatches`, and per-batch summaries.
 
 ## Documentation
 

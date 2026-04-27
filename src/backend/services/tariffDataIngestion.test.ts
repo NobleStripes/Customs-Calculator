@@ -152,4 +152,29 @@ describe('TariffDataIngestionService', () => {
     expect(rows.some((row) => row.hsCode === '8708.30')).toBe(true)
     expect(rows.every((row) => String(row.notes || '').includes('PDF source'))).toBe(true)
   })
+
+  it('imports HS catalog in batches and returns aggregate summary', async () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const summary = await service.importHSCatalogBatched({
+      sourceName: 'HS Catalog Bulk Batch Test',
+      sourceType: 'hs-catalog',
+      sourceReference: 'bulk-hs-catalog.csv',
+      batchSize: 2,
+      rows: [
+        { hsCode: '0101.21', description: 'Pure-bred breeding horses', category: 'Animals' },
+        { hsCode: '0101.29', description: 'Other horses', category: 'Animals' },
+        { hsCode: '0101.30', description: 'Asses', category: 'Animals' },
+      ],
+    })
+
+    expect(summary.totalRows).toBe(3)
+    expect(summary.batchSize).toBe(2)
+    expect(summary.totalBatches).toBe(2)
+    expect(summary.processedBatches).toBe(2)
+    expect(summary.importedRows).toBe(3)
+    expect(summary.batchResults.length).toBe(2)
+    expect(summary.batchResults[0]?.batchRows).toBe(2)
+    expect(summary.batchResults[1]?.batchRows).toBe(1)
+  })
 })

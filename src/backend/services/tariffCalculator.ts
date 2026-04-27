@@ -206,11 +206,15 @@ export class TariffCalculator {
   /**
    * Search for HS codes by code or description
    */
-  searchHSCodes(query: string): Promise<Array<{ code: string; description: string; category: string }>> {
+  searchHSCodes(
+    query: string,
+    options?: { limit?: number }
+  ): Promise<Array<{ code: string; description: string; category: string }>> {
     return new Promise((resolve, reject) => {
       const normalizedQuery = query.trim().toUpperCase()
       const compactQuery = normalizedQuery.replace(/\./g, '')
       const queryTerms = normalizedQuery.split(/\s+/).filter(Boolean)
+      const limit = Math.max(5, Math.min(100, Math.floor(options?.limit || 20)))
 
       if (!normalizedQuery) {
         resolve([])
@@ -246,7 +250,7 @@ export class TariffCalculator {
           OR UPPER(description) LIKE ?
           OR ${descriptionTermClause}
         ORDER BY rank, LENGTH(code), code, description
-        LIMIT 20
+        LIMIT ?
       `
 
       const sqlParams = [
@@ -260,6 +264,7 @@ export class TariffCalculator {
         compactSearchQuery,
         searchQuery,
         ...descriptionTermParams,
+        limit,
       ]
 
       this.db.all(
