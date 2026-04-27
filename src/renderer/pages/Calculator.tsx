@@ -33,11 +33,12 @@ interface CalculationResultsData {
     rate: number
     amount: number
   }
-  compliance: {
+  compliance?: {
     requiredDocuments?: string[]
+    requirements?: string[]
     restrictions?: string[]
     warnings?: string[]
-  } | null
+  }
   costBase: {
     fob: number
     freight: number
