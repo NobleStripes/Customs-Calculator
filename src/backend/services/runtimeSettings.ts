@@ -8,6 +8,10 @@ export interface RuntimeSettings {
   autoFetcherEnabled: boolean
   fxCacheTtlHours: number
   calculatorMode: 'estimate'
+  catalogMode: 'seed-fallback' | 'official-catalog-required'
+  stagedCutoverEnabled: boolean
+  cutoverCoverageThreshold: number
+  fullSyncIdempotencyGuardEnabled: boolean
 }
 
 const SETTINGS_FILE_NAME = 'runtime-settings.json'
@@ -18,6 +22,10 @@ const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
   autoFetcherEnabled: true,
   fxCacheTtlHours: 24,
   calculatorMode: 'estimate',
+  catalogMode: 'seed-fallback',
+  stagedCutoverEnabled: false,
+  cutoverCoverageThreshold: 99,
+  fullSyncIdempotencyGuardEnabled: true,
 }
 
 const settingsFilePath = (): string => {
@@ -39,6 +47,12 @@ const sanitizeSettings = (raw: Partial<RuntimeSettings> | null | undefined): Run
   const fxCacheTtlHours = Number.isFinite(Number(raw?.fxCacheTtlHours))
     ? Math.min(168, Math.max(1, Number(raw?.fxCacheTtlHours)))
     : DEFAULT_RUNTIME_SETTINGS.fxCacheTtlHours
+  const catalogMode = raw?.catalogMode === 'official-catalog-required'
+    ? 'official-catalog-required'
+    : DEFAULT_RUNTIME_SETTINGS.catalogMode
+  const cutoverCoverageThreshold = Number.isFinite(Number(raw?.cutoverCoverageThreshold))
+    ? Math.min(100, Math.max(90, Number(raw?.cutoverCoverageThreshold)))
+    : DEFAULT_RUNTIME_SETTINGS.cutoverCoverageThreshold
 
   return {
     defaultScheduleCode,
@@ -48,6 +62,14 @@ const sanitizeSettings = (raw: Partial<RuntimeSettings> | null | undefined): Run
       : DEFAULT_RUNTIME_SETTINGS.autoFetcherEnabled,
     fxCacheTtlHours,
     calculatorMode: 'estimate',
+    catalogMode,
+    stagedCutoverEnabled: typeof raw?.stagedCutoverEnabled === 'boolean'
+      ? raw.stagedCutoverEnabled
+      : DEFAULT_RUNTIME_SETTINGS.stagedCutoverEnabled,
+    cutoverCoverageThreshold,
+    fullSyncIdempotencyGuardEnabled: typeof raw?.fullSyncIdempotencyGuardEnabled === 'boolean'
+      ? raw.fullSyncIdempotencyGuardEnabled
+      : DEFAULT_RUNTIME_SETTINGS.fullSyncIdempotencyGuardEnabled,
   }
 }
 

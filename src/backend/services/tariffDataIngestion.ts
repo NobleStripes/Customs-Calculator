@@ -4,6 +4,8 @@
 import sqlite3 from 'sqlite3'
 import { readSheet } from 'read-excel-file/node'
 import { getDatabase } from '../db/database'
+import { getHsCodeMetadata, normalizeExactHsCode } from '../../shared/hsLookupQuery'
+import { getRuntimeSettings } from './runtimeSettings'
 
 type TabularImportPayload = {
   csvText?: string
@@ -16,6 +18,10 @@ export interface HSCatalogImportRow {
   hsCode: string
   description: string
   category?: string
+  chapterCode?: string
+  sectionCode?: string
+  sectionName?: string
+  metadataSource?: string
 }
 
 export interface HSCatalogImportPreviewRow {
@@ -25,6 +31,10 @@ export interface HSCatalogImportPreviewRow {
     hsCode: string
     description: string
     category: string
+    chapterCode: string
+    sectionCode: string
+    sectionName: string
+    metadataSource: string
   }
   errors: string[]
 }
@@ -65,6 +75,10 @@ export interface TariffImportPreviewRow {
     scheduleCode: string
     description: string
     category: string
+    chapterCode: string
+    sectionCode: string
+    sectionName: string
+    metadataSource: string
     dutyRate: number
     vatRate: number
     surchargeRate: number
@@ -74,6 +88,22 @@ export interface TariffImportPreviewRow {
     confidenceScore: number
   }
   errors: string[]
+}
+
+type NormalizedTariffRow = NonNullable<TariffImportPreviewRow['normalized']>
+
+type ConflictPayload = {
+  type: 'conflict-tariff-rate'
+  incoming: NormalizedTariffRow
+  existing: {
+    id: number
+    scheduleCode: string
+    dutyRate: number
+    vatRate: number
+    surchargeRate: number
+    effectiveDate: string
+    endDate: string | null
+  }
 }
 
 export interface TariffImportPreviewResult {
@@ -99,6 +129,9 @@ export interface TariffImportSummary {
   importedRows: number
   pendingReviewRows: number
   errorRows: number
+  duplicateRows: number
+  conflictRows: number
+  skippedRows: number
   status: 'completed' | 'completed_with_errors' | 'failed'
 }
 
@@ -354,7 +387,11 @@ const parseTariffRowsFromText = (text: string, sourceUrl: string): TariffImportR
 
   let match = rowPattern.exec(normalizedText)
   while (match) {
-    const hsCode = normalizeHsCode(String(match[1] || '').replace(/\s+/g, ''))
+    const hsCode = normalizeExactHsCode(String(match[1] || '').replace(/\s+/g, ''))
+    if (!hsCode) {
+      match = rowPattern.exec(normalizedText)
+      continue
+    }
     const dutyRateRaw = String(match[2] || '').trim()
 
     const parsedRate = normalizeRate(dutyRateRaw, Number.NaN)
@@ -383,28 +420,6 @@ const parseTariffRowsFromText = (text: string, sourceUrl: string): TariffImportR
   return rows
 }
 
-const normalizeHsCode = (hsCode: string): string => {
-  const compact = hsCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
-
-  if (/^\d{4}$/.test(compact)) {
-    return compact
-  }
-
-  if (/^\d{6}$/.test(compact)) {
-    return `${compact.slice(0, 4)}.${compact.slice(4)}`
-  }
-
-  if (/^\d{8}$/.test(compact)) {
-    return `${compact.slice(0, 4)}.${compact.slice(4, 6)}.${compact.slice(6)}`
-  }
-
-  if (/^\d{10}$/.test(compact)) {
-    return `${compact.slice(0, 4)}.${compact.slice(4, 6)}.${compact.slice(6, 8)}.${compact.slice(8)}`
-  }
-
-  return hsCode.trim().toUpperCase()
-}
-
 const parseDateOrFallback = (value: string | undefined, fallback: string): string => {
   if (!value) {
     return fallback
@@ -418,13 +433,37 @@ const parseDateOrFallback = (value: string | undefined, fallback: string): strin
   return date.toISOString().split('T')[0]
 }
 
+const buildHsMetadata = (hsCode: string): {
+  chapterCode: string
+  sectionCode: string
+  sectionName: string
+  metadataSource: string
+} => {
+  const metadata = getHsCodeMetadata(hsCode)
+  if (!metadata) {
+    return {
+      chapterCode: '',
+      sectionCode: '',
+      sectionName: '',
+      metadataSource: 'unknown',
+    }
+  }
+
+  return {
+    chapterCode: metadata.chapterCode,
+    sectionCode: metadata.sectionCode,
+    sectionName: metadata.sectionName,
+    metadataSource: 'derived-section-map',
+  }
+}
+
 const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPreviewRow => {
   const errors: string[] = []
 
-  const hsCode = normalizeHsCode(row.hsCode || '')
+  const hsCode = normalizeExactHsCode(row.hsCode || '')
   const scheduleCode = normalizeScheduleCode(row.scheduleCode)
   if (!hsCode) {
-    errors.push('HS code is required')
+    errors.push('HS code must be a valid 6, 8, or 10-digit code')
   }
 
   const dutyRate = normalizeRate(row.dutyRate, Number.NaN)
@@ -458,9 +497,10 @@ const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPrevi
     ? undefined
     : {
         hsCode,
-      scheduleCode,
+        scheduleCode,
+        ...buildHsMetadata(hsCode),
         description: (row.description || 'Imported from source').trim() || 'Imported from source',
-        category: (row.category || 'Imported').trim() || 'Imported',
+        category: (row.category || buildHsMetadata(hsCode).sectionName || 'Imported').trim() || 'Imported',
         dutyRate,
         vatRate,
         surchargeRate,
@@ -480,12 +520,12 @@ const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPrevi
 
 const validateHSCatalogRow = (row: HSCatalogImportRow, rowNumber: number): HSCatalogImportPreviewRow => {
   const errors: string[] = []
-  const hsCode = normalizeHsCode(row.hsCode || '')
+  const hsCode = normalizeExactHsCode(row.hsCode || '')
   const description = String(row.description || '').trim()
   const category = String(row.category || 'Imported').trim() || 'Imported'
 
   if (!hsCode) {
-    errors.push('HS code is required')
+    errors.push('HS code must be a valid 6, 8, or 10-digit code')
   }
 
   if (!description) {
@@ -500,10 +540,33 @@ const validateHSCatalogRow = (row: HSCatalogImportRow, rowNumber: number): HSCat
       : {
           hsCode,
           description,
-          category,
+          category: category || buildHsMetadata(hsCode).sectionName || 'Imported',
+          ...buildHsMetadata(hsCode),
         },
     errors,
   }
+}
+
+const buildConfidenceReviewReason = (
+  confidenceScore: number,
+  threshold: number,
+  sourceType: string | undefined,
+  notes: string
+): string => {
+  const reasonCodes: string[] = ['LOW_CONFIDENCE']
+
+  if ((sourceType || '').toLowerCase().includes('pdf') || notes.toLowerCase().includes('pdf source')) {
+    reasonCodes.push('PDF_EXTRACT')
+  }
+
+  if ((sourceType || '').toLowerCase().includes('auto-fetch')) {
+    reasonCodes.push('AUTO_FETCH')
+  }
+
+  reasonCodes.push(`SCORE_${Math.round(confidenceScore)}`)
+  reasonCodes.push(`THRESHOLD_${Math.round(threshold)}`)
+
+  return `${reasonCodes.join('|')}: below auto-approval threshold (${threshold})`
 }
 
 const updateImportJobStatus = async (
@@ -527,6 +590,130 @@ const updateImportJobStatus = async (
     `,
     [status, importedRows, pendingReviewRows, errorRows, errorMessage, jobId]
   )
+}
+
+const upsertHsCode = async (normalized: {
+  hsCode: string
+  description: string
+  category: string
+  chapterCode?: string
+  sectionCode?: string
+  sectionName?: string
+  metadataSource?: string
+}): Promise<void> => {
+  await run(
+    `
+      INSERT INTO hs_codes (code, description, category, chapter_code, section_code, section_name, metadata_source)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(code) DO UPDATE SET
+        description = excluded.description,
+        category = excluded.category,
+        chapter_code = excluded.chapter_code,
+        section_code = excluded.section_code,
+        section_name = excluded.section_name,
+        metadata_source = excluded.metadata_source
+    `,
+    [
+      normalized.hsCode,
+      normalized.description,
+      normalized.category,
+      normalized.chapterCode || null,
+      normalized.sectionCode || null,
+      normalized.sectionName || null,
+      normalized.metadataSource || 'imported',
+    ]
+  )
+}
+
+const applyTariffRateAndAudit = async (payload: {
+  normalized: NormalizedTariffRow
+  sourceId: number
+  importJobId: number
+  reason: string
+}): Promise<{ hadConflict: boolean; skippedAsDuplicate: boolean }> => {
+  const { normalized, sourceId, importJobId, reason } = payload
+
+  await upsertHsCode(normalized)
+
+  const existingRate = await get<{
+    id: number
+    schedule_code: string | null
+    duty_rate: number
+    vat_rate: number
+    surcharge_rate: number
+    effective_date: string
+    end_date: string | null
+  }>(
+    `
+      SELECT id, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date, end_date
+      FROM tariff_rates
+      WHERE hs_code = ?
+        AND COALESCE(schedule_code, 'MFN') = ?
+        AND (end_date IS NULL OR end_date > date('now'))
+      ORDER BY effective_date DESC
+      LIMIT 1
+    `,
+    [normalized.hsCode, normalized.scheduleCode]
+  )
+
+  const hasRateChange =
+    !existingRate ||
+    existingRate.duty_rate !== normalized.dutyRate ||
+    existingRate.vat_rate !== normalized.vatRate ||
+    existingRate.surcharge_rate !== normalized.surchargeRate
+
+  if (!hasRateChange) {
+    return { hadConflict: false, skippedAsDuplicate: true }
+  }
+
+  if (existingRate) {
+    await run('UPDATE tariff_rates SET end_date = ?, last_modified_at = CURRENT_TIMESTAMP WHERE id = ?', [
+      normalized.effectiveDate,
+      existingRate.id,
+    ])
+  }
+
+  await run(
+    `
+      INSERT INTO tariff_rates
+      (hs_code, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date, end_date, notes, source_id, confidence_score, import_status, last_modified_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', CURRENT_TIMESTAMP)
+    `,
+    [
+      normalized.hsCode,
+      normalized.scheduleCode,
+      normalized.dutyRate,
+      normalized.vatRate,
+      normalized.surchargeRate,
+      normalized.effectiveDate,
+      normalized.endDate,
+      normalized.notes,
+      sourceId,
+      normalized.confidenceScore,
+    ]
+  )
+
+  await run(
+    `
+      INSERT INTO rate_change_audit
+      (hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate, old_surcharge_rate, new_surcharge_rate, reason, source_id, import_job_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      normalized.hsCode,
+      existingRate?.duty_rate ?? null,
+      normalized.dutyRate,
+      existingRate?.vat_rate ?? null,
+      normalized.vatRate,
+      existingRate?.surcharge_rate ?? null,
+      normalized.surchargeRate,
+      reason,
+      sourceId,
+      importJobId,
+    ]
+  )
+
+  return { hadConflict: Boolean(existingRate), skippedAsDuplicate: false }
 }
 
 export class TariffDataIngestionService {
@@ -626,6 +813,10 @@ export class TariffDataIngestionService {
     let importedRows = 0
     const pendingReviewRows = 0
     let errorRows = 0
+    let duplicateRows = 0
+    let conflictRows = 0
+    let skippedRows = 0
+    const seenInPayload = new Set<string>()
 
     try {
       for (const row of preview.rows) {
@@ -650,15 +841,43 @@ export class TariffDataIngestionService {
           continue
         }
 
+        const dedupeKey = `${row.normalized.hsCode}:${row.normalized.description}:${row.normalized.category}`
+        if (seenInPayload.has(dedupeKey)) {
+          duplicateRows += 1
+          skippedRows += 1
+          continue
+        }
+        seenInPayload.add(dedupeKey)
+
+        const existingCatalogRow = await get<{ description: string; category: string }>(
+          'SELECT description, category FROM hs_codes WHERE code = ? LIMIT 1',
+          [row.normalized.hsCode]
+        )
+        if (existingCatalogRow && (existingCatalogRow.description !== row.normalized.description || existingCatalogRow.category !== row.normalized.category)) {
+          conflictRows += 1
+        }
+
         await run(
           `
-            INSERT INTO hs_codes (code, description, category)
-            VALUES (?, ?, ?)
+            INSERT INTO hs_codes (code, description, category, chapter_code, section_code, section_name, metadata_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(code) DO UPDATE SET
               description = excluded.description,
-              category = excluded.category
+              category = excluded.category,
+              chapter_code = excluded.chapter_code,
+              section_code = excluded.section_code,
+              section_name = excluded.section_name,
+              metadata_source = excluded.metadata_source
           `,
-          [row.normalized.hsCode, row.normalized.description, row.normalized.category]
+          [
+            row.normalized.hsCode,
+            row.normalized.description,
+            row.normalized.category,
+            row.normalized.chapterCode || null,
+            row.normalized.sectionCode || null,
+            row.normalized.sectionName || null,
+            row.normalized.metadataSource || 'imported',
+          ]
         )
 
         importedRows += 1
@@ -677,6 +896,9 @@ export class TariffDataIngestionService {
         importedRows,
         pendingReviewRows,
         errorRows,
+        duplicateRows,
+        conflictRows,
+        skippedRows,
         status: finalStatus,
       }
     } catch (error) {
@@ -699,6 +921,9 @@ export class TariffDataIngestionService {
       importedRows: 0,
       pendingReviewRows: 0,
       errorRows: 0,
+      duplicateRows: 0,
+      conflictRows: 0,
+      skippedRows: 0,
       status: 'completed',
       batchSize: normalizedBatchSize,
       totalBatches,
@@ -726,6 +951,9 @@ export class TariffDataIngestionService {
       aggregate.importedRows += summary.importedRows
       aggregate.pendingReviewRows += summary.pendingReviewRows
       aggregate.errorRows += summary.errorRows
+      aggregate.duplicateRows += summary.duplicateRows
+      aggregate.conflictRows += summary.conflictRows
+      aggregate.skippedRows += summary.skippedRows
       aggregate.processedBatches += 1
 
       if (summary.status === 'failed') {
@@ -747,13 +975,58 @@ export class TariffDataIngestionService {
   async importRows(request: TariffImportRequest): Promise<TariffImportSummary> {
     const threshold = request.autoApproveThreshold ?? DEFAULT_THRESHOLD
     const preview = this.previewRows(request.rows)
+    const sourceType = request.sourceType || 'manual'
+    const runtimeSettings = getRuntimeSettings()
+
+    if (
+      runtimeSettings.fullSyncIdempotencyGuardEnabled &&
+      sourceType.includes('full-sync') &&
+      request.sourceReference &&
+      request.sourceReference.trim() &&
+      await this.hasSourceReference(sourceType, request.sourceReference)
+    ) {
+      const sourceInsert = await run(
+        `
+          INSERT INTO tariff_sources (source_name, source_type, source_reference, status, fetched_at, imported_at, notes)
+          VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+        `,
+        [
+          request.sourceName,
+          sourceType,
+          request.sourceReference,
+          'Idempotency guard skipped duplicate full-sync source reference',
+        ]
+      )
+      const sourceId = sourceInsert.lastID
+
+      const jobInsert = await run(
+        `
+          INSERT INTO import_jobs (source_id, status, total_rows, imported_rows, pending_review_rows, error_rows, started_at, completed_at)
+          VALUES (?, 'completed', ?, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `,
+        [sourceId, preview.totalRows]
+      )
+
+      return {
+        sourceId,
+        importJobId: jobInsert.lastID,
+        totalRows: preview.totalRows,
+        importedRows: 0,
+        pendingReviewRows: 0,
+        errorRows: 0,
+        duplicateRows: preview.totalRows,
+        conflictRows: 0,
+        skippedRows: preview.totalRows,
+        status: 'completed',
+      }
+    }
 
     const sourceInsert = await run(
       `
         INSERT INTO tariff_sources (source_name, source_type, source_reference, status, fetched_at)
         VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP)
       `,
-      [request.sourceName, request.sourceType || 'manual', request.sourceReference || null]
+      [request.sourceName, sourceType, request.sourceReference || null]
     )
     const sourceId = sourceInsert.lastID
 
@@ -769,6 +1042,10 @@ export class TariffDataIngestionService {
     let importedRows = 0
     let pendingReviewRows = 0
     let errorRows = 0
+    let duplicateRows = 0
+    let conflictRows = 0
+    let skippedRows = 0
+    const seenInPayload = new Set<string>()
 
     try {
       for (const row of preview.rows) {
@@ -793,6 +1070,22 @@ export class TariffDataIngestionService {
           continue
         }
 
+        const dedupeKey = [
+          row.normalized.hsCode,
+          row.normalized.scheduleCode,
+          row.normalized.effectiveDate,
+          row.normalized.dutyRate,
+          row.normalized.vatRate,
+          row.normalized.surchargeRate,
+        ].join('|')
+
+        if (seenInPayload.has(dedupeKey)) {
+          duplicateRows += 1
+          skippedRows += 1
+          continue
+        }
+        seenInPayload.add(dedupeKey)
+
         const shouldQueueForReview = !request.forceApprove && row.normalized.confidenceScore < threshold
         if (shouldQueueForReview) {
           pendingReviewRows += 1
@@ -809,16 +1102,16 @@ export class TariffDataIngestionService {
               JSON.stringify(row.raw),
               JSON.stringify(row.normalized),
               row.normalized.confidenceScore,
-              `Below auto-approval threshold (${threshold})`,
+              buildConfidenceReviewReason(
+                row.normalized.confidenceScore,
+                threshold,
+                request.sourceType,
+                row.normalized.notes
+              ),
             ]
           )
           continue
         }
-
-        await run(
-          'INSERT OR IGNORE INTO hs_codes (code, description, category) VALUES (?, ?, ?)',
-          [row.normalized.hsCode, row.normalized.description, row.normalized.category]
-        )
 
         const existingRate = await get<{
           id: number
@@ -848,55 +1141,64 @@ export class TariffDataIngestionService {
           existingRate.surcharge_rate !== row.normalized.surchargeRate
 
         if (!hasRateChange) {
+          duplicateRows += 1
+          skippedRows += 1
           continue
         }
 
-        if (existingRate) {
-          await run('UPDATE tariff_rates SET end_date = ?, last_modified_at = CURRENT_TIMESTAMP WHERE id = ?', [
-            row.normalized.effectiveDate,
-            existingRate.id,
-          ])
+        if (existingRate && !request.forceApprove) {
+          conflictRows += 1
+          pendingReviewRows += 1
+
+          const conflictPayload: ConflictPayload = {
+            type: 'conflict-tariff-rate',
+            incoming: row.normalized,
+            existing: {
+              id: existingRate.id,
+              scheduleCode: existingRate.schedule_code || row.normalized.scheduleCode,
+              dutyRate: existingRate.duty_rate,
+              vatRate: existingRate.vat_rate,
+              surchargeRate: existingRate.surcharge_rate,
+              effectiveDate: existingRate.effective_date,
+              endDate: existingRate.end_date,
+            },
+          }
+
+          await run(
+            `
+              INSERT INTO extracted_rows_review
+              (source_id, import_job_id, row_number, raw_payload, normalized_payload, confidence_score, review_status, review_notes)
+              VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            `,
+            [
+              sourceId,
+              importJobId,
+              row.rowNumber,
+              JSON.stringify(row.raw),
+              JSON.stringify(conflictPayload),
+              row.normalized.confidenceScore,
+              'CONFLICT_EXISTING_RATE|requires_decision: incoming and existing rates differ for active row',
+            ]
+          )
+          continue
         }
 
-        await run(
-          `
-            INSERT INTO tariff_rates
-            (hs_code, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date, end_date, notes, source_id, confidence_score, import_status, last_modified_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', CURRENT_TIMESTAMP)
-          `,
-          [
-            row.normalized.hsCode,
-            row.normalized.scheduleCode,
-            row.normalized.dutyRate,
-            row.normalized.vatRate,
-            row.normalized.surchargeRate,
-            row.normalized.effectiveDate,
-            row.normalized.endDate,
-            row.normalized.notes,
-            sourceId,
-            row.normalized.confidenceScore,
-          ]
-        )
+        const applyResult = await applyTariffRateAndAudit({
+          normalized: row.normalized,
+          sourceId,
+          importJobId,
+          reason: `Source import (${row.normalized.scheduleCode})`,
+        })
 
-        await run(
-          `
-            INSERT INTO rate_change_audit
-            (hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate, old_surcharge_rate, new_surcharge_rate, reason, source_id, import_job_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `,
-          [
-            row.normalized.hsCode,
-            existingRate?.duty_rate ?? null,
-            row.normalized.dutyRate,
-            existingRate?.vat_rate ?? null,
-            row.normalized.vatRate,
-            existingRate?.surcharge_rate ?? null,
-            row.normalized.surchargeRate,
-            `Source import (${row.normalized.scheduleCode})`,
-            sourceId,
-            importJobId,
-          ]
-        )
+        if (applyResult.skippedAsDuplicate) {
+          duplicateRows += 1
+          skippedRows += 1
+          continue
+        }
+
+        if (applyResult.hadConflict) {
+          conflictRows += 1
+        }
 
         importedRows += 1
       }
@@ -914,6 +1216,9 @@ export class TariffDataIngestionService {
         importedRows,
         pendingReviewRows,
         errorRows,
+        duplicateRows,
+        conflictRows,
+        skippedRows,
         status: finalStatus,
       }
     } catch (error) {
@@ -946,6 +1251,11 @@ export class TariffDataIngestionService {
 
   async getPendingReviewRows(importJobId: number): Promise<Array<{
     id: number
+    source_id: number
+    source_name: string
+    source_type: string
+    source_reference: string | null
+    import_job_status: string
     row_number: number
     raw_payload: string
     normalized_payload: string | null
@@ -955,13 +1265,185 @@ export class TariffDataIngestionService {
   }>> {
     return all(
       `
-        SELECT id, row_number, raw_payload, normalized_payload, confidence_score, review_notes, created_at
-        FROM extracted_rows_review
-        WHERE import_job_id = ? AND review_status = 'pending'
+        SELECT
+          rr.id,
+          rr.source_id,
+          ts.source_name,
+          ts.source_type,
+          ts.source_reference,
+          ij.status AS import_job_status,
+          rr.row_number,
+          rr.raw_payload,
+          rr.normalized_payload,
+          rr.confidence_score,
+          rr.review_notes,
+          rr.created_at
+        FROM extracted_rows_review rr
+        JOIN tariff_sources ts ON ts.id = rr.source_id
+        JOIN import_jobs ij ON ij.id = rr.import_job_id
+        WHERE rr.import_job_id = ? AND rr.review_status = 'pending'
         ORDER BY row_number ASC
       `,
       [importJobId]
     )
+  }
+
+  async getReviewRowProvenance(rowId: number): Promise<{
+    row: {
+      id: number
+      import_job_id: number
+      source_id: number
+      row_number: number
+      raw_payload: string
+      normalized_payload: string | null
+      confidence_score: number
+      review_status: string
+      review_notes: string | null
+      created_at: string
+      reviewed_at: string | null
+    }
+    source: {
+      id: number
+      source_name: string
+      source_type: string
+      source_reference: string | null
+      status: string
+      fetched_at: string
+      imported_at: string | null
+    }
+    importJob: {
+      id: number
+      status: string
+      total_rows: number
+      imported_rows: number
+      pending_review_rows: number
+      error_rows: number
+      started_at: string
+      completed_at: string | null
+    }
+    recentAudit: Array<{
+      id: number
+      hs_code: string
+      old_duty_rate: number | null
+      new_duty_rate: number | null
+      old_vat_rate: number | null
+      new_vat_rate: number | null
+      old_surcharge_rate: number | null
+      new_surcharge_rate: number | null
+      reason: string | null
+      changed_at: string
+    }>
+  }> {
+    const row = await get<{
+      id: number
+      import_job_id: number
+      source_id: number
+      row_number: number
+      raw_payload: string
+      normalized_payload: string | null
+      confidence_score: number
+      review_status: string
+      review_notes: string | null
+      created_at: string
+      reviewed_at: string | null
+    }>(
+      `
+        SELECT id, import_job_id, source_id, row_number, raw_payload, normalized_payload, confidence_score,
+               review_status, review_notes, created_at, reviewed_at
+        FROM extracted_rows_review
+        WHERE id = ?
+      `,
+      [rowId]
+    )
+
+    if (!row) {
+      throw new Error(`Review row ${rowId} not found`)
+    }
+
+    const source = await get<{
+      id: number
+      source_name: string
+      source_type: string
+      source_reference: string | null
+      status: string
+      fetched_at: string
+      imported_at: string | null
+    }>(
+      `
+        SELECT id, source_name, source_type, source_reference, status, fetched_at, imported_at
+        FROM tariff_sources
+        WHERE id = ?
+      `,
+      [row.source_id]
+    )
+
+    const importJob = await get<{
+      id: number
+      status: string
+      total_rows: number
+      imported_rows: number
+      pending_review_rows: number
+      error_rows: number
+      started_at: string
+      completed_at: string | null
+    }>(
+      `
+        SELECT id, status, total_rows, imported_rows, pending_review_rows, error_rows, started_at, completed_at
+        FROM import_jobs
+        WHERE id = ?
+      `,
+      [row.import_job_id]
+    )
+
+    let hsCode = ''
+    if (row.normalized_payload) {
+      try {
+        const parsed = JSON.parse(row.normalized_payload) as Record<string, unknown>
+        if (parsed.type === 'conflict-tariff-rate' && parsed.incoming && typeof parsed.incoming === 'object') {
+          hsCode = String((parsed.incoming as Record<string, unknown>).hsCode || '')
+        } else {
+          hsCode = String(parsed.hsCode || '')
+        }
+      } catch {
+        hsCode = ''
+      }
+    }
+
+    const recentAudit = hsCode
+      ? await all<{
+          id: number
+          hs_code: string
+          old_duty_rate: number | null
+          new_duty_rate: number | null
+          old_vat_rate: number | null
+          new_vat_rate: number | null
+          old_surcharge_rate: number | null
+          new_surcharge_rate: number | null
+          reason: string | null
+          changed_at: string
+        }>(
+          `
+            SELECT id, hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate,
+                   old_surcharge_rate, new_surcharge_rate, reason, changed_at
+            FROM rate_change_audit
+            WHERE hs_code = ?
+            ORDER BY changed_at DESC
+            LIMIT 10
+          `,
+          [hsCode]
+        )
+      : []
+
+    if (!source || !importJob) {
+      throw new Error(`Provenance links missing for review row ${rowId}`)
+    }
+
+    return {
+      row,
+      source,
+      importJob,
+      recentAudit,
+    }
   }
 
   async approveReviewRow(importJobId: number, rowId: number, notes?: string): Promise<void> {
@@ -988,6 +1470,10 @@ export class TariffDataIngestionService {
       scheduleCode: string
       description: string
       category: string
+      chapterCode?: string
+      sectionCode?: string
+      sectionName?: string
+      metadataSource?: string
       dutyRate: number
       vatRate: number
       surchargeRate: number
@@ -996,73 +1482,29 @@ export class TariffDataIngestionService {
       notes: string
       confidenceScore: number
     }
+    let conflictIncoming: NormalizedTariffRow | null = null
 
     try {
-      normalized = JSON.parse(row.normalized_payload)
+      const parsed = JSON.parse(row.normalized_payload) as Record<string, unknown>
+
+      if (parsed && parsed.type === 'conflict-tariff-rate' && parsed.incoming && typeof parsed.incoming === 'object') {
+        conflictIncoming = parsed.incoming as NormalizedTariffRow
+        normalized = conflictIncoming
+      } else {
+        normalized = parsed as typeof normalized
+      }
     } catch {
       throw new Error(`Review row ${rowId} has invalid normalized payload JSON`)
     }
 
-    await run(
-      'INSERT OR IGNORE INTO hs_codes (code, description, category) VALUES (?, ?, ?)',
-      [normalized.hsCode, normalized.description, normalized.category]
-    )
-
-    const existingRate = await get<{
-      id: number
-      duty_rate: number
-      vat_rate: number
-      surcharge_rate: number
-    }>(
-      `SELECT id, duty_rate, vat_rate, surcharge_rate
-       FROM tariff_rates
-       WHERE hs_code = ? AND COALESCE(schedule_code, 'MFN') = ? AND (end_date IS NULL OR end_date > date('now'))
-       ORDER BY effective_date DESC LIMIT 1`,
-      [normalized.hsCode, normalized.scheduleCode]
-    )
-
-    if (existingRate) {
-      await run('UPDATE tariff_rates SET end_date = ?, last_modified_at = CURRENT_TIMESTAMP WHERE id = ?', [
-        normalized.effectiveDate,
-        existingRate.id,
-      ])
-    }
-
-    await run(
-      `INSERT INTO tariff_rates
-       (hs_code, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date, end_date, notes, source_id, confidence_score, import_status, last_modified_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', CURRENT_TIMESTAMP)`,
-      [
-        normalized.hsCode,
-        normalized.scheduleCode,
-        normalized.dutyRate,
-        normalized.vatRate,
-        normalized.surchargeRate,
-        normalized.effectiveDate,
-        normalized.endDate,
-        normalized.notes,
-        row.source_id,
-        normalized.confidenceScore,
-      ]
-    )
-
-    await run(
-      `INSERT INTO rate_change_audit
-       (hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate, old_surcharge_rate, new_surcharge_rate, reason, source_id, import_job_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        normalized.hsCode,
-        existingRate?.duty_rate ?? null,
-        normalized.dutyRate,
-        existingRate?.vat_rate ?? null,
-        normalized.vatRate,
-        existingRate?.surcharge_rate ?? null,
-        normalized.surchargeRate,
-        `Manual review approval (${normalized.scheduleCode})`,
-        row.source_id,
-        importJobId,
-      ]
-    )
+    await applyTariffRateAndAudit({
+      normalized,
+      sourceId: row.source_id,
+      importJobId,
+      reason: conflictIncoming
+        ? `Conflict review decision (use incoming ${normalized.scheduleCode})`
+        : `Manual review approval (${normalized.scheduleCode})`,
+    })
 
     await run(
       `UPDATE extracted_rows_review
@@ -1073,13 +1515,45 @@ export class TariffDataIngestionService {
   }
 
   async rejectReviewRow(importJobId: number, rowId: number, notes?: string): Promise<void> {
-    const exists = await get<{ id: number }>(
-      'SELECT id FROM extracted_rows_review WHERE id = ? AND import_job_id = ?',
+    const exists = await get<{ id: number; source_id: number; normalized_payload: string | null }>(
+      'SELECT id, source_id, normalized_payload FROM extracted_rows_review WHERE id = ? AND import_job_id = ?',
       [rowId, importJobId]
     )
 
     if (!exists) {
       throw new Error(`Review row ${rowId} not found for job ${importJobId}`)
+    }
+
+    if (exists.normalized_payload) {
+      try {
+        const parsed = JSON.parse(exists.normalized_payload) as Record<string, unknown>
+        if (parsed.type === 'conflict-tariff-rate' && parsed.existing && typeof parsed.existing === 'object' && parsed.incoming && typeof parsed.incoming === 'object') {
+          const existing = parsed.existing as { dutyRate?: number; vatRate?: number; surchargeRate?: number }
+          const incoming = parsed.incoming as { hsCode?: string; dutyRate?: number; vatRate?: number; surchargeRate?: number }
+
+          await run(
+            `
+              INSERT INTO rate_change_audit
+              (hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate, old_surcharge_rate, new_surcharge_rate, reason, source_id, import_job_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+            [
+              incoming.hsCode || '',
+              existing.dutyRate ?? null,
+              incoming.dutyRate ?? null,
+              existing.vatRate ?? null,
+              incoming.vatRate ?? null,
+              existing.surchargeRate ?? null,
+              incoming.surchargeRate ?? null,
+              'Conflict review decision (keep existing rate)',
+              exists.source_id,
+              importJobId,
+            ]
+          )
+        }
+      } catch {
+        // Ignore JSON parse errors for audit fallback on reject.
+      }
     }
 
     await run(
@@ -1144,6 +1618,84 @@ export class TariffDataIngestionService {
        LIMIT ?`,
       [limit]
     )
+  }
+
+  async getCatalogHealthMetrics(): Promise<{
+    totalHsCodes: number
+    hsCodesWithApprovedMfnRate: number
+    mfnCoveragePercent: number
+    pendingReviewRows: number
+    latestFullSyncAt: string | null
+    latestFullSyncStatus: string | null
+    importFailureCountLast30d: number
+    recommendedCutover: boolean
+    cutoverCoverageThreshold: number
+    stagedCutoverEnabled: boolean
+  }> {
+    const runtimeSettings = getRuntimeSettings()
+    const totals = await get<{ total: number }>('SELECT COUNT(1) AS total FROM hs_codes')
+    const covered = await get<{ total: number }>(
+      `
+        SELECT COUNT(DISTINCT hc.code) AS total
+        FROM hs_codes hc
+        JOIN tariff_rates tr ON tr.hs_code = hc.code
+        WHERE COALESCE(tr.schedule_code, 'MFN') = 'MFN'
+          AND (tr.import_status = 'approved' OR tr.import_status IS NULL)
+      `
+    )
+    const pending = await get<{ total: number }>(
+      `
+        SELECT COUNT(1) AS total
+        FROM extracted_rows_review
+        WHERE review_status = 'pending'
+      `
+    )
+
+    const latestFullSync = await get<{ imported_at: string | null; status: string | null }>(
+      `
+        SELECT ts.imported_at, ij.status
+        FROM tariff_sources ts
+        LEFT JOIN import_jobs ij ON ij.source_id = ts.id
+        WHERE ts.source_type LIKE '%full-sync%'
+        ORDER BY COALESCE(ts.imported_at, ts.fetched_at) DESC
+        LIMIT 1
+      `
+    )
+
+    const failures = await get<{ total: number }>(
+      `
+        SELECT COUNT(1) AS total
+        FROM import_jobs
+        WHERE status = 'failed'
+          AND started_at >= datetime('now', '-30 day')
+      `
+    )
+
+    const totalHsCodes = totals?.total || 0
+    const hsCodesWithApprovedMfnRate = covered?.total || 0
+    const mfnCoveragePercent = totalHsCodes > 0
+      ? Math.round((hsCodesWithApprovedMfnRate / totalHsCodes) * 10000) / 100
+      : 0
+
+    const recommendedCutover =
+      mfnCoveragePercent >= runtimeSettings.cutoverCoverageThreshold &&
+      (pending?.total || 0) === 0 &&
+      (failures?.total || 0) === 0 &&
+      latestFullSync?.status === 'completed' &&
+      runtimeSettings.stagedCutoverEnabled
+
+    return {
+      totalHsCodes,
+      hsCodesWithApprovedMfnRate,
+      mfnCoveragePercent,
+      pendingReviewRows: pending?.total || 0,
+      latestFullSyncAt: latestFullSync?.imported_at || null,
+      latestFullSyncStatus: latestFullSync?.status || null,
+      importFailureCountLast30d: failures?.total || 0,
+      recommendedCutover,
+      cutoverCoverageThreshold: runtimeSettings.cutoverCoverageThreshold,
+      stagedCutoverEnabled: runtimeSettings.stagedCutoverEnabled,
+    }
   }
 
   async hasSourceReference(sourceType: string, sourceReference: string): Promise<boolean> {

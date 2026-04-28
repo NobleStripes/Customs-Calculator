@@ -2,6 +2,7 @@ import sqlite3 from 'sqlite3'
 import os from 'os'
 import path from 'path'
 import { existsSync, mkdirSync } from 'fs'
+import { getHsCodeMetadata } from '../../shared/hsLookupQuery'
 
 let db: sqlite3.Database | null = null
 
@@ -13,6 +14,10 @@ type HSCodeSeedRow = {
   code: string
   description: string
   category: string
+  chapterCode?: string
+  sectionCode?: string
+  sectionName?: string
+  metadataSource?: string
 }
 
 export const getDbPath = (): string => {
@@ -71,6 +76,10 @@ const schema = [
     code TEXT UNIQUE NOT NULL,
     description TEXT NOT NULL,
     category TEXT NOT NULL,
+    chapter_code TEXT,
+    section_code TEXT,
+    section_name TEXT,
+    metadata_source TEXT NOT NULL DEFAULT 'seed',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
 
@@ -215,7 +224,8 @@ export const initializeDatabase = (): Promise<void> => {
 
     const executeNextStatement = () => {
       if (completed >= schema.length) {
-        ensureTariffRatesSchemaCompatibility(database)
+        ensureHsCodesSchemaCompatibility(database)
+          .then(() => ensureTariffRatesSchemaCompatibility(database))
           .then(() => seedInitialData())
           .then(resolve)
           .catch(reject)
@@ -235,6 +245,95 @@ export const initializeDatabase = (): Promise<void> => {
 
     executeNextStatement()
   })
+}
+
+const ensureHsCodesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    database.all("PRAGMA table_info('hs_codes')", (err: Error | null, rows: TableInfoRow[]) => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      const existingColumns = new Set((rows || []).map((row) => row.name))
+      const migrationStatements: string[] = []
+
+      if (!existingColumns.has('chapter_code')) {
+        migrationStatements.push('ALTER TABLE hs_codes ADD COLUMN chapter_code TEXT')
+      }
+
+      if (!existingColumns.has('section_code')) {
+        migrationStatements.push('ALTER TABLE hs_codes ADD COLUMN section_code TEXT')
+      }
+
+      if (!existingColumns.has('section_name')) {
+        migrationStatements.push('ALTER TABLE hs_codes ADD COLUMN section_name TEXT')
+      }
+
+      if (!existingColumns.has('metadata_source')) {
+        migrationStatements.push("ALTER TABLE hs_codes ADD COLUMN metadata_source TEXT NOT NULL DEFAULT 'seed'")
+      }
+
+      const applyBackfillAndIndexes = () => {
+        backfillHsMetadata(database)
+          .then(() => runStatement(database, "UPDATE hs_codes SET metadata_source = 'seed' WHERE metadata_source IS NULL OR TRIM(metadata_source) = ''"))
+          .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_hs_codes_chapter_code ON hs_codes(chapter_code)'))
+          .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_hs_codes_section_code ON hs_codes(section_code)'))
+          .then(resolve)
+          .catch(reject)
+      }
+
+      if (migrationStatements.length === 0) {
+        applyBackfillAndIndexes()
+        return
+      }
+
+      let completed = 0
+      migrationStatements.forEach((statement) => {
+        database.run(statement, (migrationErr: Error | null) => {
+          if (migrationErr) {
+            reject(migrationErr)
+            return
+          }
+
+          completed += 1
+          if (completed === migrationStatements.length) {
+            applyBackfillAndIndexes()
+          }
+        })
+      })
+    })
+  })
+}
+
+const backfillHsMetadata = async (database: sqlite3.Database): Promise<void> => {
+  const rows = await new Promise<Array<{ code: string }>>((resolve, reject) => {
+    database.all('SELECT code FROM hs_codes', (err: Error | null, queryRows: Array<{ code: string }>) => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      resolve(queryRows || [])
+    })
+  })
+
+  for (const row of rows) {
+    const metadata = getHsCodeMetadata(row.code)
+    if (!metadata) {
+      continue
+    }
+
+    await runStatement(
+      database,
+      `
+        UPDATE hs_codes
+        SET chapter_code = ?, section_code = ?, section_name = ?
+        WHERE code = ?
+      `,
+      [metadata.chapterCode, metadata.sectionCode, metadata.sectionName, row.code]
+    )
+  }
 }
 
 const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
@@ -281,6 +380,8 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
           .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_tariff_rates_schedule_code ON tariff_rates(schedule_code)'))
           .then(() => ensureComplianceRulesSchemaCompatibility(database))
           .then(() => cleanupDuplicateSeedRows(database))
+          .then(() => cleanupTariffVersionCollisions(database))
+          .then(() => applyHardeningIndexes(database))
           .then(resolve)
           .catch(reject)
         return
@@ -300,6 +401,8 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
               .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_tariff_rates_schedule_code ON tariff_rates(schedule_code)'))
               .then(() => ensureComplianceRulesSchemaCompatibility(database))
               .then(() => cleanupDuplicateSeedRows(database))
+              .then(() => cleanupTariffVersionCollisions(database))
+              .then(() => applyHardeningIndexes(database))
               .then(resolve)
               .catch(reject)
           }
@@ -307,6 +410,39 @@ const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promi
       })
     })
   })
+}
+
+const cleanupTariffVersionCollisions = async (database: sqlite3.Database): Promise<void> => {
+  await runStatement(
+    database,
+    `
+      DELETE FROM tariff_rates
+      WHERE id NOT IN (
+        SELECT MAX(id)
+        FROM tariff_rates
+        GROUP BY
+          hs_code,
+          COALESCE(schedule_code, 'MFN'),
+          effective_date,
+          COALESCE(import_status, 'approved')
+      )
+    `
+  )
+}
+
+const applyHardeningIndexes = async (database: sqlite3.Database): Promise<void> => {
+  await runStatement(
+    database,
+    `
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_tariff_rates_version
+      ON tariff_rates (
+        hs_code,
+        COALESCE(schedule_code, 'MFN'),
+        effective_date,
+        COALESCE(import_status, 'approved')
+      )
+    `
+  )
 }
 
 const cleanupDuplicateSeedRows = async (database: sqlite3.Database): Promise<void> => {
@@ -426,8 +562,20 @@ const insertHSCodes = (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[])
 
     hsCodesData.forEach((item) => {
       database.run(
-        'INSERT OR IGNORE INTO hs_codes (code, description, category) VALUES (?, ?, ?)',
-        [item.code, item.description, item.category],
+        `
+          INSERT OR IGNORE INTO hs_codes
+          (code, description, category, chapter_code, section_code, section_name, metadata_source)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          item.code,
+          item.description,
+          item.category,
+          item.chapterCode || null,
+          item.sectionCode || null,
+          item.sectionName || null,
+          item.metadataSource || 'seed',
+        ],
         (err: Error | null) => {
           if (err) {
             console.error(`Error inserting HS code ${item.code}:`, err)
@@ -650,7 +798,16 @@ export const seedInitialData = async (): Promise<void> => {
       { code: '8544.30', description: 'Insulated electric conductors', category: 'Electronics' },
       { code: '7326.90', description: 'Steel articles, miscellaneous', category: 'Steel' },
       { code: '4418.90', description: 'Wood articles, miscellaneous', category: 'Wood' },
-    ]
+    ].map((row) => {
+      const metadata = getHsCodeMetadata(row.code)
+      return {
+        ...row,
+        chapterCode: metadata?.chapterCode,
+        sectionCode: metadata?.sectionCode,
+        sectionName: metadata?.sectionName,
+        metadataSource: 'seed',
+      }
+    })
 
     await insertHSCodes(database, hsCodesData)
     await insertTariffSchedules(database)

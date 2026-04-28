@@ -13,6 +13,8 @@ import {
   FALLBACK_CONFIDENCE_SCORE,
   LOCAL_CATALOG_CONFIDENCE_SCORE,
   isCodeLikeQuery,
+  isValidExactHsCode,
+  normalizeExactHsCode,
 } from '../shared/hsLookupQuery'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
 import { startAutoFetching } from '../backend/services/autoFetcher'
@@ -78,8 +80,25 @@ const normalizeHsSearchQuery = (value: unknown): string | null => {
     return null
   }
 
+  if (isCodeLikeQuery(normalizedQuery)) {
+    const digitsOnlyLength = normalizedQuery.replace(/[^0-9]/g, '').length
+    if (digitsOnlyLength >= 6 && !isValidExactHsCode(normalizedQuery)) {
+      return null
+    }
+  }
+
   return normalizedQuery
 }
+
+const normalizeExactHsCodeFromRequest = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  return normalizeExactHsCode(value)
+}
+
+const isSeedFallbackMode = (): boolean => getRuntimeSettings().catalogMode === 'seed-fallback'
 
 const sendError = (response: express.Response, statusCode: number, error: unknown) => {
   response.status(statusCode).json({
@@ -120,6 +139,7 @@ app.put('/api/runtime-settings', (request, response) => {
 app.get('/api/runtime-status', async (_request, response) => {
   try {
     const sources = await tariffDataIngestion.getTariffSources(25)
+    const health = await tariffDataIngestion.getCatalogHealthMetrics()
     const [latestSource] = sources
     const latestAutoFetchSource = sources.find((source) =>
       source.source_type.startsWith('auto-fetch')
@@ -131,8 +151,18 @@ app.get('/api/runtime-status', async (_request, response) => {
         settings: getRuntimeSettings(),
         latestSource: latestSource || null,
         autoFetcherLastRun: latestAutoFetchSource?.fetched_at || null,
+        health,
       },
     })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/catalog-health', async (_request, response) => {
+  try {
+    const result = await tariffDataIngestion.getCatalogHealthMetrics()
+    return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)
   }
@@ -145,8 +175,9 @@ app.post('/api/calculate/duty', async (request, response) => {
     return sendError(response, 400, 'Request body field "value" must be a valid number')
   }
 
-  if (typeof hsCode !== 'string' || !hsCode.trim()) {
-    return sendError(response, 400, 'Request body field "hsCode" is required')
+  const normalizedHsCode = normalizeExactHsCodeFromRequest(hsCode)
+  if (!normalizedHsCode) {
+    return sendError(response, 400, 'Request body field "hsCode" must be a valid 6, 8, or 10-digit HS code')
   }
 
   if (typeof originCountry !== 'string' || !originCountry.trim()) {
@@ -154,7 +185,7 @@ app.post('/api/calculate/duty', async (request, response) => {
   }
 
   try {
-    const result = await tariffCalculator.calculateDuty(Number(value), hsCode, originCountry, normalizeScheduleCode(scheduleCode))
+    const result = await tariffCalculator.calculateDuty(Number(value), normalizedHsCode, originCountry, normalizeScheduleCode(scheduleCode))
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)
@@ -168,12 +199,13 @@ app.post('/api/calculate/vat', async (request, response) => {
     return sendError(response, 400, 'Request body field "dutiableValue" must be a valid number')
   }
 
-  if (typeof hsCode !== 'string' || !hsCode.trim()) {
-    return sendError(response, 400, 'Request body field "hsCode" is required')
+  const normalizedHsCode = normalizeExactHsCodeFromRequest(hsCode)
+  if (!normalizedHsCode) {
+    return sendError(response, 400, 'Request body field "hsCode" must be a valid 6, 8, or 10-digit HS code')
   }
 
   try {
-    const result = await tariffCalculator.calculateVAT(Number(dutiableValue), hsCode, normalizeScheduleCode(scheduleCode))
+    const result = await tariffCalculator.calculateVAT(Number(dutiableValue), normalizedHsCode, normalizeScheduleCode(scheduleCode))
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)
@@ -183,8 +215,9 @@ app.post('/api/calculate/vat', async (request, response) => {
 app.post('/api/compliance/requirements', async (request, response) => {
   const { hsCode, value, destination } = request.body || {}
 
-  if (typeof hsCode !== 'string' || !hsCode.trim()) {
-    return sendError(response, 400, 'Request body field "hsCode" is required')
+  const normalizedHsCode = normalizeExactHsCodeFromRequest(hsCode)
+  if (!normalizedHsCode) {
+    return sendError(response, 400, 'Request body field "hsCode" must be a valid 6, 8, or 10-digit HS code')
   }
 
   if (!Number.isFinite(Number(value))) {
@@ -196,7 +229,7 @@ app.post('/api/compliance/requirements', async (request, response) => {
   }
 
   try {
-    const result = await complianceChecker.getRequirements(hsCode, Number(value), destination)
+    const result = await complianceChecker.getRequirements(normalizedHsCode, Number(value), destination)
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)
@@ -459,20 +492,84 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
   try {
     const lookupResult = await officialHsLookup.search(normalizedQuery)
 
-    if (lookupResult.results.length > 0) {
+    const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: 20 })
+    const localResults = fallbackResults.map((row) => ({
+      ...row,
+      confidence: LOCAL_CATALOG_CONFIDENCE_SCORE,
+      sourceType: 'local-catalog',
+      sourceLabel: 'Approved local tariff catalog',
+      sourceUrl: '',
+      matchedBy: isCodeLikeQuery(normalizedQuery) ? 'code' : 'description',
+      authorityRank: 3,
+      authorityLabel: 'Local catalog',
+    }))
+
+    const officialResults = lookupResult.results.map((row) => ({
+      ...row,
+      authorityRank: row.sourceType === 'official-site' ? 1 : 2,
+      authorityLabel: row.sourceType === 'official-site' ? 'Official live' : 'Official cache',
+    }))
+
+    const mergedByCode = new Map<string, (typeof officialResults)[number] | (typeof localResults)[number]>()
+    const mergeRows = [...officialResults, ...(isSeedFallbackMode() ? localResults : [])]
+    for (const item of mergeRows) {
+      const existing = mergedByCode.get(item.code)
+      if (!existing) {
+        mergedByCode.set(item.code, item)
+        continue
+      }
+
+      const existingRank = Number((existing as { authorityRank?: number }).authorityRank ?? 99)
+      const incomingRank = Number((item as { authorityRank?: number }).authorityRank ?? 99)
+      const existingConfidence = Number((existing as { confidence?: number }).confidence ?? 0)
+      const incomingConfidence = Number((item as { confidence?: number }).confidence ?? 0)
+      if (incomingRank < existingRank || (incomingRank === existingRank && incomingConfidence > existingConfidence)) {
+        mergedByCode.set(item.code, item)
+      }
+    }
+
+    const rankedResults = Array.from(mergedByCode.values()).sort((left, right) => {
+      const leftRank = Number((left as { authorityRank?: number }).authorityRank ?? 99)
+      const rightRank = Number((right as { authorityRank?: number }).authorityRank ?? 99)
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank
+      }
+      const leftConfidence = Number((left as { confidence?: number }).confidence ?? 0)
+      const rightConfidence = Number((right as { confidence?: number }).confidence ?? 0)
+      if (leftConfidence !== rightConfidence) {
+        return rightConfidence - leftConfidence
+      }
+      return String((left as { code?: string }).code || '').localeCompare(String((right as { code?: string }).code || ''))
+    })
+
+    if (rankedResults.length > 0) {
       return response.json({
         success: true,
         data: {
           ...lookupResult,
-          fallbackUsed: false,
-          message: lookupResult.status === 'cache'
-            ? 'Showing cached Tariff Commission Finder results.'
-            : 'Showing live Tariff Commission Finder results.',
+          fallbackUsed: lookupResult.results.length === 0,
+          message: lookupResult.results.length > 0
+            ? (isSeedFallbackMode()
+              ? 'Showing authority-ranked results (official prioritized, local catalog used as supplemental ranking source).'
+              : 'Showing authority-ranked official results (local fallback disabled by catalog mode).')
+            : 'No official Tariff Commission Finder matches were parsed. Showing local catalog matches ranked by source authority.',
+          results: rankedResults,
         },
       })
     }
 
-    const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: 20 })
+    if (!isSeedFallbackMode()) {
+      return response.json({
+        success: true,
+        data: {
+          ...lookupResult,
+          status: 'fallback',
+          fallbackUsed: false,
+          message: 'No official Tariff Commission Finder matches were parsed. Local seed fallback is disabled by catalog mode.',
+          results: [],
+        },
+      })
+    }
     return response.json({
       success: true,
       data: {
@@ -480,18 +577,27 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
         status: 'fallback',
         fallbackUsed: true,
         message: 'No official Tariff Commission Finder matches were parsed. Showing local catalog results instead.',
-        results: fallbackResults.map((row) => ({
-          ...row,
-          confidence: LOCAL_CATALOG_CONFIDENCE_SCORE,
-          sourceType: 'local-catalog',
-          sourceLabel: 'Approved local tariff catalog',
-          sourceUrl: '',
-          matchedBy: isCodeLikeQuery(normalizedQuery) ? 'code' : 'description',
-        })),
+        results: localResults,
       },
     })
   } catch (error) {
     try {
+      if (!isSeedFallbackMode()) {
+        return response.json({
+          success: true,
+          data: {
+            query: normalizedQuery,
+            sourceUrl: '',
+            status: 'fallback',
+            fetchedAt: new Date().toISOString(),
+            cacheExpiresAt: new Date().toISOString(),
+            fallbackUsed: false,
+            message: `Official tariff lookup is unavailable and local seed fallback is disabled by catalog mode. ${error instanceof Error ? error.message : String(error)}`,
+            results: [],
+          },
+        })
+      }
+
       const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: 20 })
       return response.json({
         success: true,
@@ -522,12 +628,13 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
 app.get('/api/hs-codes/resolve', async (request, response) => {
   const { code } = request.query
 
-  if (typeof code !== 'string' || !code.trim()) {
-    return sendError(response, 400, 'Query parameter "code" is required')
+  const normalizedCode = normalizeExactHsCodeFromRequest(code)
+  if (!normalizedCode) {
+    return sendError(response, 400, 'Query parameter "code" must be a valid 6, 8, or 10-digit HS code')
   }
 
   try {
-    const result = await tariffCalculator.getHSCodeDetails(code)
+    const result = await tariffCalculator.getHSCodeDetails(normalizedCode)
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 502, error)
@@ -544,6 +651,24 @@ app.get('/api/tariff-catalog', async (request, response) => {
       typeof category === 'string' ? category : 'All',
       normalizeScheduleCode(scheduleCode),
       Number.isFinite(parsedLimit) ? parsedLimit : 200
+    )
+
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/tariff-catalog/history', async (request, response) => {
+  const { query, category, limit, scheduleCode } = request.query
+  const parsedLimit = typeof limit === 'string' ? Number(limit) : undefined
+
+  try {
+    const result = await tariffCalculator.getTariffHistory(
+      typeof query === 'string' ? query : '',
+      typeof category === 'string' ? category : 'All',
+      normalizeScheduleCode(scheduleCode),
+      Number.isFinite(parsedLimit) ? parsedLimit : 300
     )
 
     return response.json({ success: true, data: result })
@@ -739,6 +864,64 @@ app.patch('/api/import-jobs/:importJobId/review-rows/:rowId', async (request, re
       await tariffDataIngestion.rejectReviewRow(importJobId, rowId, typeof notes === 'string' ? notes : undefined)
     }
     return response.json({ success: true })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/review-rows/:rowId/provenance', async (request, response) => {
+  const rowId = Number(request.params.rowId)
+  if (!Number.isFinite(rowId)) {
+    return sendError(response, 400, 'Route parameter "rowId" must be a valid number')
+  }
+
+  try {
+    const result = await tariffDataIngestion.getReviewRowProvenance(rowId)
+    return response.json({ success: true, data: result })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.post('/api/import-jobs/:importJobId/review-rows/bulk', async (request, response) => {
+  const importJobId = Number(request.params.importJobId)
+  if (!Number.isFinite(importJobId)) {
+    return sendError(response, 400, 'Route parameter "importJobId" must be a valid number')
+  }
+
+  const { action, rowIds, notes } = request.body || {}
+  if (action !== 'approve' && action !== 'reject') {
+    return sendError(response, 400, 'Request body field "action" must be "approve" or "reject"')
+  }
+
+  if (!Array.isArray(rowIds) || rowIds.length === 0 || rowIds.some((id) => !Number.isFinite(Number(id)))) {
+    return sendError(response, 400, 'Request body field "rowIds" must be a non-empty numeric array')
+  }
+
+  try {
+    let approved = 0
+    let rejected = 0
+
+    for (const rowId of rowIds as number[]) {
+      if (action === 'approve') {
+        await tariffDataIngestion.approveReviewRow(importJobId, Number(rowId), typeof notes === 'string' ? notes : undefined)
+        approved += 1
+      } else {
+        await tariffDataIngestion.rejectReviewRow(importJobId, Number(rowId), typeof notes === 'string' ? notes : undefined)
+        rejected += 1
+      }
+    }
+
+    return response.json({
+      success: true,
+      data: {
+        importJobId,
+        action,
+        processedRows: rowIds.length,
+        approved,
+        rejected,
+      },
+    })
   } catch (error) {
     return sendError(response, 502, error)
   }

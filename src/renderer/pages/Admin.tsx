@@ -4,12 +4,23 @@ import './Admin.css'
 
 type ReviewRow = {
   id: number
+  source_id: number
+  source_name: string
+  source_type: string
+  source_reference: string | null
+  import_job_status: string
   row_number: number
   raw_payload: string
   normalized_payload: string | null
   confidence_score: number
   review_notes: string | null
   created_at: string
+}
+
+type ConflictNormalizedPayload = {
+  type: 'conflict-tariff-rate'
+  incoming: Record<string, unknown>
+  existing: Record<string, unknown>
 }
 
 type ImportJob = {
@@ -56,6 +67,17 @@ type SourceGovernanceRow = {
   latestJob: ImportJob | null
 }
 
+type CatalogHealth = {
+  totalHsCodes: number
+  hsCodesWithApprovedMfnRate: number
+  mfnCoveragePercent: number
+  pendingReviewRows: number
+  latestFullSyncAt: string | null
+  latestFullSyncStatus: string | null
+  importFailureCountLast30d: number
+  recommendedCutover: boolean
+}
+
 type Tab = 'review' | 'jobs' | 'audit' | 'sources'
 
 const PAGE_SIZE = 20
@@ -91,6 +113,29 @@ const parseNormalizedRow = (row: ReviewRow): Record<string, unknown> | null => {
   }
 }
 
+const parseConflictPayload = (row: ReviewRow): ConflictNormalizedPayload | null => {
+  const normalized = parseNormalizedRow(row)
+  if (!normalized) {
+    return null
+  }
+
+  if (
+    normalized.type === 'conflict-tariff-rate' &&
+    typeof normalized.incoming === 'object' &&
+    normalized.incoming !== null &&
+    typeof normalized.existing === 'object' &&
+    normalized.existing !== null
+  ) {
+    return {
+      type: 'conflict-tariff-rate',
+      incoming: normalized.incoming as Record<string, unknown>,
+      existing: normalized.existing as Record<string, unknown>,
+    }
+  }
+
+  return null
+}
+
 export const Admin: React.FC = () => {
   const [tab, setTab] = useState<Tab>('review')
 
@@ -106,6 +151,8 @@ export const Admin: React.FC = () => {
   const [bulkNotes, setBulkNotes] = useState('')
   const [reviewSearch, setReviewSearch] = useState('')
   const [reviewConfidenceMax, setReviewConfidenceMax] = useState(DEFAULT_CONFIDENCE_FILTER)
+  const [provenanceByRowId, setProvenanceByRowId] = useState<Record<number, Record<string, unknown>>>({})
+  const [provenanceLoadingRowId, setProvenanceLoadingRowId] = useState<number | null>(null)
 
   // Import Jobs state
   const [jobsLoading, setJobsLoading] = useState(false)
@@ -117,6 +164,7 @@ export const Admin: React.FC = () => {
   const [sourcesError, setSourcesError] = useState<string | null>(null)
   const [sourceSearch, setSourceSearch] = useState('')
   const [sourceStatusFilter, setSourceStatusFilter] = useState<'all' | 'pending-review' | 'error' | 'healthy'>('all')
+  const [catalogHealth, setCatalogHealth] = useState<CatalogHealth | null>(null)
 
   // Audit state
   const [auditRows, setAuditRows] = useState<AuditEntry[]>([])
@@ -187,14 +235,26 @@ export const Admin: React.FC = () => {
     }
   }, [])
 
+  const loadCatalogHealth = useCallback(async () => {
+    try {
+      const result = await appApi.getCatalogHealth()
+      if (result.success && result.data) {
+        setCatalogHealth(result.data as CatalogHealth)
+      }
+    } catch {
+      setCatalogHealth(null)
+    }
+  }, [])
+
   useEffect(() => {
     const handle = setTimeout(() => {
       void loadJobs()
       void loadSources()
+      void loadCatalogHealth()
     }, 0)
 
     return () => clearTimeout(handle)
-  }, [loadJobs, loadSources])
+  }, [loadJobs, loadSources, loadCatalogHealth])
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -204,11 +264,12 @@ export const Admin: React.FC = () => {
 
       if (tab === 'sources') {
         void loadSources()
+        void loadCatalogHealth()
       }
     }, 0)
 
     return () => clearTimeout(handle)
-  }, [tab, auditHsFilter, auditOffset, loadAudit, loadSources])
+  }, [tab, auditHsFilter, auditOffset, loadAudit, loadSources, loadCatalogHealth])
 
   const jobsWithPending = useMemo(() => jobs.filter((j) => j.pending_review_rows > 0), [jobs])
 
@@ -358,8 +419,14 @@ export const Admin: React.FC = () => {
 
       setReviewRows((prev) => prev.filter((r) => r.id !== row.id))
       setSelectedReviewRowIds((prev) => prev.filter((id) => id !== row.id))
+      setProvenanceByRowId((prev) => {
+        const next = { ...prev }
+        delete next[row.id]
+        return next
+      })
       void loadJobs()
       void loadSources()
+      void loadCatalogHealth()
     } catch (err) {
       setReviewError(String(err))
     } finally {
@@ -374,31 +441,50 @@ export const Admin: React.FC = () => {
     setReviewSubmitting(true)
 
     try {
-      const results = await Promise.all(
-        selectedReviewRowIds.map((rowId) =>
-          appApi.reviewRow({
-            importJobId: selectedJobId,
-            rowId,
-            action,
-            notes: bulkNotes || undefined,
-          })
-        )
-      )
+      const result = await appApi.reviewRowsBulk({
+        importJobId: selectedJobId,
+        rowIds: selectedReviewRowIds,
+        action,
+        notes: bulkNotes || undefined,
+      })
 
-      const failed = results.find((result) => !result.success)
-      if (failed) {
-        throw new Error(failed.error || 'At least one bulk review action failed')
+      if (!result.success) {
+        throw new Error(result.error || 'At least one bulk review action failed')
       }
 
       setReviewRows((prev) => prev.filter((row) => !selectedReviewRowIds.includes(row.id)))
       setSelectedReviewRowIds([])
       setBulkNotes('')
+      setProvenanceByRowId((prev) => {
+        const next = { ...prev }
+        selectedReviewRowIds.forEach((id) => delete next[id])
+        return next
+      })
       void loadJobs()
       void loadSources()
+      void loadCatalogHealth()
     } catch (err) {
       setReviewError(String(err))
     } finally {
       setReviewSubmitting(false)
+    }
+  }
+
+  const handleLoadProvenance = async (row: ReviewRow) => {
+    setReviewError(null)
+    setProvenanceLoadingRowId(row.id)
+
+    try {
+      const result = await appApi.getReviewRowProvenance({ rowId: row.id })
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Unable to load provenance')
+      }
+
+      setProvenanceByRowId((prev) => ({ ...prev, [row.id]: result.data as Record<string, unknown> }))
+    } catch (err) {
+      setReviewError(String(err))
+    } finally {
+      setProvenanceLoadingRowId((current) => (current === row.id ? null : current))
     }
   }
 
@@ -573,7 +659,9 @@ export const Admin: React.FC = () => {
 
               {filteredReviewRows.map((row) => {
                 const normalized = parseNormalizedRow(row)
+                const conflictPayload = parseConflictPayload(row)
                 const isSelected = selectedReviewRowIds.includes(row.id)
+                const provenance = provenanceByRowId[row.id]
 
                 return (
                   <div key={row.id} className={`review-row-card ${isSelected ? 'selected' : ''}`}>
@@ -589,10 +677,42 @@ export const Admin: React.FC = () => {
                       </label>
                       <span>Row #{row.row_number}</span>
                       <span>Confidence: {row.confidence_score}%</span>
+                      <span>Source: {row.source_name}</span>
+                      <span>Type: {row.source_type}</span>
                       <span>{formatDate(row.created_at)}</span>
                     </div>
 
-                    {normalized && (
+                    {row.source_reference && (
+                      <div className="review-row-meta">
+                        <span>Reference: {row.source_reference}</span>
+                        <span>Job status: {row.import_job_status}</span>
+                      </div>
+                    )}
+
+                    {conflictPayload && (
+                      <div className="table-wrap">
+                        <table className="admin-table">
+                          <thead>
+                            <tr>
+                              <th>Field</th>
+                              <th>Existing</th>
+                              <th>Incoming</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Array.from(new Set([...Object.keys(conflictPayload.existing), ...Object.keys(conflictPayload.incoming)])).map((key) => (
+                              <tr key={key}>
+                                <td>{key}</td>
+                                <td>{String(conflictPayload.existing[key] ?? '-')}</td>
+                                <td>{String(conflictPayload.incoming[key] ?? '-')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {!conflictPayload && normalized && (
                       <table className="review-data-table">
                         <tbody>
                           {Object.entries(normalized).map(([k, v]) => (
@@ -608,6 +728,13 @@ export const Admin: React.FC = () => {
                     {!normalized && <pre className="review-raw">{row.raw_payload}</pre>}
 
                     <div className="review-row-actions">
+                      <button
+                        className="btn btn-outline"
+                        onClick={() => void handleLoadProvenance(row)}
+                        disabled={reviewSubmitting || provenanceLoadingRowId === row.id}
+                      >
+                        {provenanceLoadingRowId === row.id ? 'Loading provenance...' : 'View Provenance'}
+                      </button>
                       <input
                         type="text"
                         placeholder="Optional notes"
@@ -616,12 +743,33 @@ export const Admin: React.FC = () => {
                         disabled={reviewSubmitting}
                       />
                       <button className="btn btn-success" onClick={() => void handleReview(row, 'approve')} disabled={reviewSubmitting}>
-                        Approve
+                        {conflictPayload ? 'Use Incoming' : 'Approve'}
                       </button>
                       <button className="btn btn-danger" onClick={() => void handleReview(row, 'reject')} disabled={reviewSubmitting}>
-                        Reject
+                        {conflictPayload ? 'Keep Existing' : 'Reject'}
                       </button>
                     </div>
+
+                    {provenance && (
+                      <div className="table-wrap">
+                        <table className="admin-table">
+                          <thead>
+                            <tr>
+                              <th>Provenance</th>
+                              <th>Value</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(provenance).map(([key, value]) => (
+                              <tr key={key}>
+                                <td>{key}</td>
+                                <td>{typeof value === 'string' ? value : JSON.stringify(value)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -794,6 +942,18 @@ export const Admin: React.FC = () => {
             <div className="metric-card">
               <p className="metric-label">Avg Import Completion</p>
               <p className="metric-value">{sourceSummary.averageCompletion}%</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">MFN Coverage</p>
+              <p className="metric-value">{catalogHealth ? `${catalogHealth.mfnCoveragePercent}%` : '-'}</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Latest Full Sync</p>
+              <p className="metric-value">{catalogHealth?.latestFullSyncAt ? formatDate(catalogHealth.latestFullSyncAt) : '-'}</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Cutover Ready</p>
+              <p className="metric-value">{catalogHealth?.recommendedCutover ? 'Yes' : 'No'}</p>
             </div>
           </div>
 

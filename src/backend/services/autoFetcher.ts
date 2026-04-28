@@ -1,10 +1,14 @@
-import axios from 'axios'
 import cron from 'node-cron'
 import { WebsiteFetcherService, type RegulatorySource } from './websiteFetcher'
 import { TariffDataIngestionService } from './tariffDataIngestion'
 import { getRuntimeSettings } from './runtimeSettings'
+import { downloadSourceFileBase64, sourceAdapters } from './sourceAdapters'
 
 const CRON_SCHEDULE = '0 2 * * *'
+const MONTHLY_FULL_SYNC_SCHEDULE = '0 3 1 * *'
+const MAX_RETRIES = 3
+
+type SyncMode = 'incremental' | 'full-sync'
 
 const getFileExtensionFromUrl = (href: string): string => {
   try {
@@ -33,11 +37,93 @@ const getAutoFetchSourceType = (
   method: 'html' | 'tabular'
 ): string => `auto-fetch-${kind}-${source}-${method}`
 
-const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
+const sleepMs = (durationMs: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, durationMs))
+
+const runWithRetry = async <T>(operation: () => Promise<T>, label: string): Promise<T> => {
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      console.warn(`[AutoFetcher] ${label} failed on attempt ${attempt}/${MAX_RETRIES}:`, error)
+      if (attempt < MAX_RETRIES) {
+        await sleepMs(Math.pow(2, attempt - 1) * 1000)
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
+const runAdapterImport = async (
+  ingestion: TariffDataIngestionService,
+  source: RegulatorySource,
+  mode: SyncMode,
+  href: string,
+  fileName: string,
+  contentBase64: string
+): Promise<boolean> => {
+  for (const adapter of sourceAdapters) {
+    if (!adapter.canHandle({ href, fileName, contentBase64, source, mode })) {
+      continue
+    }
+
+    const parsed = await adapter.parse({ href, fileName, contentBase64, source, mode }, ingestion)
+    if (!parsed) {
+      continue
+    }
+
+    if (await ingestion.hasSourceReference(parsed.sourceType, href)) {
+      console.log(`[AutoFetcher] Skipping previously imported source ${href} (${parsed.adapterId})`)
+      return true
+    }
+
+    if (parsed.kind === 'tariff-rates') {
+      const tariffRows = parsed.rows as Array<{ hsCode: string; dutyRate: string | number; notes?: string }>
+      const summary = await ingestion.importRows({
+        sourceName: `${mode}:${source}:${parsed.adapterId}`,
+        sourceType: parsed.sourceType,
+        sourceReference: href,
+        rows: tariffRows.map((row) => ({
+          ...row,
+          notes: [row.notes, `${mode === 'full-sync' ? 'Full-sync' : 'Auto-fetched'} from ${href}`].filter(Boolean).join(' | '),
+        })),
+        autoApproveThreshold: 100,
+      })
+
+      console.log(
+        `[AutoFetcher] ${mode} tariff import via ${parsed.adapterId} from ${fileName}: ` +
+        `${summary.importedRows} imported, ${summary.pendingReviewRows} pending, ${summary.errorRows} errors, ` +
+        `${summary.duplicateRows} duplicates, ${summary.conflictRows} conflicts`
+      )
+      return true
+    }
+
+    const summary = await ingestion.importHSCatalog({
+      sourceName: `${mode}:${source}:${parsed.adapterId}`,
+      sourceType: parsed.sourceType,
+      sourceReference: href,
+      rows: parsed.rows as Awaited<ReturnType<TariffDataIngestionService['parseHSCatalogRows']>>,
+    })
+
+    console.log(
+      `[AutoFetcher] ${mode} catalog import via ${parsed.adapterId} from ${fileName}: ` +
+      `${summary.importedRows} imported, ${summary.pendingReviewRows} pending, ${summary.errorRows} errors, ` +
+      `${summary.duplicateRows} duplicates, ${summary.conflictRows} conflicts`
+    )
+    return true
+  }
+
+  return false
+}
+
+const fetchAndIngest = async (source: RegulatorySource, mode: SyncMode = 'incremental'): Promise<void> => {
   const fetcher = new WebsiteFetcherService()
   const ingestion = new TariffDataIngestionService()
 
-  console.log(`[AutoFetcher] Starting fetch for ${source}...`)
+  console.log(`[AutoFetcher] Starting ${mode} fetch for ${source}...`)
 
   let updates
   try {
@@ -66,14 +152,14 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
           }
 
           const rowsWithConfidence = rows.map((r) => ({ ...r, confidenceScore: confidence }))
-          const sourceType = getAutoFetchSourceType('tariff-rates', source, 'html')
+          const sourceType = `${getAutoFetchSourceType('tariff-rates', source, 'html')}${mode === 'full-sync' ? '-full-sync' : ''}`
           if (await ingestion.hasSourceReference(sourceType, update.url)) {
             console.log(`[AutoFetcher] Skipping previously imported HTML source ${update.url}`)
             continue
           }
 
           const summary = await ingestion.importRows({
-            sourceName: `auto-fetch-html:${source}`,
+            sourceName: `${mode}:auto-fetch-html:${source}`,
             sourceType,
             sourceReference: update.url,
             rows: rowsWithConfidence,
@@ -82,7 +168,8 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
 
           console.log(
             `[AutoFetcher] HTML import for ${update.url}: ${summary.importedRows} imported, ` +
-            `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors`
+            `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors, ` +
+            `${summary.duplicateRows} duplicates, ${summary.conflictRows} conflicts`
           )
         } catch (err) {
           console.error(`[AutoFetcher] HTML table extraction failed for ${update.url}:`, err)
@@ -99,102 +186,43 @@ const fetchAndIngest = async (source: RegulatorySource): Promise<void> => {
 
       let contentBase64: string
       try {
-        const fileResponse = await axios.get<ArrayBuffer>(link.href, {
-          responseType: 'arraybuffer',
-          timeout: 15000,
-        })
-        contentBase64 = Buffer.from(fileResponse.data).toString('base64')
+        contentBase64 = await runWithRetry(() => downloadSourceFileBase64(link.href), `download ${link.href}`)
       } catch (err) {
         console.warn(`[AutoFetcher] Could not download ${link.href}:`, err)
         continue
       }
 
       try {
-        const tariffSourceType = getAutoFetchSourceType('tariff-rates', source, 'tabular')
-        const hsCatalogSourceType = getAutoFetchSourceType('hs-catalog', source, 'tabular')
-        const tariffPdfSourceType = getAutoFetchSourceType('tariff-rates', source, 'pdf')
-
-        if (
-          await ingestion.hasSourceReference(tariffSourceType, link.href) ||
-          await ingestion.hasSourceReference(hsCatalogSourceType, link.href) ||
-          await ingestion.hasSourceReference(tariffPdfSourceType, link.href)
-        ) {
-          console.log(`[AutoFetcher] Skipping previously imported source ${link.href}`)
-          continue
-        }
-
-        if (isPdfFileUrl(link.href)) {
-          const pdfRows = await ingestion.parsePdfTariffRows({
-            contentBase64,
-            sourceUrl: link.href,
-          })
-
-          if (pdfRows.length === 0) {
-            console.log(`[AutoFetcher] No tariff rows extracted from PDF ${fileName}`)
-            continue
-          }
-
-          const summary = await ingestion.importRows({
-            sourceName: `auto-fetch-pdf:${source}`,
-            sourceType: tariffPdfSourceType,
-            sourceReference: link.href,
-            rows: pdfRows,
-            autoApproveThreshold: 100,
-          })
-
-          console.log(
-            `[AutoFetcher] Imported PDF rows from ${fileName}: ${summary.importedRows} rows imported, ` +
-            `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors`
-          )
-
-          continue
-        }
-
-        const tariffRows = await ingestion.parseTariffRows({ contentBase64, fileName })
-        const tariffPreview = ingestion.previewRows(tariffRows)
-        if (tariffPreview.validRows > 0) {
-          const summary = await ingestion.importRows({
-            sourceName: `auto-fetch:${source}`,
-            sourceType: tariffSourceType,
-            sourceReference: link.href,
-            rows: tariffRows.map((row) => ({
-              ...row,
-              notes: [row.notes, `Auto-fetched from ${link.href}`].filter(Boolean).join(' | '),
-            })),
-            autoApproveThreshold: 100,
-          })
-
-          console.log(
-            `[AutoFetcher] Imported tariff rows from ${fileName}: ${summary.importedRows} rows imported, ` +
-            `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors`
-          )
-          continue
-        }
-
-        const rows = await ingestion.parseHSCatalogRows({ contentBase64, fileName })
-        if (rows.length === 0) {
-          console.log(`[AutoFetcher] No rows parsed from ${fileName}`)
-          continue
-        }
-
-        const summary = await ingestion.importHSCatalog({
-          sourceName: `auto-fetch:${source}`,
-          sourceType: hsCatalogSourceType,
-          sourceReference: link.href,
-          rows,
-        })
-
-        console.log(
-          `[AutoFetcher] Imported ${fileName}: ${summary.importedRows} rows imported, ` +
-          `${summary.pendingReviewRows} pending review, ${summary.errorRows} errors`
+        const imported = await runWithRetry(
+          () => runAdapterImport(ingestion, source, mode, link.href, fileName, contentBase64),
+          `adapter import ${link.href}`
         )
+
+        if (!imported) {
+          console.log(`[AutoFetcher] No adapter produced rows for ${fileName}`)
+        }
       } catch (err) {
         console.error(`[AutoFetcher] Import failed for ${fileName}:`, err)
       }
     }
   }
 
-  console.log(`[AutoFetcher] Completed fetch for ${source}`)
+  console.log(`[AutoFetcher] Completed ${mode} fetch for ${source}`)
+}
+
+const runFullSync = async (): Promise<void> => {
+  console.log('[AutoFetcher] Starting monthly full-sync run')
+
+  const sources: RegulatorySource[] = ['boc', 'bir', 'tariff-commission']
+  for (const source of sources) {
+    try {
+      await fetchAndIngest(source, 'full-sync')
+    } catch (error) {
+      console.error(`[AutoFetcher] Full-sync failed for ${source}:`, error)
+    }
+  }
+
+  console.log('[AutoFetcher] Completed monthly full-sync run')
 }
 
 export const startAutoFetching = (): void => {
@@ -204,9 +232,19 @@ export const startAutoFetching = (): void => {
       return
     }
 
-    await fetchAndIngest('boc')
-    await fetchAndIngest('bir')
-    await fetchAndIngest('tariff-commission')
+    await fetchAndIngest('boc', 'incremental')
+    await fetchAndIngest('bir', 'incremental')
+    await fetchAndIngest('tariff-commission', 'incremental')
   })
   console.log(`[AutoFetcher] Scheduled with cron: ${CRON_SCHEDULE}`)
+
+  cron.schedule(MONTHLY_FULL_SYNC_SCHEDULE, async () => {
+    if (!getRuntimeSettings().autoFetcherEnabled) {
+      console.log('[AutoFetcher] Skipping monthly full-sync because runtime settings disabled auto fetch')
+      return
+    }
+
+    await runFullSync()
+  })
+  console.log(`[AutoFetcher] Scheduled monthly full-sync with cron: ${MONTHLY_FULL_SYNC_SCHEDULE}`)
 }

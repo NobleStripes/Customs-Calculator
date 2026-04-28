@@ -15,6 +15,10 @@ describe('runtimeSettings', () => {
       defaultOriginCountry: 'phl',
       autoFetcherEnabled: false,
       fxCacheTtlHours: 999,
+      catalogMode: 'official-catalog-required',
+      stagedCutoverEnabled: true,
+      cutoverCoverageThreshold: 101,
+      fullSyncIdempotencyGuardEnabled: false,
     })
 
     expect(updated).toEqual({
@@ -23,6 +27,10 @@ describe('runtimeSettings', () => {
       autoFetcherEnabled: false,
       fxCacheTtlHours: 168,
       calculatorMode: 'estimate',
+      catalogMode: 'official-catalog-required',
+      stagedCutoverEnabled: true,
+      cutoverCoverageThreshold: 100,
+      fullSyncIdempotencyGuardEnabled: false,
     })
 
     expect(runtimeSettingsModule.getRuntimeSettings()).toEqual(updated)

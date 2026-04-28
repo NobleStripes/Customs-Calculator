@@ -2,6 +2,7 @@ import {
   FALLBACK_CONFIDENCE_SCORE,
   LOCAL_CATALOG_CONFIDENCE_SCORE,
   isCodeLikeQuery,
+  normalizeExactHsCode,
 } from '../../shared/hsLookupQuery'
 
 type ApiResponse<T> = Promise<{ success: boolean; data?: T; error?: string }>
@@ -41,6 +42,8 @@ type HSCodeRow = {
   officialDutyRate?: number
   officialVatRate?: number
   officialScheduleCode?: string
+  authorityRank?: number
+  authorityLabel?: string
 }
 
 type LiveHSLookupResponse = {
@@ -183,6 +186,9 @@ type TariffImportSummary = {
   importedRows: number
   pendingReviewRows: number
   errorRows: number
+  duplicateRows: number
+  conflictRows: number
+  skippedRows: number
   status: 'completed' | 'completed_with_errors' | 'failed'
 }
 
@@ -192,12 +198,50 @@ type RuntimeSettings = {
   autoFetcherEnabled: boolean
   fxCacheTtlHours: number
   calculatorMode: 'estimate'
+  catalogMode: 'seed-fallback' | 'official-catalog-required'
+  stagedCutoverEnabled: boolean
+  cutoverCoverageThreshold: number
+  fullSyncIdempotencyGuardEnabled: boolean
 }
 
 type RuntimeStatus = {
   settings: RuntimeSettings
   latestSource: Record<string, unknown> | null
   autoFetcherLastRun: string | null
+  health?: {
+    totalHsCodes: number
+    hsCodesWithApprovedMfnRate: number
+    mfnCoveragePercent: number
+    pendingReviewRows: number
+    latestFullSyncAt: string | null
+    latestFullSyncStatus: string | null
+    importFailureCountLast30d: number
+    recommendedCutover: boolean
+    cutoverCoverageThreshold: number
+    stagedCutoverEnabled: boolean
+  }
+}
+
+type PendingReviewRow = {
+  id: number
+  source_id: number
+  source_name: string
+  source_type: string
+  source_reference: string | null
+  import_job_status: string
+  row_number: number
+  raw_payload: string
+  normalized_payload: string | null
+  confidence_score: number
+  review_notes: string | null
+  created_at: string
+}
+
+type ReviewRowProvenance = {
+  row: Record<string, unknown>
+  source: Record<string, unknown>
+  importJob: Record<string, unknown>
+  recentAudit: Array<Record<string, unknown>>
 }
 
 const todayDate = new Date().toISOString().split('T')[0]
@@ -368,7 +412,7 @@ const normalizeDestinationPort = (value?: string): string => {
 }
 
 const normalizeHSCode = (value: string): string => {
-  const normalizedValue = value.trim().toUpperCase()
+  const normalizedValue = normalizeExactHsCode(value) || value.trim().toUpperCase()
   const compactValue = normalizedValue.replace(/\./g, '')
 
   const exactMatch = hsCodes.find((row) => row.code.toUpperCase() === normalizedValue)
@@ -804,10 +848,49 @@ const getTariffCatalogRemote = async (payload: { query?: string; category?: stri
   }>>(`/api/tariff-catalog?${params.toString()}`)
 }
 
+const getTariffHistoryRemote = async (payload: {
+  query?: string
+  category?: string
+  scheduleCode?: string
+  limit?: number
+}) => {
+  const params = new URLSearchParams()
+
+  if (payload.query?.trim()) {
+    params.set('query', payload.query.trim())
+  }
+
+  if (payload.category?.trim()) {
+    params.set('category', payload.category.trim())
+  }
+
+  if (payload.scheduleCode?.trim()) {
+    params.set('scheduleCode', normalizeScheduleCode(payload.scheduleCode))
+  }
+
+  if (typeof payload.limit === 'number') {
+    params.set('limit', String(payload.limit))
+  }
+
+  return callApi<Array<{
+    hsCode: string
+    scheduleCode: string
+    description: string
+    category: string
+    dutyRate: number
+    vatRate: number
+    surchargeRate: number
+    effectiveDate: string
+    endDate: string | null
+    importStatus: string | null
+  }>>(`/api/tariff-catalog/history?${params.toString()}`)
+}
+
 const getTariffCategoriesRemote = async (): ApiResponse<string[]> => callApi<string[]>('/api/tariff-categories')
 const getTariffSchedulesRemote = async (): ApiResponse<TariffScheduleOption[]> => callApi<TariffScheduleOption[]>('/api/tariff-schedules')
 const getRuntimeSettingsRemote = async (): ApiResponse<RuntimeSettings> => callApi<RuntimeSettings>('/api/runtime-settings')
 const getRuntimeStatusRemote = async (): ApiResponse<RuntimeStatus> => callApi<RuntimeStatus>('/api/runtime-status')
+const getCatalogHealthRemote = async () => callApi<NonNullable<RuntimeStatus['health']>>('/api/catalog-health')
 
 const calculateDutyRemote = async (payload: {
   value: number
@@ -839,7 +922,10 @@ const importHSCatalogRemote = async (payload: Record<string, unknown>) =>
 const getImportJobsRemote = async () => callApi<Array<Record<string, unknown>>>('/api/import-jobs')
 
 const getPendingReviewRowsRemote = async (payload: { importJobId: number }) =>
-  callApi<Array<Record<string, unknown>>>(`/api/import-jobs/${payload.importJobId}/pending-review`)
+  callApi<PendingReviewRow[]>(`/api/import-jobs/${payload.importJobId}/pending-review`)
+
+const getReviewRowProvenanceRemote = async (payload: { rowId: number }) =>
+  callApi<ReviewRowProvenance>(`/api/review-rows/${payload.rowId}/provenance`)
 
 export const appApi = {
   initDB: (): ApiResponse<undefined> => makeSuccess(undefined),
@@ -923,6 +1009,17 @@ export const appApi = {
       return remoteResult
     }
 
+    const runtimeSettingsResult = await appApi.getRuntimeSettings()
+    const catalogMode = runtimeSettingsResult.success && runtimeSettingsResult.data
+      ? runtimeSettingsResult.data.catalogMode
+      : 'seed-fallback'
+
+    if (catalogMode === 'official-catalog-required') {
+      return makeError(
+        remoteResult.error || 'Official HS lookup is unavailable and local seed fallback is disabled by catalog mode.'
+      )
+    }
+
     const fallbackRows = searchHSRows(query)
     return makeSuccess(
       wrapLocalLiveLookupFallback(
@@ -983,6 +1080,35 @@ export const appApi = {
         .slice(0, payload?.limit || 200)
 
       return makeSuccess(rows)
+    } catch (error) {
+      return makeError(error)
+    }
+  },
+
+  getTariffHistory: async (payload: {
+    query?: string
+    category?: string
+    scheduleCode?: string
+    limit?: number
+  }): ApiResponse<Array<{ hsCode: string; scheduleCode: string; description: string; category: string; dutyRate: number; vatRate: number; surchargeRate: number; effectiveDate: string; endDate: string | null; importStatus: string | null }>> => {
+    const remoteResult = await getTariffHistoryRemote(payload || {})
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
+    try {
+      const catalogResult = await appApi.getTariffCatalog(payload)
+      if (!catalogResult.success || !catalogResult.data) {
+        return makeError(catalogResult.error || 'Unable to load tariff history fallback')
+      }
+
+      return makeSuccess(
+        catalogResult.data.map((row) => ({
+          ...row,
+          endDate: null,
+          importStatus: 'approved',
+        }))
+      )
     } catch (error) {
       return makeError(error)
     }
@@ -1183,6 +1309,9 @@ export const appApi = {
       importedRows: job.imported_rows,
       pendingReviewRows: 0,
       errorRows: 0,
+      duplicateRows: 0,
+      conflictRows: 0,
+      skippedRows: 0,
       status: 'completed',
     })
   },
@@ -1212,6 +1341,15 @@ export const appApi = {
     }
 
     return makeSuccess(pendingReviewRows[payload.importJobId] || [])
+  },
+
+  getReviewRowProvenance: async (payload: { rowId: number }) => {
+    const remoteResult = await getReviewRowProvenanceRemote(payload)
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
+    return makeError(remoteResult.error || 'Review row provenance is unavailable')
   },
 
   fetchWebsiteContent: async (payload: { url: string; query?: string }) => {
@@ -1298,6 +1436,10 @@ export const appApi = {
       autoFetcherEnabled: true,
       fxCacheTtlHours: 24,
       calculatorMode: 'estimate',
+      catalogMode: 'seed-fallback',
+      stagedCutoverEnabled: false,
+      cutoverCoverageThreshold: 99,
+      fullSyncIdempotencyGuardEnabled: true,
     })
   },
 
@@ -1321,9 +1463,45 @@ export const appApi = {
         autoFetcherEnabled: true,
         fxCacheTtlHours: 24,
         calculatorMode: 'estimate',
+        catalogMode: 'seed-fallback',
+        stagedCutoverEnabled: false,
+        cutoverCoverageThreshold: 99,
+        fullSyncIdempotencyGuardEnabled: true,
       },
       latestSource: null,
       autoFetcherLastRun: null,
+      health: {
+        totalHsCodes: 0,
+        hsCodesWithApprovedMfnRate: 0,
+        mfnCoveragePercent: 0,
+        pendingReviewRows: 0,
+        latestFullSyncAt: null,
+        latestFullSyncStatus: null,
+        importFailureCountLast30d: 0,
+        recommendedCutover: false,
+        cutoverCoverageThreshold: 99,
+        stagedCutoverEnabled: false,
+      },
+    })
+  },
+
+  getCatalogHealth: async () => {
+    const remoteResult = await getCatalogHealthRemote()
+    if (remoteResult.success && remoteResult.data) {
+      return remoteResult
+    }
+
+    return makeSuccess({
+      totalHsCodes: 0,
+      hsCodesWithApprovedMfnRate: 0,
+      mfnCoveragePercent: 0,
+      pendingReviewRows: 0,
+      latestFullSyncAt: null,
+      latestFullSyncStatus: null,
+      importFailureCountLast30d: 0,
+      recommendedCutover: false,
+      cutoverCoverageThreshold: 99,
+      stagedCutoverEnabled: false,
     })
   },
 
@@ -1344,6 +1522,21 @@ export const appApi = {
       method: 'PATCH',
       body: JSON.stringify({ action: payload.action, notes: payload.notes }),
     })
+  },
+
+  reviewRowsBulk: async (payload: {
+    importJobId: number
+    rowIds: number[]
+    action: 'approve' | 'reject'
+    notes?: string
+  }) => {
+    return callApi<{ processedRows: number; approved: number; rejected: number }>(
+      `/api/import-jobs/${payload.importJobId}/review-rows/bulk`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ rowIds: payload.rowIds, action: payload.action, notes: payload.notes }),
+      }
+    )
   },
 }
 

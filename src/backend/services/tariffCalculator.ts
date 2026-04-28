@@ -1,4 +1,5 @@
 import { getDatabase } from '../db/database'
+import { normalizeExactHsCode } from '../../shared/hsLookupQuery'
 
 export interface DutyResult {
   rate: number
@@ -22,6 +23,19 @@ export interface TariffCatalogRow {
   vatRate: number
   surchargeRate: number
   effectiveDate: string
+}
+
+export interface TariffHistoryRow {
+  hsCode: string
+  scheduleCode: string
+  description: string
+  category: string
+  dutyRate: number
+  vatRate: number
+  surchargeRate: number
+  effectiveDate: string
+  endDate: string | null
+  importStatus: string | null
 }
 
 export interface TariffScheduleOption {
@@ -63,6 +77,11 @@ type TariffCatalogDbRow = {
   effective_date: string
 }
 
+type TariffHistoryDbRow = TariffCatalogDbRow & {
+  end_date: string | null
+  import_status: string | null
+}
+
 type TariffCategoryRow = {
   category: string
 }
@@ -87,7 +106,7 @@ export class TariffCalculator {
   private db = getDatabase()
 
   private normalizeHSCode(value: string): string {
-    return value.trim().toUpperCase()
+    return normalizeExactHsCode(value) || value.trim().toUpperCase()
   }
 
   private resolveCanonicalHSCode(hsCode: string): Promise<string> {
@@ -410,6 +429,79 @@ export class TariffCalculator {
         }
 
         resolve(rows?.map((row) => row.category) || [])
+      })
+    })
+  }
+
+  /**
+   * Get historical tariff rate rows (includes expired/superseded entries)
+   */
+  getTariffHistory(
+    query: string = '',
+    category: string = 'All',
+    scheduleCode: string = 'MFN',
+    limit: number = 300
+  ): Promise<TariffHistoryRow[]> {
+    return new Promise((resolve, reject) => {
+      const searchQuery = `%${query.trim().toUpperCase()}%`
+      const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
+
+      let sql = `
+        SELECT
+          hc.code AS hs_code,
+          COALESCE(tr.schedule_code, 'MFN') AS schedule_code,
+          hc.description,
+          hc.category,
+          tr.duty_rate,
+          tr.vat_rate,
+          tr.surcharge_rate,
+          tr.effective_date,
+          tr.end_date,
+          tr.import_status
+        FROM hs_codes hc
+        JOIN tariff_rates tr ON tr.hs_code = hc.code
+        WHERE COALESCE(tr.schedule_code, 'MFN') = ?
+          AND (hc.code LIKE ? OR hc.description LIKE ?)
+      `
+
+      const params: Array<string | number> = [normalizedScheduleCode, searchQuery, searchQuery]
+
+      if (category && category !== 'All') {
+        sql += ' AND hc.category = ?'
+        params.push(category)
+      }
+
+      sql += `
+        ORDER BY
+          CASE WHEN tr.end_date IS NULL THEN 0 ELSE 1 END,
+          tr.effective_date DESC,
+          COALESCE(tr.last_modified_at, tr.created_at) DESC,
+          hc.code ASC
+        LIMIT ?
+      `
+      params.push(limit)
+
+      this.db.all(sql, params, (err, rows: TariffHistoryDbRow[]) => {
+        if (err) {
+          console.error('Error fetching tariff history:', err)
+          reject(new Error(`Failed to fetch tariff history: ${err.message}`))
+          return
+        }
+
+        resolve(
+          rows?.map((row) => ({
+            hsCode: row.hs_code,
+            scheduleCode: row.schedule_code,
+            description: row.description,
+            category: row.category,
+            dutyRate: (row.duty_rate || 0) * 100,
+            vatRate: (row.vat_rate || 0) * 100,
+            surchargeRate: (row.surcharge_rate || 0) * 100,
+            effectiveDate: row.effective_date,
+            endDate: row.end_date,
+            importStatus: row.import_status,
+          })) || []
+        )
       })
     })
   }

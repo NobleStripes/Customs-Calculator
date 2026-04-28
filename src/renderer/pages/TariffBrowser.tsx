@@ -11,6 +11,8 @@ type TariffRow = {
   vatRate: number
   surchargeRate: number
   effectiveDate: string
+  endDate?: string | null
+  importStatus?: string | null
 }
 
 type TariffScheduleOption = {
@@ -24,6 +26,7 @@ const RATE_FORMAT = new Intl.NumberFormat('en-US', {
 })
 
 export const TariffBrowser: React.FC = () => {
+  const [browseMode, setBrowseMode] = useState<'latest' | 'history'>('latest')
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
   const [scheduleCode, setScheduleCode] = useState('MFN')
@@ -46,12 +49,24 @@ export const TariffBrowser: React.FC = () => {
     }
   }, [])
 
-  const fetchRows = useCallback(async (searchTerm: string, selectedCategory: string, selectedScheduleCode: string) => {
+  const fetchRows = useCallback(async (
+    searchTerm: string,
+    selectedCategory: string,
+    selectedScheduleCode: string,
+    mode: 'latest' | 'history'
+  ) => {
     setLoading(true)
     setError(null)
 
     try {
-      const response = await appApi.getTariffCatalog({
+      const response = mode === 'history'
+        ? await appApi.getTariffHistory({
+            query: searchTerm,
+            category: selectedCategory,
+            scheduleCode: selectedScheduleCode,
+            limit: 400,
+          })
+        : await appApi.getTariffCatalog({
         query: searchTerm,
         category: selectedCategory,
         scheduleCode: selectedScheduleCode,
@@ -79,7 +94,7 @@ export const TariffBrowser: React.FC = () => {
           setSchedules(response.data)
         }
       })
-      void fetchRows('', 'All', 'MFN')
+      void fetchRows('', 'All', 'MFN', 'latest')
     }, 0)
 
     return () => clearTimeout(handle)
@@ -87,11 +102,11 @@ export const TariffBrowser: React.FC = () => {
 
   useEffect(() => {
     const handle = setTimeout(() => {
-      void fetchRows(query, category, scheduleCode)
+      void fetchRows(query, category, scheduleCode, browseMode)
     }, 250)
 
     return () => clearTimeout(handle)
-  }, [category, fetchRows, query, scheduleCode])
+  }, [browseMode, category, fetchRows, query, scheduleCode])
 
   const stats = useMemo(() => {
     const totalRows = rows.length
@@ -136,6 +151,18 @@ export const TariffBrowser: React.FC = () => {
                 {item}
               </option>
             ))}
+          </select>
+        </div>
+
+        <div className="control-group category">
+          <label htmlFor="tariff-browse-mode">Browse Mode</label>
+          <select
+            id="tariff-browse-mode"
+            value={browseMode}
+            onChange={(event) => setBrowseMode(event.target.value as 'latest' | 'history')}
+          >
+            <option value="latest">Latest Effective Rates</option>
+            <option value="history">Historical Timeline</option>
           </select>
         </div>
 
@@ -185,12 +212,14 @@ export const TariffBrowser: React.FC = () => {
                 <th>VAT Rate</th>
                 <th>Surcharge</th>
                 <th>Effective Date</th>
+                {browseMode === 'history' && <th>End Date</th>}
+                {browseMode === 'history' && <th>Import Status</th>}
               </tr>
             </thead>
             <tbody>
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td className="empty-cell" colSpan={8}>
+                  <td className="empty-cell" colSpan={browseMode === 'history' ? 10 : 8}>
                     No tariff rows found for the selected filters.
                   </td>
                 </tr>
@@ -198,8 +227,8 @@ export const TariffBrowser: React.FC = () => {
 
               {loading && (
                 <tr>
-                  <td className="empty-cell" colSpan={8}>
-                    Loading tariff catalog...
+                  <td className="empty-cell" colSpan={browseMode === 'history' ? 10 : 8}>
+                    {browseMode === 'history' ? 'Loading tariff history...' : 'Loading tariff catalog...'}
                   </td>
                 </tr>
               )}
@@ -215,6 +244,8 @@ export const TariffBrowser: React.FC = () => {
                     <td>{RATE_FORMAT.format(row.vatRate)}%</td>
                     <td>{RATE_FORMAT.format(row.surchargeRate)}%</td>
                     <td>{row.effectiveDate}</td>
+                    {browseMode === 'history' && <td>{row.endDate || 'Active'}</td>}
+                    {browseMode === 'history' && <td>{row.importStatus || 'n/a'}</td>}
                   </tr>
                 ))}
             </tbody>
