@@ -243,6 +243,10 @@ app.post('/api/calculate/batch', async (request, response) => {
     return sendError(response, 400, 'Request body field "shipments" must be an array')
   }
 
+  if (shipments.length > 100) {
+    return sendError(response, 400, 'Request body field "shipments" must contain 100 or fewer items per request')
+  }
+
   try {
     const results = []
 
@@ -896,6 +900,10 @@ app.post('/api/import-jobs/:importJobId/review-rows/bulk', async (request, respo
 
   if (!Array.isArray(rowIds) || rowIds.length === 0 || rowIds.some((id) => !Number.isFinite(Number(id)))) {
     return sendError(response, 400, 'Request body field "rowIds" must be a non-empty numeric array')
+  }
+
+  if (rowIds.length > 500) {
+    return sendError(response, 400, 'Request body field "rowIds" must contain 500 or fewer items per request')
   }
 
   try {

@@ -268,6 +268,61 @@ export const Settings: React.FC = () => {
           )}
         </section>
 
+        <section className="settings-card">
+          <h2>Catalog &amp; Ingestion</h2>
+
+          <div className="settings-field settings-field--checkbox">
+            <label>
+              <input
+                type="checkbox"
+                checked={localSettings.stagedCutoverEnabled ?? false}
+                onChange={(e) => setLocalSettings((prev) => ({ ...prev, stagedCutoverEnabled: e.target.checked }))}
+              />
+              <span>Enable staged catalog cutover</span>
+            </label>
+            <p className="settings-hint">
+              When enabled, the system switches from seed-fallback to official-catalog mode only after the coverage
+              threshold below is met during a full sync.
+            </p>
+          </div>
+
+          <div className="settings-field">
+            <label htmlFor="cutover-threshold">Cutover coverage threshold (%)</label>
+            <input
+              id="cutover-threshold"
+              type="number"
+              min={90}
+              max={100}
+              step={1}
+              value={localSettings.cutoverCoverageThreshold ?? 99}
+              onChange={(e) => {
+                const parsed = Number(e.target.value)
+                if (Number.isFinite(parsed)) {
+                  setLocalSettings((prev) => ({ ...prev, cutoverCoverageThreshold: Math.min(100, Math.max(90, parsed)) }))
+                }
+              }}
+            />
+            <p className="settings-hint">
+              Percentage of HS codes that must be covered by the imported catalog before a staged cutover is allowed.
+              Accepted range: 90–100.
+            </p>
+          </div>
+
+          <div className="settings-field settings-field--checkbox">
+            <label>
+              <input
+                type="checkbox"
+                checked={localSettings.fullSyncIdempotencyGuardEnabled ?? true}
+                onChange={(e) => setLocalSettings((prev) => ({ ...prev, fullSyncIdempotencyGuardEnabled: e.target.checked }))}
+              />
+              <span>Enable full-sync idempotency guard</span>
+            </label>
+            <p className="settings-hint">
+              Prevents duplicate full-sync imports within the same day. Disable only during manual re-ingestion recovery.
+            </p>
+          </div>
+        </section>
+
         <div className="settings-actions">
           <button className="btn btn-primary" onClick={() => void handleSave()} disabled={isSaving}>
             {isSaving ? 'Saving...' : saved ? 'Saved' : 'Save Settings'}

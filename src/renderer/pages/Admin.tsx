@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { appApi } from '../lib/appApi'
+import { appApi, type ReviewRowProvenance } from '../lib/appApi'
 import './Admin.css'
 
 type ReviewRow = {
@@ -151,7 +151,7 @@ export const Admin: React.FC = () => {
   const [bulkNotes, setBulkNotes] = useState('')
   const [reviewSearch, setReviewSearch] = useState('')
   const [reviewConfidenceMax, setReviewConfidenceMax] = useState(DEFAULT_CONFIDENCE_FILTER)
-  const [provenanceByRowId, setProvenanceByRowId] = useState<Record<number, Record<string, unknown>>>({})
+  const [provenanceByRowId, setProvenanceByRowId] = useState<Record<number, ReviewRowProvenance>>({})
   const [provenanceLoadingRowId, setProvenanceLoadingRowId] = useState<number | null>(null)
 
   // Import Jobs state
@@ -480,7 +480,7 @@ export const Admin: React.FC = () => {
         throw new Error(result.error || 'Unable to load provenance')
       }
 
-      setProvenanceByRowId((prev) => ({ ...prev, [row.id]: result.data as Record<string, unknown> }))
+      setProvenanceByRowId((prev) => ({ ...prev, [row.id]: result.data }))
     } catch (err) {
       setReviewError(String(err))
     } finally {
@@ -700,7 +700,7 @@ export const Admin: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {Array.from(new Set([...Object.keys(conflictPayload.existing), ...Object.keys(conflictPayload.incoming)])).map((key) => (
+                            {Array.from(new Set([...Object.keys(conflictPayload.existing), ...Object.keys(conflictPayload.incoming)])).sort().map((key) => (
                               <tr key={key}>
                                 <td>{key}</td>
                                 <td>{String(conflictPayload.existing[key] ?? '-')}</td>

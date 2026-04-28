@@ -237,7 +237,7 @@ type PendingReviewRow = {
   created_at: string
 }
 
-type ReviewRowProvenance = {
+export type ReviewRowProvenance = {
   row: Record<string, unknown>
   source: Record<string, unknown>
   importJob: Record<string, unknown>
