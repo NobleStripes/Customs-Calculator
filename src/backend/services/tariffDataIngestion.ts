@@ -635,6 +635,84 @@ const applyTariffRateAndAudit = async (payload: {
 
   await upsertHsCode(normalized)
 
+  const existingVersionRow = await get<{
+    id: number
+    duty_rate: number
+    vat_rate: number
+    surcharge_rate: number
+  }>(
+    `
+      SELECT id, duty_rate, vat_rate, surcharge_rate
+      FROM tariff_rates
+      WHERE hs_code = ?
+        AND COALESCE(schedule_code, 'MFN') = ?
+        AND effective_date = ?
+        AND (import_status = 'approved' OR import_status IS NULL)
+      ORDER BY COALESCE(last_modified_at, created_at) DESC, id DESC
+      LIMIT 1
+    `,
+    [normalized.hsCode, normalized.scheduleCode, normalized.effectiveDate]
+  )
+
+  if (existingVersionRow) {
+    const isSameVersionValues =
+      existingVersionRow.duty_rate === normalized.dutyRate &&
+      existingVersionRow.vat_rate === normalized.vatRate &&
+      existingVersionRow.surcharge_rate === normalized.surchargeRate
+
+    if (isSameVersionValues) {
+      return { hadConflict: true, skippedAsDuplicate: true }
+    }
+
+    await run(
+      `
+        UPDATE tariff_rates
+        SET duty_rate = ?,
+            vat_rate = ?,
+            surcharge_rate = ?,
+            end_date = ?,
+            notes = ?,
+            source_id = ?,
+            confidence_score = ?,
+            import_status = 'approved',
+            last_modified_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      [
+        normalized.dutyRate,
+        normalized.vatRate,
+        normalized.surchargeRate,
+        normalized.endDate,
+        normalized.notes,
+        sourceId,
+        normalized.confidenceScore,
+        existingVersionRow.id,
+      ]
+    )
+
+    await run(
+      `
+        INSERT INTO rate_change_audit
+        (hs_code, old_duty_rate, new_duty_rate, old_vat_rate, new_vat_rate, old_surcharge_rate, new_surcharge_rate, reason, source_id, import_job_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        normalized.hsCode,
+        existingVersionRow.duty_rate,
+        normalized.dutyRate,
+        existingVersionRow.vat_rate,
+        normalized.vatRate,
+        existingVersionRow.surcharge_rate,
+        normalized.surchargeRate,
+        `${reason} [existing version updated]`,
+        sourceId,
+        importJobId,
+      ]
+    )
+
+    return { hadConflict: true, skippedAsDuplicate: false }
+  }
+
   const existingRate = await get<{
     id: number
     schedule_code: string | null

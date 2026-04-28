@@ -624,12 +624,7 @@ const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
             FROM tariff_rates
             WHERE hs_code = ?
               AND COALESCE(schedule_code, 'MFN') = ?
-              AND duty_rate = ?
-              AND vat_rate = ?
-              AND surcharge_rate = ?
               AND effective_date = ?
-              AND end_date IS NULL
-              AND source_id IS NULL
               AND (import_status = 'approved' OR import_status IS NULL)
           )
         `,
@@ -642,9 +637,6 @@ const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
           todayDate,
           item.hs_code,
           item.schedule_code,
-          item.duty_rate,
-          item.vat_rate,
-          item.surcharge_rate,
           todayDate,
         ],
         (err: Error | null) => {
