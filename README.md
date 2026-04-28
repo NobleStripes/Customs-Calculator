@@ -6,7 +6,7 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
 - Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent, and missing tariff rows now fail explicitly instead of silently defaulting to zero.
-- New in 0.3.0: runtime operations controls in Settings, including runtime health state, latest source metadata, manual status refresh, and persisted save/reset behavior.
+- New in 0.4.0: conflict-resolution review UX, provenance drill-downs, authority-ranked live lookup merge behavior, tariff history browsing mode, and full-sync idempotency/cutover hardening.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
 - Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions and local fallback results.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
@@ -30,16 +30,17 @@ The project is in an active build-out phase: core calculation and operator workf
 
 ## Release Notes
 
-### Current Release: v0.3.0
+### Current Release: v0.4.0
 
-- Added runtime operations controls in Settings with healthy/degraded state visibility.
-- Added runtime source telemetry in Settings: latest source, source type, status, and fetched timestamp.
-- Added manual runtime status refresh action for operators.
-- Hardened runtime settings save/reset workflows with loading and error handling.
+- Added conflict-aware review workflow with side-by-side decisioning and provenance drill-down support.
+- Added authority-ranked live HS search merge behavior with deterministic source prioritization.
+- Added explicit tariff history browsing mode and history API support.
+- Added full-sync idempotency guard and staged cutover controls for safer rollout.
+- Fixed tariff version uniqueness collisions to avoid hard failures on duplicate version keys.
 
 Full release details:
 
-- [docs/changelog/v0.3.0.md](docs/changelog/v0.3.0.md)
+- [docs/changelog/v0.4.0.md](docs/changelog/v0.4.0.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## Features
@@ -193,10 +194,11 @@ For issues, feature requests, or contributions:
 The full changelog has moved out of this README into dedicated release-note files:
 
 - Changelog index: [CHANGELOG.md](CHANGELOG.md)
+- 0.4.0 release notes: [docs/changelog/v0.4.0.md](docs/changelog/v0.4.0.md)
 - 0.3.0 release notes: [docs/changelog/v0.3.0.md](docs/changelog/v0.3.0.md)
 - 0.2.0 release notes: [docs/changelog/v0.2.0.md](docs/changelog/v0.2.0.md)
 - 0.1.0 release notes: [docs/changelog/v0.1.0.md](docs/changelog/v0.1.0.md)
 
 ---
 
-**Last Updated:** April 27, 2026
+**Last Updated:** April 28, 2026
