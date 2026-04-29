@@ -156,8 +156,8 @@ describe('appApi.batchCalculate', () => {
     expect(result.data?.[0]?.breakdown?.globalFees?.transitCharge).toBeCloseTo(1000)
     expect(result.data?.[0]?.breakdown?.globalFees?.ipc).toBeCloseTo(250)
     expect(result.data?.[0]?.breakdown?.globalFees?.totalGlobalTax).toBeCloseTo(1380)
-    expect(result.data?.[0]?.costBase?.vatBase).toBeCloseTo(38567.5)
-    expect(result.data?.[0]?.vat?.amount).toBeCloseTo(4628.1)
+    expect(result.data?.[0]?.costBase?.vatBase).toBeCloseTo(34480)
+    expect(result.data?.[0]?.vat?.amount).toBeCloseTo(4137.6)
   })
 
   it('keeps transit totals distinct from consumption totals for the same shipment', async () => {
@@ -197,8 +197,8 @@ describe('appApi.batchCalculate', () => {
     expect(result.data).toHaveLength(2)
     expect(consumptionRow?.breakdown?.globalFees?.transitCharge).toBeCloseTo(0)
     expect(consumptionRow?.breakdown?.globalFees?.ipc).toBeCloseTo(500)
-    expect(consumptionRow?.totalLandedCost).toBeCloseTo(42355.6)
-    expect(transitRow?.totalLandedCost).toBeCloseTo(43195.6)
+    expect(consumptionRow?.totalLandedCost).toBeCloseTo(37777.6)
+    expect(transitRow?.totalLandedCost).toBeCloseTo(38617.6)
     expect((transitRow?.totalLandedCost || 0) - (consumptionRow?.totalLandedCost || 0)).toBeCloseTo(840)
   })
 
@@ -227,8 +227,8 @@ describe('appApi.batchCalculate', () => {
     expect(row?.fx?.baseCurrency).toBe('PHP')
     expect(row?.costBase?.taxableValue).toBeCloseTo(5600)
     expect(row?.duty?.amount).toBeCloseTo(392)
-    expect(row?.vat?.amount).toBeCloseTo(1371.48)
-    expect(row?.totalLandedCost).toBeCloseTo(12800.48)
+    expect(row?.vat?.amount).toBeCloseTo(884.64)
+    expect(row?.totalLandedCost).toBeCloseTo(8256.64)
   })
 })
 
@@ -331,6 +331,97 @@ describe('appApi HS lookup', () => {
 
     expect(result.success).toBe(true)
     expect(result.data?.code).toBe('8471.30')
+  })
+
+  it('uses the dedicated live lookup endpoint when available', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          query: '847130',
+          sourceUrl: 'https://finder.tariffcommission.gov.ph/search-by-code?ahtn=847130',
+          status: 'live',
+          fetchedAt: '2026-04-27T00:00:00.000Z',
+          cacheExpiresAt: '2026-04-27T00:05:00.000Z',
+          fallbackUsed: false,
+          message: 'Showing live Tariff Commission Finder results.',
+          results: [
+            {
+              code: '8471.30',
+              description: 'Portable automatic data processing machines',
+              category: 'Official Tariff Finder',
+              sourceType: 'official-site',
+              sourceLabel: 'Tariff Commission Finder',
+              matchedBy: 'code',
+              confidence: 96,
+            },
+          ],
+        },
+      }),
+    } as Response)
+
+    const result = await appApi.searchLiveHSCodes('847130')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.results[0]?.sourceType).toBe('official-site')
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/hs-codes/live-search?query=847130'),
+      expect.anything()
+    )
+  })
+
+  it('falls back to the local browser catalog when live lookup is unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+
+    const result = await appApi.searchLiveHSCodes('oil filter')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.status).toBe('fallback')
+    expect(result.data?.fallbackUsed).toBe(true)
+    expect(result.data?.results[0]?.code).toBe('8421.23')
+    expect(result.data?.results[0]?.sourceType).toBe('local-fallback')
+  })
+
+  it('falls back to live exact-match results when the local resolve endpoint returns null', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: null,
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            query: '847130',
+            sourceUrl: 'https://finder.tariffcommission.gov.ph/search-by-code?ahtn=847130',
+            status: 'live',
+            fetchedAt: '2026-04-27T00:00:00.000Z',
+            cacheExpiresAt: '2026-04-27T00:05:00.000Z',
+            fallbackUsed: false,
+            results: [
+              {
+                code: '9999.10',
+                description: 'Live-only tariff finder row',
+                category: 'Official Tariff Finder',
+                sourceType: 'official-site',
+                matchedBy: 'code',
+                confidence: 96,
+              },
+            ],
+          },
+        }),
+      } as Response)
+
+    const result = await appApi.resolveHSCode('999910')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.code).toBe('9999.10')
+    expect(result.data?.sourceType).toBe('official-site')
   })
 
   it('uses the server HS import preview endpoint when available', async () => {

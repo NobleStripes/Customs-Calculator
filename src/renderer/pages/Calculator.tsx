@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { HSCodeSearch } from '../components/HSCodeSearch'
 import { CalculationResults } from '../components/CalculationResults'
-import { appApi } from '../lib/appApi'
+import { appApi, type AppHsCodeRow } from '../lib/appApi'
+import { useSettingsStore } from '../lib/settingsStore'
 import './Calculator.css'
 
 interface CalculationPayload {
@@ -33,11 +34,12 @@ interface CalculationResultsData {
     rate: number
     amount: number
   }
-  compliance: {
+  compliance?: {
     requiredDocuments?: string[]
+    requirements?: string[]
     restrictions?: string[]
     warnings?: string[]
-  } | null
+  }
   costBase: {
     fob: number
     freight: number
@@ -81,44 +83,43 @@ type TariffScheduleOption = {
   displayName: string
 }
 
-const TRANSIT_CHARGE_PHP = 1000
-const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
-const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
-const VAT_RATE = 0.12
-
-const getContainerSecurityFeeUsd = (containerSize: CalculationPayload['containerSize']): number => {
-  if (containerSize === '40ft') return 10
-  if (containerSize === '20ft') return 5
-  return 0
+type HistoryEntry = {
+  id: number
+  hs_code: string
+  value: number
+  currency: string
+  duty_amount: number
+  vat_amount: number
+  total_landed_cost: number
+  created_at: string
 }
 
-const getBrokerageFeePhp = (taxableValuePhp: number): number =>
-  ((taxableValuePhp - 200000) * 0.00125) + 5300
+const HISTORY_LIMIT = 10
 
-const getImportProcessingChargePhp = (dutiableValuePhp: number): number => {
-  if (dutiableValuePhp <= 25000) return 250
-  if (dutiableValuePhp <= 50000) return 500
-  if (dutiableValuePhp <= 250000) return 750
-  if (dutiableValuePhp <= 500000) return 1000
-  if (dutiableValuePhp <= 750000) return 1500
-  return 2000
-}
+const formatCurrency = (amount: number, currency = 'PHP') =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)
 
 export const Calculator: React.FC = () => {
-  const [formData, setFormData] = useState<CalculationPayload>({
+  const settings = useSettingsStore((state) => state.settings)
+  const [formData, setFormData] = useState<CalculationPayload>(() => ({
     value: 0,
     freight: 0,
     insurance: 0,
     hsCode: '',
-    scheduleCode: 'MFN',
-    originCountry: '',
-    destinationPort: 'MNL', // Manila by default
+    scheduleCode: settings.defaultScheduleCode || 'MFN',
+    originCountry: settings.defaultOriginCountry || '',
+    destinationPort: 'MNL',
     currency: 'USD',
     containerSize: '20ft',
     arrastreWharfage: 0,
     doxStampOthers: 0,
     declarationType: 'consumption',
-  })
+  }))
 
   const [results, setResults] = useState<CalculationResultsData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -133,6 +134,28 @@ export const Calculator: React.FC = () => {
   const [tariffSchedules, setTariffSchedules] = useState<TariffScheduleOption[]>([
     { code: 'MFN', displayName: 'Most-Favored-Nation' },
   ])
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [historyExpanded, setHistoryExpanded] = useState(false)
+  const [selectedLookupRow, setSelectedLookupRow] = useState<AppHsCodeRow | null>(null)
+
+  const reloadHistory = async () => {
+    try {
+      const result = await appApi.getCalculationHistory(HISTORY_LIMIT)
+      if (result.success && result.data) {
+        setHistory(result.data as HistoryEntry[])
+      }
+    } catch {
+      // non-critical
+    }
+  }
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      void reloadHistory()
+    }, 0)
+
+    return () => clearTimeout(handle)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -206,6 +229,8 @@ export const Calculator: React.FC = () => {
     let cancelled = false
     const normalizedInput = formData.hsCode.trim()
     const compactInput = normalizedInput.replace(/\./g, '')
+    const selectedLookupMatchesInput =
+      selectedLookupRow?.code.replace(/\./g, '').toUpperCase() === compactInput.toUpperCase()
 
     if (!normalizedInput) {
       return
@@ -225,7 +250,9 @@ export const Calculator: React.FC = () => {
       setHsCodeValidationMessage(
         result.success && result.data
           ? null
-          : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
+          : selectedLookupMatchesInput
+            ? 'Matched an official Tariff Commission Finder result. Calculation will still require an approved local tariff row.'
+            : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
       )
     }, 250)
 
@@ -233,10 +260,11 @@ export const Calculator: React.FC = () => {
       cancelled = true
       clearTimeout(validateHandle)
     }
-  }, [formData.hsCode])
+  }, [formData.hsCode, selectedLookupRow])
 
-  const handleHSCodeSelect = (code: string) => {
+  const handleHSCodeSelect = (code: string, selection?: AppHsCodeRow) => {
     setHsCodeValidationMessage(null)
+    setSelectedLookupRow(selection || null)
     setFormData((prev) => ({ ...prev, hsCode: code }))
   }
 
@@ -250,159 +278,80 @@ export const Calculator: React.FC = () => {
     const resolvedCode = resolvedResult.success ? resolvedResult.data : null
 
     if (!resolvedCode) {
-      setError('Typed HS code does not resolve to a known tariff code. Choose a suggestion or enter a full valid HS code before calculating.')
-      setHsCodeValidationMessage('Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.')
+      setError(
+        selectedLookupRow?.sourceType === 'official-site' || selectedLookupRow?.sourceType === 'official-site-cache'
+          ? 'The official tariff finder matched this HS code, but there is no approved local tariff row for calculation yet. Import or review the tariff data first.'
+          : 'Typed HS code does not resolve to a known tariff code. Choose a suggestion or enter a full valid HS code before calculating.'
+      )
+      setHsCodeValidationMessage(
+        selectedLookupRow?.sourceType === 'official-site' || selectedLookupRow?.sourceType === 'official-site-cache'
+          ? 'Official tariff finder match selected. Calculation still depends on approved local tariff data.'
+          : 'Typed HS code does not resolve to a known tariff code yet. Select a suggestion or enter a full valid code.'
+      )
       return
     }
 
+    const canonicalHsCode = resolvedCode.code
+    setFormData((prev) => ({ ...prev, hsCode: canonicalHsCode }))
     setLoading(true)
     setError(null)
     setHsCodeValidationMessage(null)
 
     try {
-      const canonicalHsCode = resolvedCode.code
-      setFormData((prev) => ({ ...prev, hsCode: canonicalHsCode }))
-      let taxableValuePhp = formData.value + formData.freight + formData.insurance
-      let fxRateToPhp = 1
-      const inputCurrency = formData.currency.toUpperCase()
-
-      if (inputCurrency !== 'PHP') {
-        const conversionResult = await appApi.convertCurrency({
-          amount: formData.value + formData.freight + formData.insurance,
-          fromCurrency: inputCurrency,
-          toCurrency: 'PHP',
-        })
-
-        if (!conversionResult.success || !conversionResult.data) {
-          throw new Error(conversionResult.error || 'Currency conversion failed')
-        }
-
-        taxableValuePhp = conversionResult.data.convertedAmount
-        fxRateToPhp = conversionResult.data.rate
-      }
-
-      // Calculate duty
-      const dutyResult = await appApi.calculateDuty({
-        value: taxableValuePhp,
+      const batchResult = await appApi.batchCalculate([{
         hsCode: canonicalHsCode,
-        originCountry: formData.originCountry,
         scheduleCode: formData.scheduleCode,
-      })
+        value: formData.value,
+        freight: formData.freight,
+        insurance: formData.insurance,
+        originCountry: formData.originCountry,
+        destinationPort: formData.destinationPort,
+        currency: formData.currency,
+        declarationType: formData.declarationType,
+        containerSize: formData.containerSize,
+        arrastreWharfage: formData.arrastreWharfage,
+        doxStampOthers: formData.doxStampOthers,
+      }])
 
-      if (!dutyResult.success) {
-        throw new Error(dutyResult.error)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const batchResultAny = batchResult as any
+      if (!batchResultAny.success || !batchResultAny.data?.[0]) {
+        throw new Error(batchResultAny.error || 'Calculation returned no data')
       }
 
-      if (!dutyResult.data) {
-        throw new Error('Duty calculation returned no data')
-      }
-
-      const dutyData = dutyResult.data
-
-      const dutyAmount = dutyData.amount
-      const surchargeAmount = dutyData.surcharge || 0
-
-      // Get compliance requirements
-      const complianceResult = await appApi.getComplianceRequirements({
-        hsCode: canonicalHsCode,
-        value: taxableValuePhp,
-        destination: formData.destinationPort,
-      })
-
-      const complianceData =
-        typeof complianceResult === 'object' &&
-        complianceResult !== null &&
-        'data' in complianceResult
-          ? complianceResult.data ?? null
-          : null
-
-      const brokerageFeePhp = getBrokerageFeePhp(taxableValuePhp)
-      const arrastreWharfagePhp = formData.arrastreWharfage
-      const doxStampOthersPhp = formData.doxStampOthers
-      const csfUsd = getContainerSecurityFeeUsd(formData.containerSize)
-      let csfPhp = 0
-
-      if (csfUsd > 0) {
-        const csfConversion = await appApi.convertCurrency({
-          amount: csfUsd,
-          fromCurrency: 'USD',
-          toCurrency: 'PHP',
-        })
-
-        if (!csfConversion.success || !csfConversion.data) {
-          throw new Error(csfConversion.error || 'CSF conversion failed')
-        }
-
-        csfPhp = csfConversion.data.convertedAmount
-      }
-
-      const transitChargePhp = formData.declarationType === 'transit' ? TRANSIT_CHARGE_PHP : 0
-      const ipcPhp = formData.declarationType === 'transit' ? 250 : getImportProcessingChargePhp(taxableValuePhp)
-      const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
-      const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
-      const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp
-      const vatBasePhp =
-        taxableValuePhp +
-        dutyAmount +
-        surchargeAmount +
-        brokerageFeePhp +
-        arrastreWharfagePhp +
-        doxStampOthersPhp +
-        totalGlobalFeesPhp
-      const vatAmountPhp = vatBasePhp * VAT_RATE
-      const totalTaxAndFeesPhp = dutyAmount + vatAmountPhp + totalGlobalFeesPhp
-
+      const r = batchResultAny.data[0]
       setResults({
-        duty: {
-          ...dutyData,
-          amount: dutyAmount,
-          surcharge: surchargeAmount,
-        },
-        tariff: {
-          scheduleCode: formData.scheduleCode,
-        },
-        vat: {
-          rate: VAT_RATE * 100,
-          amount: vatAmountPhp,
-        },
-        compliance: complianceData,
+        duty: r.duty,
+        tariff: { scheduleCode: r.scheduleCode },
+        vat: r.vat,
+        compliance: r.compliance,
         costBase: {
           fob: formData.value,
           freight: formData.freight,
           insurance: formData.insurance,
-          taxableValue: taxableValuePhp,
-          brokerageFee: brokerageFeePhp,
-          arrastreWharfage: arrastreWharfagePhp,
-          doxStampOthers: doxStampOthersPhp,
-          vatBase: vatBasePhp,
+          taxableValue: r.costBase.taxableValue,
+          brokerageFee: r.costBase.brokerageFee,
+          arrastreWharfage: r.costBase.arrastreWharfage,
+          doxStampOthers: r.costBase.doxStampOthers,
+          vatBase: r.costBase.vatBase,
         },
-        breakdown: {
-          itemTaxes: {
-            cud: dutyAmount,
-            vat: vatAmountPhp,
-            totalItemTax: dutyAmount + vatAmountPhp,
-          },
-          globalFees: {
-            transitCharge: transitChargePhp,
-            ipc: ipcPhp,
-            csf: csfPhp,
-            cds: cdsPhp,
-            irs: irsPhp,
-            totalGlobalTax: totalGlobalFeesPhp,
-          },
-          totalTaxAndFees: totalTaxAndFeesPhp,
-        },
-        totalLandedCost: vatBasePhp + vatAmountPhp,
+        breakdown: r.breakdown,
+        totalLandedCost: r.totalLandedCost,
         calculationCurrency: 'PHP',
-        fx: {
-          applied: inputCurrency !== 'PHP',
-          rateToPhp: fxRateToPhp,
-          inputCurrency,
-          baseCurrency: 'PHP',
-        },
+        fx: r.fx,
       })
+      // Refresh history after successful calculation
+      reloadHistory()
     } catch (err) {
-      setError(String(err))
+      const errorMessage = String(err)
+      if (
+        (selectedLookupRow?.sourceType === 'official-site' || selectedLookupRow?.sourceType === 'official-site-cache') &&
+        (errorMessage.includes('Unknown HS code') || errorMessage.includes('No approved tariff rate found'))
+      ) {
+        setError('Official tariff finder lookup succeeded, but calculation still requires approved local tariff data for this HS code and schedule.')
+      } else {
+        setError(errorMessage)
+      }
     } finally {
       setLoading(false)
     }
@@ -413,6 +362,7 @@ export const Calculator: React.FC = () => {
       <header className="calculator-header">
         <h1>Customs Duty Calculator</h1>
         <p>Calculate import duties, VAT, and compliance requirements</p>
+        <p>Estimate only — validate rates, fees, and documentary requirements with BOC before filing.</p>
       </header>
 
       <div className="calculator-grid">
@@ -579,13 +529,13 @@ export const Calculator: React.FC = () => {
                   }
                 >
                   <option value="MNL">Manila (MNL)</option>
-                  <option value="CEBU">Cebu (CEBU)</option>
-                  <option value="DAVAO">Davao (DAVAO)</option>
-                  <option value="ILOILO">Iloilo (ILOILO)</option>
-                  <option value="SUBIC">Subic (SUBIC)</option>
-                </select>
+                    <option value="CEB">Cebu (CEB)</option>
+                    <option value="DVO">Davao (DVO)</option>
+                    <option value="ILO">Iloilo (ILO)</option>
+                    <option value="SUB">Subic (SUB)</option>
+                  </select>
+                </div>
               </div>
-            </div>
 
             <div className="form-row">
               <div className="form-group">
@@ -697,6 +647,49 @@ export const Calculator: React.FC = () => {
           )}
         </div>
       </div>
+
+      {history.length > 0 && (
+        <section className="history-panel">
+          <button
+            className="history-toggle"
+            onClick={() => setHistoryExpanded((prev) => !prev)}
+          >
+            🕒 Calculation History ({history.length} recent)
+            <span className="history-toggle-icon">{historyExpanded ? '▲' : '▼'}</span>
+          </button>
+
+          {historyExpanded && (
+            <div className="history-table-wrap">
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th>HS Code</th>
+                    <th>FOB Value</th>
+                    <th>Currency</th>
+                    <th>Duty (PHP)</th>
+                    <th>VAT (PHP)</th>
+                    <th>Total Landed (PHP)</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>{entry.hs_code}</td>
+                      <td>{entry.value.toLocaleString()}</td>
+                      <td>{entry.currency}</td>
+                      <td>{formatCurrency(entry.duty_amount)}</td>
+                      <td>{formatCurrency(entry.vat_amount)}</td>
+                      <td>{formatCurrency(entry.total_landed_cost)}</td>
+                      <td>{new Date(entry.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }

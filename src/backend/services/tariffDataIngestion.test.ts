@@ -6,6 +6,7 @@ const xlsxFixtureBase64 = 'UEsDBAoAAAAIAFkbl1yR28AJWQEAAPAEAAATAAAAW0NvbnRlbnRfV
 
 let TariffDataIngestionServiceClass: typeof import('./tariffDataIngestion').TariffDataIngestionService
 let getDatabase: typeof import('../db/database').getDatabase
+let updateRuntimeSettingsFn: typeof import('./runtimeSettings').updateRuntimeSettings
 
 beforeAll(async () => {
   process.env.APPDATA = path.join(os.tmpdir(), 'customs-calculator-ingestion-vitest')
@@ -16,6 +17,9 @@ beforeAll(async () => {
 
   const ingestionModule = await import('./tariffDataIngestion')
   TariffDataIngestionServiceClass = ingestionModule.TariffDataIngestionService
+
+  const runtimeSettingsModule = await import('./runtimeSettings')
+  updateRuntimeSettingsFn = runtimeSettingsModule.updateRuntimeSettings
 })
 
 describe('TariffDataIngestionService', () => {
@@ -81,6 +85,131 @@ describe('TariffDataIngestionService', () => {
     expect(rows.some((row) => row.schedule_code === 'AHTN' && Math.abs(row.duty_rate - 0.01) < 0.000001)).toBe(true)
   })
 
+  it('tracks duplicate and conflict accounting during tariff imports', async () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const summary = await service.importRows({
+      sourceName: 'Duplicate Accounting Test',
+      sourceType: 'manual',
+      rows: [
+        {
+          hsCode: '8471.30',
+          scheduleCode: 'MFN',
+          dutyRate: '5%',
+          vatRate: '12%',
+          effectiveDate: '2026-01-01',
+        },
+        {
+          hsCode: '847130',
+          scheduleCode: 'MFN',
+          dutyRate: '5%',
+          vatRate: '12%',
+          effectiveDate: '2026-01-01',
+        },
+      ],
+      forceApprove: true,
+    })
+
+    expect(summary.duplicateRows).toBeGreaterThanOrEqual(1)
+    expect(summary.skippedRows).toBeGreaterThanOrEqual(1)
+  })
+
+  it('is idempotent for repeated full-sync source references when guard is enabled', async () => {
+    const service = new TariffDataIngestionServiceClass()
+    updateRuntimeSettingsFn({ fullSyncIdempotencyGuardEnabled: true })
+
+    const first = await service.importRows({
+      sourceName: 'Full Sync Idempotency Baseline',
+      sourceType: 'auto-fetch-tariff-rates-boc-full-sync',
+      sourceReference: 'https://example.gov.ph/full-sync-2026-01-01.csv',
+      rows: [
+        {
+          hsCode: '8471.30',
+          scheduleCode: 'MFN',
+          dutyRate: '4%',
+          vatRate: '12%',
+          surchargeRate: '0%',
+          effectiveDate: '2026-02-01',
+        },
+      ],
+      forceApprove: true,
+    })
+
+    const second = await service.importRows({
+      sourceName: 'Full Sync Idempotency Repeat',
+      sourceType: 'auto-fetch-tariff-rates-boc-full-sync',
+      sourceReference: 'https://example.gov.ph/full-sync-2026-01-01.csv',
+      rows: [
+        {
+          hsCode: '8471.30',
+          scheduleCode: 'MFN',
+          dutyRate: '4%',
+          vatRate: '12%',
+          surchargeRate: '0%',
+          effectiveDate: '2026-02-01',
+        },
+      ],
+      forceApprove: true,
+    })
+
+    expect(first.status).toBe('completed')
+    expect(second.importedRows).toBe(0)
+    expect(second.duplicateRows).toBe(second.totalRows)
+    expect(second.skippedRows).toBe(second.totalRows)
+  })
+
+  it('allows repeated full-sync imports when idempotency guard is disabled', async () => {
+    const service = new TariffDataIngestionServiceClass()
+    updateRuntimeSettingsFn({ fullSyncIdempotencyGuardEnabled: false })
+
+    const first = await service.importRows({
+      sourceName: 'Full Sync Guard Off Baseline',
+      sourceType: 'auto-fetch-tariff-rates-boc-full-sync',
+      sourceReference: 'https://example.gov.ph/full-sync-2026-02-01.csv',
+      rows: [
+        {
+          hsCode: '8708.30',
+          scheduleCode: 'MFN',
+          dutyRate: '8%',
+          vatRate: '12%',
+          surchargeRate: '0%',
+          effectiveDate: '2026-03-01',
+        },
+      ],
+      forceApprove: true,
+    })
+
+    const second = await service.importRows({
+      sourceName: 'Full Sync Guard Off Repeat',
+      sourceType: 'auto-fetch-tariff-rates-boc-full-sync',
+      sourceReference: 'https://example.gov.ph/full-sync-2026-02-01.csv',
+      rows: [
+        {
+          hsCode: '8708.30',
+          scheduleCode: 'MFN',
+          dutyRate: '8%',
+          vatRate: '12%',
+          surchargeRate: '0%',
+          effectiveDate: '2026-03-01',
+        },
+      ],
+      forceApprove: true,
+    }).catch((error: unknown) => ({
+      failed: true,
+      message: error instanceof Error ? error.message : String(error),
+    }))
+
+    expect(first.status).toBe('completed')
+    if ('failed' in second && second.failed) {
+      expect(second.message).toContain('uq_tariff_rates_version')
+    } else {
+      expect(second.status).toBe('completed')
+      expect(second.duplicateRows).toBeGreaterThanOrEqual(1)
+    }
+
+    updateRuntimeSettingsFn({ fullSyncIdempotencyGuardEnabled: true })
+  })
+
   it('parses HS catalog rows from xlsx base64 uploads', async () => {
     const service = new TariffDataIngestionServiceClass()
 
@@ -96,5 +225,86 @@ describe('TariffDataIngestionService', () => {
         category: 'Electronics',
       },
     ])
+  })
+
+  it('parses tariff rows from workbook uploads and detects duplicate source references', async () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const rows = await service.parseTariffRows({
+      rows: [
+        {
+          hs_code: '8471.30',
+          duty_rate: '5%',
+          vat_rate: '12%',
+          schedule_code: 'MFN',
+        },
+      ],
+    })
+
+    expect(rows[0]).toMatchObject({
+      hsCode: '8471.30',
+      dutyRate: '5%',
+      vatRate: '12%',
+      scheduleCode: 'MFN',
+    })
+
+    await service.importRows({
+      sourceName: 'Duplicate Reference Test',
+      sourceType: 'auto-fetch-tariff-rates-boc-tabular',
+      sourceReference: 'https://example.gov.ph/file.csv',
+      rows,
+      forceApprove: true,
+    })
+
+    await expect(
+      service.hasSourceReference('auto-fetch-tariff-rates-boc-tabular', 'https://example.gov.ph/file.csv')
+    ).resolves.toBe(true)
+  })
+
+  it('extracts tariff rows from PDF-like payload text', async () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const pseudoPdfText = [
+      '%PDF-1.4',
+      '1 0 obj << /Type /Page >> endobj',
+      '(8471.30 Portable computers 5%) Tj',
+      '(8708.30 Brake parts 10%) Tj',
+    ].join('\n')
+
+    const rows = await service.parsePdfTariffRows({
+      contentBase64: Buffer.from(pseudoPdfText, 'utf-8').toString('base64'),
+      sourceUrl: 'https://example.gov.ph/tariff.pdf',
+    })
+
+    expect(rows.length).toBeGreaterThanOrEqual(2)
+    expect(rows.some((row) => row.hsCode === '8471.30')).toBe(true)
+    expect(rows.some((row) => row.hsCode === '8708.30')).toBe(true)
+    expect(rows.every((row) => String(row.notes || '').includes('PDF source'))).toBe(true)
+  })
+
+  it('imports HS catalog in batches and returns aggregate summary', async () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const summary = await service.importHSCatalogBatched({
+      sourceName: 'HS Catalog Bulk Batch Test',
+      sourceType: 'hs-catalog',
+      sourceReference: 'bulk-hs-catalog.csv',
+      batchSize: 2,
+      rows: [
+        { hsCode: '0101.21', description: 'Pure-bred breeding horses', category: 'Animals' },
+        { hsCode: '0101.29', description: 'Other horses', category: 'Animals' },
+        { hsCode: '0101.30', description: 'Asses', category: 'Animals' },
+      ],
+    })
+
+    expect(summary.totalRows).toBe(3)
+    expect(summary.batchSize).toBe(2)
+    expect(summary.totalBatches).toBe(2)
+    expect(summary.processedBatches).toBe(2)
+    expect(summary.importedRows).toBe(3)
+    expect(summary.batchResults.length).toBe(2)
+    expect(summary.batchResults[0]?.batchRows).toBe(2)
+    expect(summary.batchResults[1]?.batchRows).toBe(1)
+    expect(summary.batchResults[0]?.duplicateRows).toBeGreaterThanOrEqual(0)
   })
 })

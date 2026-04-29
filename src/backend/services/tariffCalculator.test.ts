@@ -43,6 +43,15 @@ describe('TariffCalculator.searchHSCodes', () => {
     expect(results).toEqual([])
   })
 
+  it('respects configurable HS search limits', async () => {
+    const tariffCalculator = new TariffCalculatorClass()
+
+    const results = await tariffCalculator.searchHSCodes('8', { limit: 5 })
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results.length).toBeLessThanOrEqual(5)
+  })
+
   it('selects schedule-specific tariff rates when a non-default schedule is requested', async () => {
     const database = getDatabase()
     const tariffCalculator = new TariffCalculatorClass()
@@ -104,5 +113,13 @@ describe('TariffCalculator.searchHSCodes', () => {
           schedule.displayName === 'Philippines-European Free Trade Association Free Trade Agreement (Switzerland/Liechtenstein)'
       )
     ).toBe(true)
+  })
+
+  it('throws a handled error when a selected tariff schedule has no approved row', async () => {
+    const tariffCalculator = new TariffCalculatorClass()
+
+    await expect(
+      tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'NON-EXISTENT')
+    ).rejects.toThrow('No approved tariff rate found')
   })
 })

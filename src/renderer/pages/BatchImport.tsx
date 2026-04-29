@@ -1,20 +1,14 @@
 import React, { useMemo, useState } from 'react'
 import { appApi } from '../lib/appApi'
+import {
+  CSV_TEMPLATE_EXAMPLE,
+  CSV_TEMPLATE_HEADER,
+  RESULT_CURRENCY,
+  getColumnAliasHelp,
+  parseBatchImportCsv,
+  type ShipmentRow,
+} from '../lib/batchImportCsv'
 import './BatchImport.css'
-
-type ShipmentRow = {
-  hsCode: string
-  scheduleCode: string
-  value: number
-  freight: number
-  insurance: number
-  originCountry: string
-  currency: string
-  declarationType: 'consumption' | 'warehousing' | 'transit'
-  containerSize: 'none' | '20ft' | '40ft'
-  arrastreWharfage: number
-  doxStampOthers: number
-}
 
 type BatchResultRow = ShipmentRow & {
   duty?: {
@@ -40,8 +34,6 @@ type BatchResultRow = ShipmentRow & {
   totalLandedCost?: number
 }
 
-const DEFAULT_CURRENCY = 'USD'
-const RESULT_CURRENCY = 'PHP'
 
 const formatCurrency = (amount: number, currency: string = RESULT_CURRENCY) =>
   new Intl.NumberFormat('en-US', {
@@ -51,65 +43,6 @@ const formatCurrency = (amount: number, currency: string = RESULT_CURRENCY) =>
     maximumFractionDigits: 2,
   }).format(amount)
 
-const parseCsvText = (input: string): ShipmentRow[] => {
-  const lines = input
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-
-  if (lines.length === 0) {
-    return []
-  }
-
-  const firstRowParts = lines[0].split(',').map((part) => part.trim().toLowerCase())
-  const hasHeader =
-    firstRowParts.includes('hscode') ||
-    firstRowParts.includes('hs_code') ||
-    firstRowParts.includes('value')
-
-  const dataLines = hasHeader ? lines.slice(1) : lines
-
-  const rows: ShipmentRow[] = []
-
-  for (const line of dataLines) {
-    const parts = line.split(',').map((part) => part.trim())
-    if (parts.length < 3) {
-      continue
-    }
-
-    const hsCode = parts[0]
-    const value = Number(parts[1])
-    const freight = Number(parts[2] || 0)
-    const insurance = Number(parts[3] || 0)
-    const scheduleCode = (parts[4] || 'MFN').toUpperCase()
-    const originCountry = (parts[5] || '').toUpperCase()
-    const currency = (parts[6] || DEFAULT_CURRENCY).toUpperCase()
-    const declarationType = (parts[7] || 'consumption').toLowerCase() as ShipmentRow['declarationType']
-    const containerSize = (parts[8] || '20ft').toLowerCase() as ShipmentRow['containerSize']
-    const arrastreWharfage = Number(parts[9] || 0)
-    const doxStampOthers = Number(parts[10] || 0)
-
-    if (!hsCode || Number.isNaN(value) || value <= 0 || Number.isNaN(freight) || Number.isNaN(insurance) || !originCountry || Number.isNaN(arrastreWharfage) || Number.isNaN(doxStampOthers)) {
-      continue
-    }
-
-    rows.push({
-      hsCode,
-      scheduleCode,
-      value,
-      freight,
-      insurance,
-      originCountry,
-      currency,
-      declarationType: declarationType === 'consumption' || declarationType === 'warehousing' || declarationType === 'transit' ? declarationType : 'consumption',
-      containerSize: containerSize === '40ft' || containerSize === '20ft' || containerSize === 'none' ? containerSize : '20ft',
-      arrastreWharfage,
-      doxStampOthers,
-    })
-  }
-
-  return rows
-}
 
 const toCsv = (rows: BatchResultRow[]): string => {
   const header = [
@@ -119,6 +52,7 @@ const toCsv = (rows: BatchResultRow[]): string => {
     'freight',
     'insurance',
     'originCountry',
+    'destinationPort',
     'currency',
     'declarationType',
     'containerSize',
@@ -143,6 +77,7 @@ const toCsv = (rows: BatchResultRow[]): string => {
       row.freight.toFixed(2),
       row.insurance.toFixed(2),
       row.originCountry,
+      row.destinationPort,
       row.currency,
       row.declarationType,
       row.containerSize,
@@ -159,12 +94,25 @@ const toCsv = (rows: BatchResultRow[]): string => {
   return [header.join(','), ...lines].join('\n')
 }
 
+const downloadTemplate = () => {
+  const content = `${CSV_TEMPLATE_HEADER}\n${CSV_TEMPLATE_EXAMPLE}`
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'batch-import-template.csv'
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 export const BatchImport: React.FC = () => {
   const [rawCsv, setRawCsv] = useState('')
   const [shipments, setShipments] = useState<ShipmentRow[]>([])
   const [results, setResults] = useState<BatchResultRow[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [columnWarnings, setColumnWarnings] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  const columnAliasHelp = useMemo(() => getColumnAliasHelp(), [])
 
   const totals = useMemo(() => {
     return results.reduce(
@@ -195,16 +143,18 @@ export const BatchImport: React.FC = () => {
 
   const handleParse = () => {
     setError(null)
-    const parsed = parseCsvText(rawCsv)
+    setColumnWarnings([])
+    const { rows, columnWarnings: warnings } = parseBatchImportCsv(rawCsv)
+    setColumnWarnings(warnings)
 
-    if (parsed.length === 0) {
+    if (rows.length === 0) {
       setShipments([])
       setResults([])
-      setError('No valid rows found. Expected columns: hsCode,value,freight,insurance,scheduleCode(optional),originCountry,currency(optional),declarationType(optional),containerSize(optional),arrastreWharfage(optional),doxStampOthers(optional).')
+      setError('No valid rows found. Download the template above to see the expected column format.')
       return
     }
 
-    setShipments(parsed)
+    setShipments(rows)
     setResults([])
   }
 
@@ -219,6 +169,7 @@ export const BatchImport: React.FC = () => {
     setShipments([])
     setResults([])
     setError(null)
+    setColumnWarnings([])
   }
 
   const handleRunBatch = async () => {
@@ -272,14 +223,32 @@ export const BatchImport: React.FC = () => {
       <div className="batch-layout">
         <section className="batch-panel">
           <h2>Input CSV</h2>
-          <p className="hint">Use header: hsCode,value,freight,insurance,scheduleCode,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers</p>
+
+          <div className="template-row">
+            <p className="hint">Use the template or keep your own header order. Common aliases are mapped automatically.</p>
+            <button className="btn btn-template" onClick={downloadTemplate}>
+              ⬇ Download Template
+            </button>
+          </div>
+
+          <div className="mapping-panel">
+            <p className="mapping-title">Accepted header aliases</p>
+            <div className="mapping-grid">
+              {columnAliasHelp.map((entry) => (
+                <div key={entry.column} className="mapping-item">
+                  <strong>{entry.column}</strong>
+                  <span>{entry.aliases.join(', ')}</span>
+                </div>
+              ))}
+            </div>
+          </div>
 
           <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
 
           <textarea
             value={rawCsv}
             onChange={(event) => setRawCsv(event.target.value)}
-            placeholder="hsCode,value,freight,insurance,scheduleCode,originCountry,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers\n8471.30,1000,100,25,MFN,CHN,USD,consumption,20ft,4500,265\n8517.62,2500,200,30,AHTN,USA,USD,transit,40ft,6000,300"
+            placeholder={`${CSV_TEMPLATE_HEADER}\n${CSV_TEMPLATE_EXAMPLE}`}
           />
 
           <div className="actions">
@@ -293,6 +262,14 @@ export const BatchImport: React.FC = () => {
               Export Results
             </button>
           </div>
+
+          {columnWarnings.length > 0 && (
+            <div className="column-warnings">
+              {columnWarnings.map((w, i) => (
+                <div key={i} className="column-warning">⚠ {w}</div>
+              ))}
+            </div>
+          )}
 
           {error && <div className="error-message">{error}</div>}
         </section>

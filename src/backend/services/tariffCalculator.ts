@@ -53,6 +53,7 @@ export async function calculateAllTaxes(
   return results
 }
 import { getDatabase } from '../db/database'
+import { normalizeExactHsCode } from '../../shared/hsLookupQuery'
 
 export interface DutyResult {
   rate: number
@@ -76,6 +77,19 @@ export interface TariffCatalogRow {
   vatRate: number
   surchargeRate: number
   effectiveDate: string
+}
+
+export interface TariffHistoryRow {
+  hsCode: string
+  scheduleCode: string
+  description: string
+  category: string
+  dutyRate: number
+  vatRate: number
+  surchargeRate: number
+  effectiveDate: string
+  endDate: string | null
+  importStatus: string | null
 }
 
 export interface TariffScheduleOption {
@@ -106,12 +120,6 @@ type HSCodeLookupRow = {
   category: string
 }
 
-type TariffsByCategoryRow = {
-  hs_code: string
-  duty_rate: number
-  vat_rate: number
-}
-
 type TariffCatalogDbRow = {
   hs_code: string
   schedule_code: string
@@ -121,6 +129,11 @@ type TariffCatalogDbRow = {
   vat_rate: number
   surcharge_rate: number
   effective_date: string
+}
+
+type TariffHistoryDbRow = TariffCatalogDbRow & {
+  end_date: string | null
+  import_status: string | null
 }
 
 type TariffCategoryRow = {
@@ -147,7 +160,7 @@ export class TariffCalculator {
   private db = getDatabase()
 
   private normalizeHSCode(value: string): string {
-    return value.trim().toUpperCase()
+    return normalizeExactHsCode(value) || value.trim().toUpperCase()
   }
 
   private resolveCanonicalHSCode(hsCode: string): Promise<string> {
@@ -208,12 +221,26 @@ export class TariffCalculator {
     })
   }
 
+  private async requireCurrentTariffRateRow(
+    hsCode: string,
+    fields: string,
+    scheduleCode: string = 'MFN'
+  ): Promise<Record<string, unknown>> {
+    const row = await this.getCurrentTariffRateRow(hsCode, fields, scheduleCode)
+    if (row) {
+      return row
+    }
+
+    const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
+    throw new Error(`No approved tariff rate found for HS code ${hsCode} under schedule ${normalizedScheduleCode}`)
+  }
+
   /**
    * Calculate import duty for a product
    */
   async calculateDuty(value: number, hsCode: string, _originCountry: string, scheduleCode: string = 'MFN'): Promise<DutyResult> {
     try {
-      const row = await this.getCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes', scheduleCode) as DutyRateRow | null
+      const row = await this.requireCurrentTariffRateRow(hsCode, 'duty_rate, surcharge_rate, notes', scheduleCode) as DutyRateRow
 
       const dutyRate = row?.duty_rate || 0
       const surchargeRate = row?.surcharge_rate || 0
@@ -235,7 +262,7 @@ export class TariffCalculator {
    */
   async calculateVAT(dutiableValue: number, hsCode: string, scheduleCode: string = 'MFN'): Promise<VATResult> {
     try {
-      const row = await this.getCurrentTariffRateRow(hsCode, 'vat_rate, notes', scheduleCode) as VatRateRow | null
+      const row = await this.requireCurrentTariffRateRow(hsCode, 'vat_rate, notes', scheduleCode) as VatRateRow
       const vatRate = row?.vat_rate || 0.12
 
       return {
@@ -252,11 +279,15 @@ export class TariffCalculator {
   /**
    * Search for HS codes by code or description
    */
-  searchHSCodes(query: string): Promise<Array<{ code: string; description: string; category: string }>> {
+  searchHSCodes(
+    query: string,
+    options?: { limit?: number }
+  ): Promise<Array<{ code: string; description: string; category: string }>> {
     return new Promise((resolve, reject) => {
       const normalizedQuery = query.trim().toUpperCase()
       const compactQuery = normalizedQuery.replace(/\./g, '')
       const queryTerms = normalizedQuery.split(/\s+/).filter(Boolean)
+      const limit = Math.max(5, Math.min(100, Math.floor(options?.limit || 20)))
 
       if (!normalizedQuery) {
         resolve([])
@@ -292,7 +323,7 @@ export class TariffCalculator {
           OR UPPER(description) LIKE ?
           OR ${descriptionTermClause}
         ORDER BY rank, LENGTH(code), code, description
-        LIMIT 20
+        LIMIT ?
       `
 
       const sqlParams = [
@@ -306,6 +337,7 @@ export class TariffCalculator {
         compactSearchQuery,
         searchQuery,
         ...descriptionTermParams,
+        limit,
       ]
 
       this.db.all(
@@ -360,40 +392,6 @@ export class TariffCalculator {
                 category: row.category,
               }
             : null
-        )
-      })
-    })
-  }
-
-  /**
-   * Get all tariff rates for a product category
-   */
-  getTariffsByCategory(category: string, scheduleCode: string = 'MFN'): Promise<Array<{ hs_code: string; duty_rate: number; vat_rate: number }>> {
-    return new Promise((resolve, reject) => {
-      const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
-      const sql = `
-        SELECT DISTINCT tr.hs_code, tr.duty_rate, tr.vat_rate
-        FROM tariff_rates tr
-        JOIN hs_codes hc ON tr.hs_code = hc.code
-        WHERE hc.category = ? AND tr.effective_date <= date('now')
-        AND COALESCE(tr.schedule_code, 'MFN') = ?
-        AND (tr.end_date IS NULL OR tr.end_date > date('now'))
-        ORDER BY tr.hs_code
-      `
-
-      this.db.all(sql, [category, normalizedScheduleCode], (err, rows: TariffsByCategoryRow[]) => {
-        if (err) {
-          console.error('Error fetching tariffs by category:', err)
-          reject(new Error(`Failed to fetch tariffs: ${err.message}`))
-          return
-        }
-
-        resolve(
-          rows?.map((r) => ({
-            hs_code: r.hs_code,
-            duty_rate: r.duty_rate,
-            vat_rate: r.vat_rate,
-          })) || []
         )
       })
     })
@@ -489,6 +487,79 @@ export class TariffCalculator {
     })
   }
 
+  /**
+   * Get historical tariff rate rows (includes expired/superseded entries)
+   */
+  getTariffHistory(
+    query: string = '',
+    category: string = 'All',
+    scheduleCode: string = 'MFN',
+    limit: number = 300
+  ): Promise<TariffHistoryRow[]> {
+    return new Promise((resolve, reject) => {
+      const searchQuery = `%${query.trim().toUpperCase()}%`
+      const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
+
+      let sql = `
+        SELECT
+          hc.code AS hs_code,
+          COALESCE(tr.schedule_code, 'MFN') AS schedule_code,
+          hc.description,
+          hc.category,
+          tr.duty_rate,
+          tr.vat_rate,
+          tr.surcharge_rate,
+          tr.effective_date,
+          tr.end_date,
+          tr.import_status
+        FROM hs_codes hc
+        JOIN tariff_rates tr ON tr.hs_code = hc.code
+        WHERE COALESCE(tr.schedule_code, 'MFN') = ?
+          AND (hc.code LIKE ? OR hc.description LIKE ?)
+      `
+
+      const params: Array<string | number> = [normalizedScheduleCode, searchQuery, searchQuery]
+
+      if (category && category !== 'All') {
+        sql += ' AND hc.category = ?'
+        params.push(category)
+      }
+
+      sql += `
+        ORDER BY
+          CASE WHEN tr.end_date IS NULL THEN 0 ELSE 1 END,
+          tr.effective_date DESC,
+          COALESCE(tr.last_modified_at, tr.created_at) DESC,
+          hc.code ASC
+        LIMIT ?
+      `
+      params.push(limit)
+
+      this.db.all(sql, params, (err, rows: TariffHistoryDbRow[]) => {
+        if (err) {
+          console.error('Error fetching tariff history:', err)
+          reject(new Error(`Failed to fetch tariff history: ${err.message}`))
+          return
+        }
+
+        resolve(
+          rows?.map((row) => ({
+            hsCode: row.hs_code,
+            scheduleCode: row.schedule_code,
+            description: row.description,
+            category: row.category,
+            dutyRate: (row.duty_rate || 0) * 100,
+            vatRate: (row.vat_rate || 0) * 100,
+            surchargeRate: (row.surcharge_rate || 0) * 100,
+            effectiveDate: row.effective_date,
+            endDate: row.end_date,
+            importStatus: row.import_status,
+          })) || []
+        )
+      })
+    })
+  }
+
   getTariffSchedules(): Promise<TariffScheduleOption[]> {
     return new Promise((resolve, reject) => {
       const sql = `
@@ -546,26 +617,24 @@ export class TariffCalculator {
    */
   saveCalculationHistory(data: {
     hsCode: string
-    productValue: number
+    value: number
     currency: string
-    originCountry: string
     dutyAmount: number
     vatAmount: number
     totalLandedCost: number
   }): void {
     const sql = `
       INSERT INTO calculation_history
-      (hs_code, product_value, currency, origin_country, duty_amount, vat_amount, total_landed_cost)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      (hs_code, value, currency, duty_amount, vat_amount, total_landed_cost)
+      VALUES (?, ?, ?, ?, ?, ?)
     `
 
     this.db.run(
       sql,
       [
         data.hsCode,
-        data.productValue,
+        data.value,
         data.currency,
-        data.originCountry,
         data.dutyAmount,
         data.vatAmount,
         data.totalLandedCost,
@@ -611,4 +680,3 @@ export class TariffCalculator {
     })
   }
 }
-

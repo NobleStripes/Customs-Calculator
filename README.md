@@ -5,9 +5,13 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 ## Quick Summary
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
-- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP.
+- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent, and missing tariff rows now fail explicitly instead of silently defaulting to zero.
+- New in 0.4.1: Admin tariff import supports CSV/XLS/XLSX upload paths, preview/source CSV exports, stronger Tariff Commission HTML parsing coverage, and batch-import alias/header fixes.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
+- Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions and local fallback results.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
+- Automated regulatory fetcher: cron-scheduled job discovers and ingests data files from BOC, BIR, and Tariff Commission pages; all auto-fetched rows go to the human review queue before being applied.
+- Batch shipment import now supports reordered CSV headers and common alias mapping, not just the template column order.
 - Current focus: admin data-management UI and automated Customs/BIR source adapters.
 
 ## Project Overview
@@ -25,6 +29,21 @@ The project is in an active build-out phase: core calculation and operator workf
 - Runtime, storage, API, and service boundaries are documented in [docs/architecture.md](docs/architecture.md).
 - Calculation formulas, fee rules, VAT-base logic, and PHP output rules are documented in [docs/calculation-logic.md](docs/calculation-logic.md).
 
+## Release Notes
+
+### Current Release: v0.4.1
+
+- Added CSV/XLS/XLSX upload support to the Admin tariff import workspace.
+- Added export/download actions for tariff import preview results and tariff source governance tables.
+- Added stronger Tariff Commission matrix parser coverage and BOC negative fixtures for HTML fallback extraction.
+- Fixed Batch Import CSV parsing so reordered headers and common alias names are mapped correctly.
+
+Full release details:
+
+- [docs/changelog/v0.4.1.md](docs/changelog/v0.4.1.md)
+- [docs/changelog/v0.4.0.md](docs/changelog/v0.4.0.md)
+- [CHANGELOG.md](CHANGELOG.md)
+
 ## Features
 
 ### Completed
@@ -35,27 +54,30 @@ The project is in an active build-out phase: core calculation and operator workf
 - [x] VAT taxable base calculation includes surcharge
 - [x] Multi-currency calculator flow (converts shipment values to PHP for computation while computed outputs stay in PHP)
 - [x] Currency conversion flow with live, cached, and fallback FX behavior in website mode
-- [x] HS code autocomplete search by code and description
+- [x] HS code catalog auto-search by code and description (adaptive code/text query thresholds)
 - [x] HS code search ranking and normalization (supports code searches with/without dots)
 - [x] HS code keyboard navigation (Arrow Up/Down, Enter, Escape)
+- [x] Remote-first official HS lookup suggestions via Tariff Commission Finder, with cached server responses and local fallback
 - [x] Compliance requirement checks by HS code/category/value
 - [x] Calculator page with real-time results and FX context display
 - [x] Batch Import page with CSV parse, preview, calculate, and export
+- [x] Batch Import CSV alias mapping and template guidance for reordered headers
 - [x] Tariff Browser page with search and category filtering
 - [x] Browser report export for calculation output
 - [x] HS catalog import pipeline for CSV/XLS sources into `hs_codes`
-- [x] Tariff data ingestion workflow stubbed in the website UI for future admin wiring
+- [x] Tariff data ingestion workflow with Admin preview/import workspace, including CSV/XLS/XLSX upload support
+- [x] Runtime settings operations panel (health state, latest source visibility, manual runtime refresh, and robust save/reset persistence)
 
 ### In Progress
-- [ ] Data management/admin UI for tariff source imports and review queue
+- [x] Data management/admin UI for tariff source imports and review queue (single-row and bulk review actions, confidence filtering, and governance summaries)
 - [x] Server-side Customs/BIR/Tariff Commission website fetch proxy
-- [ ] Customs/BIR/Tariff Commission source adapters (HTML/CSV/PDF ingestion and structured extraction)
-- [ ] Tariff source governance views (import status, confidence, and rate change audit)
+- [x] Automated cron-scheduled regulatory fetcher (BOC and Tariff Commission; fetched rows queued for human review)
+- [x] Customs/BIR/Tariff Commission source adapters (HTML table extraction, linked CSV/XLS/XLSX autodetection, and PDF extraction path)
+- [x] Tariff source governance views (import status, confidence, and rate change audit)
 
 ### Planned
 - [ ] Automated historical tariff tracking and comparison dashboards
-- [ ] Data import/export tooling improvements (templates, mapping, conflict resolution UX)
-- [ ] Settings management
+- [ ] Data import/export tooling improvements (broader export coverage and richer conflict-resolution UX beyond the current Admin preview/source CSV exports)
 - [ ] Offline mode enhancements
 
 ## Setup Instructions
@@ -101,11 +123,37 @@ Use this quick-start when running locally for website development.
    - The API is served from the same origin, for example `http://127.0.0.1:8787/api/health`.
    - Currency conversion is served from the same origin, for example `http://127.0.0.1:8787/api/currency/convert?amount=1&from=USD&to=PHP`.
 
+### Full HS Catalog Import (Batch Mode)
+
+For complete HS code catalog loads, use batch mode to avoid oversized single imports.
+
+- Endpoint: `POST /api/import/hs-codes`
+- Key payload fields:
+   - `sourceName` (required)
+   - One of `rows`, `csvText`, or `contentBase64` + `fileName`
+   - `batchSize` (optional, recommended for large uploads)
+
+Example payload:
+
+```json
+{
+   "sourceName": "PH HS Catalog 2026",
+   "sourceType": "hs-catalog",
+   "sourceReference": "ph-hs-catalog-2026.xlsx",
+   "contentBase64": "<base64-file-content>",
+   "fileName": "ph-hs-catalog-2026.xlsx",
+   "batchSize": 1000
+}
+```
+
+Batch mode returns aggregate import metadata including `totalBatches`, `processedBatches`, and per-batch summaries.
+
 ## Documentation
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Calculation logic: [docs/calculation-logic.md](docs/calculation-logic.md)
 - Development guide: [docs/development-guide.md](docs/development-guide.md)
+- Changelog index: [CHANGELOG.md](CHANGELOG.md)
 
 ## Detailed Technical Notes
 
@@ -120,10 +168,12 @@ Contributor workflows, extension patterns, testing commands, and maintenance not
 
 ## Known Issues & Limitations
 
-1. **Exchange Rates:** Current website mode uses fallback FX data; live-rate refresh is part of the future server-side phase.
-2. **Structured Extraction:** The current proxy returns sanitized page content and discovery results, but not issuer-specific structured parsing yet.
-3. **Seeded Data Scope:** The current browser dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage.
-4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress.
+1. **Exchange Rates:** Live rates are fetched from `exchangerate-api.com` (free tier, ~1,500 req/month) and cached for 24 hours in SQLite. Fallback hardcoded rates are used when the API is unavailable.
+2. **Structured Extraction:** The regulatory fetcher discovers and downloads linked tabular files (`.csv`/`.xls`/`.xlsx`) from approved government sources, extracts structured HTML tariff tables, and includes a PDF extraction path. Deeply formatted/scanned PDF memo parsing may still need source-specific refinements.
+3. **Seeded Data Scope:** The built-in dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage. Import your own tariff schedules via the CSV/XLS import pipeline.
+4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress, though tariff source visibility is now surfaced in the admin page.
+5. **Official Lookup Scope:** Live Tariff Commission Finder matches improve HS code suggestion quality, but calculations still rely on approved local tariff rows unless operators import/review newer tariff data.
+6. **Estimate-Only Output:** The calculator is intended for planning/reference workflows. Verify the final tariff treatment, fees, and documentary requirements with current BOC/BIR issuances before filing.
 
 ## Future Enhancements
 
@@ -141,33 +191,16 @@ For issues, feature requests, or contributions:
 2. Include relevant HS codes and product details
 3. Test with multiple product categories
 
-## License
-
-MIT
-
 ## Changelog
 
-### v0.2.0 (Current)
-- Added first-class tariff schedule support across the calculator, tariff browser, tariff import pipeline, batch shipment workflows, and exported calculation documents.
-- Added seeded tariff schedule metadata for MFN plus named FTA agreement options such as AANZFTA, ACFTA, AJCEPA, ATIGA, PJEPA, PH-KR FTA, PH-EFTA FTA variants, and RCEP.
-- Upgraded HS code search reliability with better normalization, ranking, input validation, and stale-result handling.
-- Added server-backed tariff-rate preview/import endpoints and schedule-aware tariff row storage using `schedule_code` on `tariff_rates`.
-- Improved tariff import normalization so percentage-style inputs like `1%` are stored correctly as decimal rates.
-- Added PDF/report output schedule metadata and surfaced schedule context in calculator and batch-import UX.
-- Replaced the vulnerable spreadsheet dependency path with an audit-clean XLSX reader flow for HS catalog imports.
-- Cleaned up backend TypeScript typing so lint, targeted tests, and build now pass cleanly.
+The full changelog has moved out of this README into dedicated release-note files:
 
-### v0.1.0
-- Website-first React + TypeScript runtime
-- Seeded browser app API for calculation workflows
-- Express API for same-origin Customs/BIR/Tariff Commission website fetching
-- Duty and VAT engine with surcharge-aware taxable base
-- Currency conversion with fallback behavior in web mode
-- Ranked HS code search with keyboard navigation support
-- Calculator, Batch Import, and Tariff Browser pages
-- Compliance checks and browser report export
-- Legacy backend ingestion foundation retained for future server-side integration
+- Changelog index: [CHANGELOG.md](CHANGELOG.md)
+- 0.4.0 release notes: [docs/changelog/v0.4.0.md](docs/changelog/v0.4.0.md)
+- 0.3.0 release notes: [docs/changelog/v0.3.0.md](docs/changelog/v0.3.0.md)
+- 0.2.0 release notes: [docs/changelog/v0.2.0.md](docs/changelog/v0.2.0.md)
+- 0.1.0 release notes: [docs/changelog/v0.1.0.md](docs/changelog/v0.1.0.md)
 
 ---
 
-**Last Updated:** April 23, 2026
+**Last Updated:** April 28, 2026

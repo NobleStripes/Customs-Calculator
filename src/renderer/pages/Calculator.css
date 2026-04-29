@@ -202,3 +202,65 @@
     padding: 16px;
   }
 }
+
+/* Calculation History Panel */
+.history-panel {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.history-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 14px 20px;
+  text-align: left;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-toggle:hover {
+  background: #f9fafb;
+}
+
+.history-toggle-icon {
+  margin-left: auto;
+  color: #6b7280;
+}
+
+.history-table-wrap {
+  overflow-x: auto;
+  border-top: 1px solid #e5e7eb;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.history-table th,
+.history-table td {
+  border-bottom: 1px solid #f3f4f6;
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.history-table th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+}
+
+.history-table tbody tr:hover {
+  background: #f0f9ff;
+}

@@ -184,3 +184,80 @@ td {
     grid-template-columns: 1fr;
   }
 }
+
+.template-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 10px;
+}
+
+.btn-template {
+  background: #f0f9ff;
+  border: 1px solid #7dd3fc;
+  color: #0369a1;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-template:hover {
+  background: #e0f2fe;
+}
+
+.mapping-panel {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #dce8ee;
+  background: #f7fbfc;
+  border-radius: 8px;
+}
+
+.mapping-title {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #183446;
+}
+
+.mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.mapping-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+  color: #4a6170;
+}
+
+.mapping-item strong {
+  color: #183446;
+}
+
+.column-warnings {
+  margin-top: 10px;
+}
+
+.column-warning {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 560px) {
+  .mapping-grid {
+    grid-template-columns: 1fr;
+  }
+}

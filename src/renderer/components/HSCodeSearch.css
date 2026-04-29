@@ -62,7 +62,7 @@
   cursor: pointer;
   text-align: left;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   transition: background-color 0.2s ease;
   font-size: 0.9rem;
@@ -87,12 +87,23 @@
   background-color: #fef3f2;
 }
 
+.suggestion-item.search-status {
+  cursor: default;
+  color: #475467;
+  background-color: #f8fafc;
+  font-size: 0.8rem;
+}
+
 .suggestion-item.no-results:hover {
   background-color: transparent;
 }
 
 .suggestion-item.search-error:hover {
   background-color: #fef3f2;
+}
+
+.suggestion-item.search-status:hover {
+  background-color: #f8fafc;
 }
 
 .suggestion-item .code {
@@ -109,4 +120,12 @@
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
+}
+
+.suggestion-item .suggestion-meta {
+  display: block;
+  color: #667085;
+  font-size: 0.75rem;
+  white-space: normal;
+  margin-top: 2px;
 }

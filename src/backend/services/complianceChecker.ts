@@ -1,4 +1,5 @@
 import { getDatabase } from '../db/database'
+import { PHILIPPINE_PORT_CODES, normalizeDestinationPort } from './customsRules'
 
 type ComplianceRuleRow = {
   required_documents?: string | null
@@ -27,18 +28,20 @@ export interface ComplianceRequirement {
 export class ComplianceChecker {
   private db = getDatabase()
 
-  /**
-   * Get compliance requirements for a product
-   */
   async getRequirements(
     hsCode: string,
     value: number,
-    _destination: string
+    destination: string
   ): Promise<ComplianceRequirement> {
     return new Promise((resolve) => {
       const requiredDocuments: string[] = []
       const restrictions: string[] = []
       const warnings: string[] = []
+
+      const normalizedDest = normalizeDestinationPort(destination)
+      if (normalizedDest && !PHILIPPINE_PORT_CODES.has(normalizedDest)) {
+        warnings.push('Compliance rules are calibrated for Philippine import — verify requirements for other destinations')
+      }
 
       // Get compliance rules for this HS code
       this.db.get(
@@ -224,4 +227,3 @@ export class ComplianceChecker {
     })
   }
 }
-
