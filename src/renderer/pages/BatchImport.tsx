@@ -1,23 +1,14 @@
 import React, { useMemo, useState } from 'react'
 import { appApi } from '../lib/appApi'
+import {
+  CSV_TEMPLATE_EXAMPLE,
+  CSV_TEMPLATE_HEADER,
+  RESULT_CURRENCY,
+  getColumnAliasHelp,
+  parseBatchImportCsv,
+  type ShipmentRow,
+} from '../lib/batchImportCsv'
 import './BatchImport.css'
-
-type ConflictResolution = 'overwrite' | 'skip' | 'review'
-
-type ShipmentRow = {
-  hsCode: string
-  scheduleCode: string
-  value: number
-  freight: number
-  insurance: number
-  originCountry: string
-  destinationPort: string
-  currency: string
-  declarationType: 'consumption' | 'warehousing' | 'transit'
-  containerSize: 'none' | '20ft' | '40ft'
-  arrastreWharfage: number
-  doxStampOthers: number
-}
 
 type BatchResultRow = ShipmentRow & {
   duty?: {
@@ -43,27 +34,6 @@ type BatchResultRow = ShipmentRow & {
   totalLandedCost?: number
 }
 
-const DEFAULT_CURRENCY = 'USD'
-const RESULT_CURRENCY = 'PHP'
-
-const CSV_TEMPLATE_HEADER = 'hsCode,value,freight,insurance,scheduleCode,originCountry,destinationPort,currency,declarationType,containerSize,arrastreWharfage,doxStampOthers'
-const CSV_TEMPLATE_EXAMPLE = '8471.30,1000,100,25,MFN,CHN,MNL,USD,consumption,20ft,4500,265\n8517.62,2500,200,30,MFN,USA,CEB,USD,transit,40ft,6000,300'
-
-const EXPECTED_COLUMNS = ['hsCode', 'value', 'freight', 'insurance', 'scheduleCode', 'originCountry', 'destinationPort', 'currency', 'declarationType', 'containerSize', 'arrastreWharfage', 'doxStampOthers']
-const COLUMN_ALIASES: Record<string, string[]> = {
-  hsCode: ['hscode', 'hs_code', 'code'],
-  value: ['value', 'fobvalue', 'fob'],
-  freight: ['freight'],
-  insurance: ['insurance'],
-  scheduleCode: ['schedulecode', 'schedule_code', 'schedule'],
-  originCountry: ['origincountry', 'origin_country', 'origin', 'country'],
-  destinationPort: ['destinationport', 'destination_port', 'port', 'destination'],
-  currency: ['currency', 'curr'],
-  declarationType: ['declarationtype', 'declaration_type', 'declaration'],
-  containerSize: ['containersize', 'container_size', 'container'],
-  arrastreWharfage: ['arrastrewharfage', 'arrastre', 'wharfage'],
-  doxStampOthers: ['doxstampothers', 'dox_stamp', 'dox'],
-}
 
 const formatCurrency = (amount: number, currency: string = RESULT_CURRENCY) =>
   new Intl.NumberFormat('en-US', {
@@ -73,86 +43,6 @@ const formatCurrency = (amount: number, currency: string = RESULT_CURRENCY) =>
     maximumFractionDigits: 2,
   }).format(amount)
 
-const normalizeHeader = (h: string) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
-
-const detectMissingColumns = (headerLine: string): string[] => {
-  const normalized = headerLine.split(',').map(normalizeHeader)
-  const missing: string[] = []
-
-  for (const col of EXPECTED_COLUMNS) {
-    const aliases = COLUMN_ALIASES[col] || [col.toLowerCase()]
-    const found = normalized.some((h) => aliases.includes(h))
-    if (!found && ['hsCode', 'value', 'originCountry'].includes(col)) {
-      const expected = aliases.join(', ')
-      missing.push(`Column "${col}" not found — expected one of: ${expected}`)
-    }
-  }
-
-  return missing
-}
-
-const parseCsvText = (input: string): { rows: ShipmentRow[]; columnWarnings: string[] } => {
-  const lines = input
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-
-  if (lines.length === 0) {
-    return { rows: [], columnWarnings: [] }
-  }
-
-  const firstRowParts = lines[0].split(',').map(normalizeHeader)
-  const hasHeader =
-    firstRowParts.includes('hscode') ||
-    firstRowParts.includes('hs_code') ||
-    firstRowParts.includes('value')
-
-  const columnWarnings = hasHeader ? detectMissingColumns(lines[0]) : []
-  const dataLines = hasHeader ? lines.slice(1) : lines
-
-  const rows: ShipmentRow[] = []
-
-  for (const line of dataLines) {
-    const parts = line.split(',').map((part) => part.trim())
-    if (parts.length < 3) {
-      continue
-    }
-
-    const hsCode = parts[0]
-    const value = Number(parts[1])
-    const freight = Number(parts[2] || 0)
-    const insurance = Number(parts[3] || 0)
-    const scheduleCode = (parts[4] || 'MFN').toUpperCase()
-    const originCountry = (parts[5] || '').toUpperCase()
-    const destinationPort = (parts[6] || 'MNL').toUpperCase()
-    const currency = (parts[7] || DEFAULT_CURRENCY).toUpperCase()
-    const declarationType = (parts[8] || 'consumption').toLowerCase() as ShipmentRow['declarationType']
-    const containerSize = (parts[9] || '20ft').toLowerCase() as ShipmentRow['containerSize']
-    const arrastreWharfage = Number(parts[10] || 0)
-    const doxStampOthers = Number(parts[11] || 0)
-
-    if (!hsCode || Number.isNaN(value) || value <= 0 || Number.isNaN(freight) || Number.isNaN(insurance) || !originCountry || !destinationPort || Number.isNaN(arrastreWharfage) || Number.isNaN(doxStampOthers)) {
-      continue
-    }
-
-    rows.push({
-      hsCode,
-      scheduleCode,
-      value,
-      freight,
-      insurance,
-      originCountry,
-      destinationPort,
-      currency,
-      declarationType: declarationType === 'consumption' || declarationType === 'warehousing' || declarationType === 'transit' ? declarationType : 'consumption',
-      containerSize: containerSize === '40ft' || containerSize === '20ft' || containerSize === 'none' ? containerSize : '20ft',
-      arrastreWharfage,
-      doxStampOthers,
-    })
-  }
-
-  return { rows, columnWarnings }
-}
 
 const toCsv = (rows: BatchResultRow[]): string => {
   const header = [
@@ -222,7 +112,7 @@ export const BatchImport: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [columnWarnings, setColumnWarnings] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-  const [conflictResolution, setConflictResolution] = useState<ConflictResolution>('overwrite')
+  const columnAliasHelp = useMemo(() => getColumnAliasHelp(), [])
 
   const totals = useMemo(() => {
     return results.reduce(
@@ -254,7 +144,7 @@ export const BatchImport: React.FC = () => {
   const handleParse = () => {
     setError(null)
     setColumnWarnings([])
-    const { rows, columnWarnings: warnings } = parseCsvText(rawCsv)
+    const { rows, columnWarnings: warnings } = parseBatchImportCsv(rawCsv)
     setColumnWarnings(warnings)
 
     if (rows.length === 0) {
@@ -335,45 +225,21 @@ export const BatchImport: React.FC = () => {
           <h2>Input CSV</h2>
 
           <div className="template-row">
-            <p className="hint">Use the expected column format — download the template for reference.</p>
+            <p className="hint">Use the template or keep your own header order. Common aliases are mapped automatically.</p>
             <button className="btn btn-template" onClick={downloadTemplate}>
               ⬇ Download Template
             </button>
           </div>
 
-          <div className="conflict-resolution">
-            <label><strong>Tariff Import Conflict Resolution:</strong></label>
-            <div className="radio-group">
-              <label>
-                <input
-                  type="radio"
-                  name="conflict"
-                  value="overwrite"
-                  checked={conflictResolution === 'overwrite'}
-                  onChange={() => setConflictResolution('overwrite')}
-                />
-                Overwrite existing rates
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="conflict"
-                  value="skip"
-                  checked={conflictResolution === 'skip'}
-                  onChange={() => setConflictResolution('skip')}
-                />
-                Skip duplicates
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="conflict"
-                  value="review"
-                  checked={conflictResolution === 'review'}
-                  onChange={() => setConflictResolution('review')}
-                />
-                Flag for review
-              </label>
+          <div className="mapping-panel">
+            <p className="mapping-title">Accepted header aliases</p>
+            <div className="mapping-grid">
+              {columnAliasHelp.map((entry) => (
+                <div key={entry.column} className="mapping-item">
+                  <strong>{entry.column}</strong>
+                  <span>{entry.aliases.join(', ')}</span>
+                </div>
+              ))}
             </div>
           </div>
 
