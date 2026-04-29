@@ -6,6 +6,7 @@ import { readSheet } from 'read-excel-file/node'
 import { getDatabase } from '../db/database'
 import { getHsCodeMetadata, normalizeExactHsCode } from '../../shared/hsLookupQuery'
 import { getRuntimeSettings } from './runtimeSettings'
+import { parseTariffHtml } from './tariffHtmlParser'
 
 type TabularImportPayload = {
   csvText?: string
@@ -148,6 +149,11 @@ export interface BatchedHSCatalogImportSummary extends TariffImportSummary {
 }
 
 const DEFAULT_THRESHOLD = 85
+
+const inferTariffHtmlSource = (sourceUrl: string): 'boc' | 'tariff-commission' => {
+  const normalized = sourceUrl.toLowerCase()
+  return normalized.includes('tariffcommission') ? 'tariff-commission' : 'boc'
+}
 
 const normalizeHeaderKey = (value: string): string => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
 
@@ -1817,63 +1823,14 @@ export class TariffDataIngestionService {
     rows: TariffImportRow[]
     confidence: number
   }> {
-    const { load } = await import('cheerio')
-    const $ = load(htmlContent)
-    const extractedRows: TariffImportRow[] = []
-
-    const HS_CODE_PATTERN = /^\d{4}[.\d]*$/
-
-    $('table').each((_tableIndex, tableEl) => {
-      const headers: string[] = []
-
-      $(tableEl).find('thead tr th, thead tr td').each((_i, el) => {
-        headers.push($(el).text().trim().toLowerCase())
-      })
-
-      if (headers.length === 0) {
-        $(tableEl).find('tr').first().find('th, td').each((_i, el) => {
-          headers.push($(el).text().trim().toLowerCase())
-        })
-      }
-
-      const hsColIndex = headers.findIndex((h) =>
-        h.includes('hs') || h.includes('tariff') || h.includes('code') || h.includes('commodity')
-      )
-      const dutyColIndex = headers.findIndex((h) =>
-        h.includes('duty') || h.includes('rate') || h.includes('%')
-      )
-
-      if (hsColIndex < 0 || dutyColIndex < 0) {
-        return
-      }
-
-      $(tableEl).find('tbody tr, tr').each((_rowIndex, rowEl) => {
-        const cells = $(rowEl).find('td')
-        if (cells.length === 0) return
-
-        const hsRaw = $(cells[hsColIndex]).text().trim()
-        const dutyRaw = $(cells[dutyColIndex]).text().trim()
-
-        const compactHs = hsRaw.replace(/[^0-9]/g, '')
-        if (compactHs.length < 4 || !HS_CODE_PATTERN.test(compactHs)) {
-          return
-        }
-
-        const descColIndex = headers.findIndex((h) => h.includes('desc'))
-        const description = descColIndex >= 0 ? $(cells[descColIndex]).text().trim() : undefined
-
-        extractedRows.push({
-          hsCode: hsRaw,
-          dutyRate: dutyRaw,
-          description: description || undefined,
-          notes: `Extracted from HTML table at ${sourceUrl}`,
-        })
-      })
-    })
+    const extractedRows = parseTariffHtml(inferTariffHtmlSource(sourceUrl), htmlContent).map((row) => ({
+      ...row,
+      notes: [row.notes, `Source URL: ${sourceUrl}`].filter(Boolean).join(' | '),
+    }))
 
     return {
       rows: extractedRows,
-      confidence: 60,
+      confidence: extractedRows.length > 0 ? 65 : 0,
     }
   }
 }
