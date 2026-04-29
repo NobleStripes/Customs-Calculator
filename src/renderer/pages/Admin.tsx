@@ -78,11 +78,44 @@ type CatalogHealth = {
   recommendedCutover: boolean
 }
 
+type TariffImportPreviewRow = {
+  rowNumber: number
+  raw: Record<string, unknown>
+  normalized?: Record<string, unknown>
+  errors: string[]
+}
+
+type TariffImportPreviewResult = {
+  totalRows: number
+  validRows: number
+  invalidRows: number
+  rows: TariffImportPreviewRow[]
+}
+
+type TariffImportResult = {
+  sourceId: number
+  importJobId: number
+  totalRows: number
+  importedRows: number
+  pendingReviewRows: number
+  errorRows: number
+  duplicateRows: number
+  conflictRows: number
+  skippedRows: number
+  status: 'completed' | 'completed_with_errors' | 'failed'
+}
+
 type Tab = 'review' | 'jobs' | 'audit' | 'sources'
 
 const PAGE_SIZE = 20
 const DEFAULT_CONFIDENCE_FILTER = 100
 const LOW_CONFIDENCE_THRESHOLD = 70
+const DEFAULT_TARIFF_SOURCE_TYPE = 'tariff-rates'
+const DEFAULT_TARIFF_SOURCE_NAME = 'Admin tariff import'
+const TARIFF_IMPORT_TEMPLATE_CSV = [
+  'hsCode,scheduleCode,description,category,dutyRate,vatRate,surchargeRate,effectiveDate,endDate,notes,confidenceScore',
+  '8471.30,MFN,Portable automatic data processing machines,Electronics,5,12,0,2025-01-01,,Baseline MFN schedule import,100',
+].join('\n')
 
 const formatPct = (v: number | null): string => (v !== null ? `${(v * 100).toFixed(2)}%` : '-')
 
@@ -165,6 +198,18 @@ export const Admin: React.FC = () => {
   const [sourceSearch, setSourceSearch] = useState('')
   const [sourceStatusFilter, setSourceStatusFilter] = useState<'all' | 'pending-review' | 'error' | 'healthy'>('all')
   const [catalogHealth, setCatalogHealth] = useState<CatalogHealth | null>(null)
+  const [tariffImportSourceName, setTariffImportSourceName] = useState(DEFAULT_TARIFF_SOURCE_NAME)
+  const [tariffImportSourceType, setTariffImportSourceType] = useState(DEFAULT_TARIFF_SOURCE_TYPE)
+  const [tariffImportSourceReference, setTariffImportSourceReference] = useState('')
+  const [tariffImportCsvText, setTariffImportCsvText] = useState(TARIFF_IMPORT_TEMPLATE_CSV)
+  const [tariffImportFileName, setTariffImportFileName] = useState('')
+  const [tariffAutoApproveThreshold, setTariffAutoApproveThreshold] = useState('85')
+  const [tariffForceApprove, setTariffForceApprove] = useState(false)
+  const [tariffPreview, setTariffPreview] = useState<TariffImportPreviewResult | null>(null)
+  const [tariffPreviewLoading, setTariffPreviewLoading] = useState(false)
+  const [tariffImportLoading, setTariffImportLoading] = useState(false)
+  const [tariffImportError, setTariffImportError] = useState<string | null>(null)
+  const [tariffImportSuccess, setTariffImportSuccess] = useState<TariffImportResult | null>(null)
 
   // Audit state
   const [auditRows, setAuditRows] = useState<AuditEntry[]>([])
@@ -538,6 +583,112 @@ export const Admin: React.FC = () => {
     anchor.click()
     document.body.removeChild(anchor)
     URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadTariffTemplate = () => {
+    const blob = new Blob([TARIFF_IMPORT_TEMPLATE_CSV], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'tariff-import-template.csv'
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleTariffFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+
+    try {
+      const text = await file.text()
+      setTariffImportCsvText(text)
+      setTariffImportFileName(file.name)
+      setTariffImportError(null)
+      setTariffImportSuccess(null)
+      setTariffPreview(null)
+      if (!tariffImportSourceReference.trim()) {
+        setTariffImportSourceReference(file.name)
+      }
+      if (tariffImportSourceName === DEFAULT_TARIFF_SOURCE_NAME) {
+        setTariffImportSourceName(file.name.replace(/\.[^.]+$/, ''))
+      }
+    } catch (error) {
+      setTariffImportError(`Failed to read file: ${String(error)}`)
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  const handlePreviewTariffImport = async () => {
+    const csvText = tariffImportCsvText.trim()
+    if (!csvText) {
+      setTariffImportError('Paste CSV content or choose a CSV file before previewing.')
+      setTariffPreview(null)
+      return
+    }
+
+    setTariffPreviewLoading(true)
+    setTariffImportError(null)
+    setTariffImportSuccess(null)
+
+    try {
+      const result = await appApi.previewTariffImport({ csvText })
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Preview failed')
+      }
+
+      setTariffPreview(result.data as TariffImportPreviewResult)
+    } catch (error) {
+      setTariffImportError(String(error))
+      setTariffPreview(null)
+    } finally {
+      setTariffPreviewLoading(false)
+    }
+  }
+
+  const handleRunTariffImport = async () => {
+    const csvText = tariffImportCsvText.trim()
+    if (!csvText) {
+      setTariffImportError('Paste CSV content or choose a CSV file before importing.')
+      return
+    }
+
+    if (!tariffImportSourceName.trim()) {
+      setTariffImportError('Source name is required before importing.')
+      return
+    }
+
+    setTariffImportLoading(true)
+    setTariffImportError(null)
+    setTariffImportSuccess(null)
+
+    try {
+      const parsedThreshold = Number(tariffAutoApproveThreshold)
+      const result = await appApi.importTariffData({
+        sourceName: tariffImportSourceName.trim(),
+        sourceType: tariffImportSourceType.trim() || DEFAULT_TARIFF_SOURCE_TYPE,
+        sourceReference: tariffImportSourceReference.trim() || tariffImportFileName || undefined,
+        csvText,
+        autoApproveThreshold: Number.isFinite(parsedThreshold) ? parsedThreshold : undefined,
+        forceApprove: tariffForceApprove,
+        fileName: tariffImportFileName || undefined,
+      })
+
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Import failed')
+      }
+
+      setTariffImportSuccess(result.data as TariffImportResult)
+      await Promise.all([loadJobs(), loadSources(), loadCatalogHealth()])
+    } catch (error) {
+      setTariffImportError(String(error))
+    } finally {
+      setTariffImportLoading(false)
+    }
   }
 
   return (
@@ -922,6 +1073,172 @@ export const Admin: React.FC = () => {
 
       {tab === 'sources' && (
         <div className="admin-panel">
+          <section className="tariff-import-panel">
+            <div className="tariff-import-header">
+              <div>
+                <h2>Tariff Import Workspace</h2>
+                <p>Download the template, stage a CSV, preview normalization results, then import into the review workflow.</p>
+              </div>
+              <div className="tariff-import-actions">
+                <button className="btn btn-outline btn-sm" onClick={handleDownloadTariffTemplate}>
+                  Download CSV Template
+                </button>
+                <label className="btn btn-outline btn-sm tariff-file-button">
+                  Load CSV File
+                  <input type="file" accept=".csv,text/csv" onChange={(event) => void handleTariffFileSelected(event)} />
+                </label>
+              </div>
+            </div>
+
+            <div className="tariff-import-grid">
+              <label>
+                <span>Source name</span>
+                <input
+                  type="text"
+                  value={tariffImportSourceName}
+                  onChange={(event) => setTariffImportSourceName(event.target.value)}
+                  placeholder="Admin tariff import"
+                />
+              </label>
+              <label>
+                <span>Source type</span>
+                <select value={tariffImportSourceType} onChange={(event) => setTariffImportSourceType(event.target.value)}>
+                  <option value="tariff-rates">Tariff rates</option>
+                  <option value="tariff-commission">Tariff Commission</option>
+                  <option value="boc">BOC</option>
+                  <option value="manual-curation">Manual curation</option>
+                </select>
+              </label>
+              <label>
+                <span>Source reference</span>
+                <input
+                  type="text"
+                  value={tariffImportSourceReference}
+                  onChange={(event) => setTariffImportSourceReference(event.target.value)}
+                  placeholder="URL, circular number, or file name"
+                />
+              </label>
+              <label>
+                <span>Auto-approve threshold</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={tariffAutoApproveThreshold}
+                  onChange={(event) => setTariffAutoApproveThreshold(event.target.value)}
+                />
+              </label>
+            </div>
+
+            <div className="tariff-import-meta">
+              <label className="tariff-toggle">
+                <input
+                  type="checkbox"
+                  checked={tariffForceApprove}
+                  onChange={(event) => setTariffForceApprove(event.target.checked)}
+                />
+                <span>Force approve valid rows</span>
+              </label>
+              <span className="tariff-import-file">Loaded file: {tariffImportFileName || 'None'}</span>
+            </div>
+
+            <label className="tariff-import-csv-field">
+              <span>Tariff CSV content</span>
+              <textarea
+                value={tariffImportCsvText}
+                onChange={(event) => {
+                  setTariffImportCsvText(event.target.value)
+                  setTariffPreview(null)
+                  setTariffImportSuccess(null)
+                }}
+                placeholder="Paste tariff import CSV here"
+                rows={12}
+              />
+            </label>
+
+            <div className="tariff-import-hint">
+              Required columns: <code>hsCode</code>, <code>dutyRate</code>. Recommended columns: <code>scheduleCode</code>, <code>description</code>, <code>vatRate</code>, <code>surchargeRate</code>, <code>effectiveDate</code>, <code>endDate</code>, <code>notes</code>, <code>confidenceScore</code>.
+            </div>
+
+            <div className="tariff-import-actions-row">
+              <button className="btn btn-primary" onClick={() => void handlePreviewTariffImport()} disabled={tariffPreviewLoading || tariffImportLoading}>
+                {tariffPreviewLoading ? 'Previewing...' : 'Preview Import'}
+              </button>
+              <button
+                className="btn btn-success"
+                onClick={() => void handleRunTariffImport()}
+                disabled={tariffImportLoading || tariffPreviewLoading || !tariffPreview || tariffPreview.validRows === 0}
+              >
+                {tariffImportLoading ? 'Importing...' : 'Import Tariff Rows'}
+              </button>
+            </div>
+
+            {tariffImportError && <div className="admin-error">{tariffImportError}</div>}
+
+            {tariffImportSuccess && (
+              <div className="tariff-import-summary success">
+                <strong>Import completed.</strong> Job #{tariffImportSuccess.importJobId} created with {tariffImportSuccess.importedRows} imported rows, {tariffImportSuccess.pendingReviewRows} pending review rows, and {tariffImportSuccess.errorRows} error rows.
+              </div>
+            )}
+
+            {tariffPreview && (
+              <div className="tariff-preview-block">
+                <div className="tariff-preview-metrics">
+                  <div className="metric-card">
+                    <p className="metric-label">Total Rows</p>
+                    <p className="metric-value">{tariffPreview.totalRows}</p>
+                  </div>
+                  <div className="metric-card">
+                    <p className="metric-label">Valid Rows</p>
+                    <p className="metric-value">{tariffPreview.validRows}</p>
+                  </div>
+                  <div className="metric-card">
+                    <p className="metric-label">Invalid Rows</p>
+                    <p className="metric-value">{tariffPreview.invalidRows}</p>
+                  </div>
+                </div>
+
+                <div className="table-wrap tariff-preview-table-wrap">
+                  <table className="admin-table tariff-preview-table">
+                    <thead>
+                      <tr>
+                        <th>Row</th>
+                        <th>Status</th>
+                        <th>HS Code</th>
+                        <th>Schedule</th>
+                        <th>Duty</th>
+                        <th>VAT</th>
+                        <th>Effective Date</th>
+                        <th>Notes / Errors</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tariffPreview.rows.map((row) => {
+                        const normalized = row.normalized || {}
+                        return (
+                          <tr key={row.rowNumber} className={row.errors.length > 0 ? 'preview-invalid-row' : 'preview-valid-row'}>
+                            <td>{row.rowNumber}</td>
+                            <td>{row.errors.length > 0 ? 'Invalid' : 'Valid'}</td>
+                            <td>{String(normalized.hsCode ?? row.raw.hsCode ?? '-')}</td>
+                            <td>{String(normalized.scheduleCode ?? row.raw.scheduleCode ?? 'MFN')}</td>
+                            <td>{String(normalized.dutyRate ?? row.raw.dutyRate ?? '-')}</td>
+                            <td>{String(normalized.vatRate ?? row.raw.vatRate ?? '-')}</td>
+                            <td>{String(normalized.effectiveDate ?? row.raw.effectiveDate ?? '-')}</td>
+                            <td>
+                              {row.errors.length > 0
+                                ? row.errors.join('; ')
+                                : String(normalized.notes ?? row.raw.notes ?? 'Ready for import')}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </section>
+
           <div className="source-governance-summary">
             <div className="metric-card">
               <p className="metric-label">Total Sources</p>

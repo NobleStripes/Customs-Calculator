@@ -383,11 +383,12 @@ Browse and filter the tariff catalog by schedule, category, or HS code. Backed b
 
 ### Admin (`Admin.tsx`)
 
-Three-tab admin page for post-import review and audit:
+Four-tab admin page for post-import review, source governance, and audit:
 
 1. **Review Queue** — shows pending review rows grouped by import job; operators can approve or reject rows with optional notes via `updateReviewRow`.
 2. **Import Jobs** — paginated list of all import jobs showing status, row counts, and timestamps.
 3. **Rate Change Audit** — paginated audit log of all approved rate changes with optional HS code filter.
+4. **Tariff Sources** — source-governance view plus an Admin tariff import workspace for CSV template download, preview, and import execution.
 
 ### Settings (`Settings.tsx`)
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { parseTariffHtml } from './tariffHtmlParser'
+
+const readFixture = (fileName: string): string =>
+  readFileSync(fileURLToPath(new URL(`./fixtures/${fileName}`, import.meta.url)), 'utf-8')
 
 describe('parseTariffHtml', () => {
   it('extracts tariff rows from tariff commission style HTML tables', () => {
@@ -86,5 +91,37 @@ describe('parseTariffHtml', () => {
     })
     expect(rows[0]?.notes).toContain('BOC')
     expect(rows[0]?.notes).toContain('BOC Reference')
+  })
+
+  it('extracts tariff commission schedule matrix rows from a real-page fixture shape', () => {
+    const html = readFixture('tariff-commission-search.fixture.html')
+
+    const rows = parseTariffHtml('tariff-commission', html)
+
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toMatchObject({
+      hsCode: '8471.30',
+      scheduleCode: 'MFN',
+      description: 'Portable automatic data processing machines',
+      dutyRate: '5%',
+    })
+    expect(rows[1]).toMatchObject({
+      scheduleCode: 'ATIGA',
+      dutyRate: '0%',
+    })
+    expect(rows[2]).toMatchObject({
+      scheduleCode: 'RCEP',
+      dutyRate: '1%',
+    })
+    expect(rows[0]?.notes).toContain('PSR: WO')
+    expect(rows[1]?.notes).toContain('Remarks: ASEAN preference')
+  })
+
+  it('ignores BOC memoranda tables from a real-page fixture shape', () => {
+    const html = readFixture('boc-memoranda.fixture.html')
+
+    const rows = parseTariffHtml('boc', html)
+
+    expect(rows).toHaveLength(0)
   })
 })

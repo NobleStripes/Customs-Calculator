@@ -77,7 +77,7 @@ Full release details:
 
 ### Planned
 - [ ] Automated historical tariff tracking and comparison dashboards
-- [ ] Data import/export tooling improvements (tariff import templates, richer conflict-resolution UX, and additional export options)
+- [ ] Data import/export tooling improvements (additional export options and richer conflict-resolution UX beyond the current Admin tariff import workspace)
 - [ ] Offline mode enhancements
 
 ## Setup Instructions

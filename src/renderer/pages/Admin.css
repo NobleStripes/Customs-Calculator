@@ -422,6 +422,160 @@
   margin-bottom: 14px;
 }
 
+.tariff-import-panel {
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.tariff-import-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.tariff-import-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #12324a;
+}
+
+.tariff-import-header p {
+  margin: 6px 0 0;
+  color: #526072;
+  max-width: 720px;
+}
+
+.tariff-import-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tariff-file-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.tariff-file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tariff-import-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.tariff-import-grid label,
+.tariff-import-csv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #374151;
+  font-size: 0.88rem;
+}
+
+.tariff-import-grid input,
+.tariff-import-grid select,
+.tariff-import-csv-field textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.92rem;
+  background: #fff;
+}
+
+.tariff-import-csv-field textarea {
+  resize: vertical;
+  min-height: 220px;
+  font-family: Consolas, 'Courier New', monospace;
+}
+
+.tariff-import-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.tariff-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: #374151;
+}
+
+.tariff-import-file,
+.tariff-import-hint {
+  color: #526072;
+  font-size: 0.84rem;
+}
+
+.tariff-import-hint {
+  margin: 10px 0 12px;
+  line-height: 1.5;
+}
+
+.tariff-import-actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.tariff-import-summary {
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.tariff-import-summary.success {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.tariff-preview-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tariff-preview-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tariff-preview-table-wrap {
+  max-height: 360px;
+}
+
+.tariff-preview-table td:last-child {
+  white-space: normal;
+  min-width: 280px;
+}
+
+.preview-valid-row {
+  background: #f8fffb;
+}
+
+.preview-invalid-row {
+  background: #fff7f7;
+}
+
 .metric-card {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -481,6 +635,10 @@
   .source-governance-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .tariff-import-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 860px) {
@@ -498,6 +656,17 @@
 
 @media (max-width: 640px) {
   .source-governance-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .tariff-import-header,
+  .tariff-import-meta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tariff-import-grid,
+  .tariff-preview-metrics {
     grid-template-columns: 1fr;
   }
 
