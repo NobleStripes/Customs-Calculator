@@ -1,3 +1,57 @@
+// Generalized tax model types
+export interface TaxComponentResult {
+  taxType: string // e.g. 'DUTY', 'VAT', 'EXCISE', etc.
+  rate: number
+  rateType: string // 'percentage', 'fixed', etc.
+  amount: number
+  notes?: string
+}
+
+export interface MultiTaxCalculationResult {
+  components: TaxComponentResult[]
+  total: number
+  breakdown: Record<string, number> // e.g. { duty: 100, vat: 120, excise: 0 }
+}
+
+// Multi-schedule tax calculation: returns results for all available schedules or a specific one
+export async function calculateAllTaxes(
+  value: number,
+  hsCode: string,
+  scheduleCode?: string,
+  originCountry?: string,
+  declarationType?: string
+): Promise<{ [schedule: string]: MultiTaxCalculationResult }> {
+  const calc = new TariffCalculator()
+  const db = calc['db']
+  // If a schedule is specified, only calculate for that schedule
+  let schedules: string[] = []
+  if (scheduleCode) {
+    schedules = [scheduleCode.trim().toUpperCase()]
+  } else {
+    // Query all active schedules
+    schedules = await new Promise<string[]>((resolve, reject) => {
+      db.all('SELECT code FROM tariff_schedules WHERE is_active = 1', [], (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows.map((r: any) => r.code))
+      })
+    })
+  }
+  const results: { [schedule: string]: MultiTaxCalculationResult } = {}
+  for (const sched of schedules) {
+    const duty = await calc.calculateDuty(value, hsCode, originCountry || '', sched)
+    const vat = await calc.calculateVAT(value, hsCode, sched)
+    const components: TaxComponentResult[] = [
+      { taxType: 'DUTY', rate: duty.rate, rateType: 'percentage', amount: duty.amount, notes: duty.notes },
+      { taxType: 'VAT', rate: vat.rate, rateType: 'percentage', amount: vat.amount, notes: vat.notes },
+    ]
+    results[sched] = {
+      components,
+      total: components.reduce((sum, c) => sum + c.amount, 0),
+      breakdown: { duty: duty.amount, vat: vat.amount },
+    }
+  }
+  return results
+}
 import { getDatabase } from '../db/database'
 
 export interface DutyResult {

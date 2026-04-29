@@ -7,33 +7,31 @@ let db: sqlite3.Database | null = null
 
 type TableInfoRow = {
   name: string
-}
+};
 
 type HSCodeSeedRow = {
-  code: string
-  description: string
-  category: string
-}
+  code: string;
+  description: string;
+  category: string;
+};
 
 export const getDbPath = (): string => {
-  const baseDataDir = process.env.APPDATA || path.join(os.homedir(), '.customs-calculator')
-  const dbDir = path.join(baseDataDir, 'customs-calculator')
+  const baseDataDir = process.env.APPDATA || path.join(os.homedir(), '.customs-calculator');
+  const dbDir = path.join(baseDataDir, 'customs-calculator');
   if (!existsSync(dbDir)) {
-    mkdirSync(dbDir, { recursive: true })
+    mkdirSync(dbDir, { recursive: true });
   }
-  return path.join(dbDir, 'customs.db')
-}
+  return path.join(dbDir, 'customs.db');
 
 export const getDatabase = (): sqlite3.Database => {
   if (!db) {
-    const dbPath = getDbPath()
+    const dbPath = getDbPath();
     db = new sqlite3.Database(dbPath, (err: Error | null) => {
-      if (err) console.error('Database connection error:', err)
-      else console.log('Connected to SQLite database')
-    })
+      if (err) console.error('Database connection error:', err);
+      else console.log('Connected to SQLite database');
+    });
   }
-  return db
-}
+  return db;
 
 const runStatement = (database: sqlite3.Database, sql: string, params: Array<string | number | null> = []): Promise<void> => {
   return new Promise((resolve, reject) => {
@@ -46,24 +44,20 @@ const runStatement = (database: sqlite3.Database, sql: string, params: Array<str
       resolve()
     })
   })
-}
+
 
 const seededTariffSchedules = [
   { code: 'MFN', displayName: 'Most-Favored-Nation' },
   { code: 'AANZFTA', displayName: 'ASEAN-Australia-New Zealand Free Trade Agreement' },
   { code: 'ACFTA', displayName: 'ASEAN-China Free Trade Agreement' },
-  { code: 'AHKFTA', displayName: 'ASEAN-Hong Kong, China Free Trade Agreement' },
-  { code: 'AIFTA', displayName: 'ASEAN-India Free Trade Agreement' },
   { code: 'AJCEPA', displayName: 'ASEAN-Japan Comprehensive Economic Partnership Agreement' },
   { code: 'AKFTA', displayName: 'ASEAN-Korea Free Trade Agreement' },
   { code: 'ATIGA', displayName: 'ASEAN Trade in Goods Agreement' },
-  { code: 'PH-EFTA FTA (CHE/LIE)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Switzerland/Liechtenstein)' },
-  { code: 'PH-EFTA FTA (ISL)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Iceland)' },
-  { code: 'PH-EFTA FTA (NOR)', displayName: 'Philippines-European Free Trade Association Free Trade Agreement (Norway)' },
-  { code: 'PH-KR FTA', displayName: 'Philippines-Korea Free Trade Agreement' },
   { code: 'PJEPA', displayName: 'Philippines-Japan Economic Partnership Agreement' },
   { code: 'RCEP', displayName: 'Regional Comprehensive Economic Partnership Agreement' },
-] as const
+]
+
+
 
 const schema = [
   `CREATE TABLE IF NOT EXISTS hs_codes (
@@ -73,7 +67,50 @@ const schema = [
     category TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS tax_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    display_name TEXT NOT NULL,
+    description TEXT,
+    legal_basis TEXT,
+    is_schedule_based INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
 
+  // Generalized tax rule table (applicability, conditions, etc.)
+  `CREATE TABLE IF NOT EXISTS tax_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hs_code TEXT NOT NULL,
+    tax_type_id INTEGER NOT NULL,
+    schedule_code TEXT,
+    origin_country TEXT,
+    declaration_type TEXT,
+    min_value REAL,
+    max_value REAL,
+    notes TEXT,
+    effective_date DATE NOT NULL,
+    end_date DATE,
+    import_status TEXT NOT NULL DEFAULT 'approved',
+    source_id INTEGER,
+    confidence_score INTEGER NOT NULL DEFAULT 100,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (hs_code) REFERENCES hs_codes(code),
+    FOREIGN KEY (tax_type_id) REFERENCES tax_types(id),
+    FOREIGN KEY (source_id) REFERENCES tariff_sources(id)
+  )`,
+
+  // Generalized tax rate table (rate per rule)
+  `CREATE TABLE IF NOT EXISTS tax_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tax_rule_id INTEGER NOT NULL,
+    rate REAL NOT NULL,
+    rate_type TEXT NOT NULL DEFAULT 'percentage', -- or 'fixed', 'per_unit', etc.
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tax_rule_id) REFERENCES tax_rules(id)
+  )`,
+
+  // Legacy tariff_rates table (for migration/compatibility)
   `CREATE TABLE IF NOT EXISTS tariff_rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     hs_code TEXT NOT NULL,
@@ -208,36 +245,427 @@ const schema = [
   `CREATE INDEX IF NOT EXISTS idx_rate_change_audit_hs_code ON rate_change_audit(hs_code)`,
 ]
 
+
+// --- Utility: Remove duplicate seed rows ---
+const cleanupDuplicateSeedRows = async (database: sqlite3.Database): Promise<void> => {
+  await runStatement(
+    database,
+    `
+      DELETE FROM tariff_rates
+      WHERE id NOT IN (
+        SELECT MIN(id)
+        FROM tariff_rates
+        GROUP BY
+          hs_code,
+          IFNULL(schedule_code, 'MFN'),
+          duty_rate,
+          vat_rate,
+          surcharge_rate,
+          effective_date,
+          IFNULL(end_date, ''),
+          IFNULL(notes, ''),
+          IFNULL(source_id, -1),
+          confidence_score,
+          IFNULL(import_status, '')
+      )
+    `
+  )
+
+  await runStatement(
+    database,
+    `
+      DELETE FROM compliance_rules
+      WHERE id NOT IN (
+        SELECT MIN(id)
+        FROM compliance_rules
+        GROUP BY
+          hs_code_range,
+          category,
+          IFNULL(required_documents, ''),
+          IFNULL(restrictions, ''),
+          IFNULL(special_conditions, ''),
+          IFNULL(source_id, -1),
+          IFNULL(effective_date, ''),
+          IFNULL(end_date, ''),
+          confidence_score,
+          IFNULL(import_status, '')
+      )
+    `
+  )
+
+// --- Utility: Ensure compliance rules schema compatibility ---
+const ensureComplianceRulesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    database.all("PRAGMA table_info('compliance_rules')", (err: Error | null, rows: TableInfoRow[]) => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      const existingColumns = new Set((rows || []).map((row) => row.name))
+      const migrationStatements: string[] = []
+
+      if (!existingColumns.has('source_id')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN source_id INTEGER')
+      }
+
+      if (!existingColumns.has('effective_date')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN effective_date DATE')
+      }
+
+      if (!existingColumns.has('end_date')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN end_date DATE')
+      }
+
+      if (!existingColumns.has('confidence_score')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN confidence_score INTEGER NOT NULL DEFAULT 100')
+      }
+
+      if (!existingColumns.has('import_status')) {
+        migrationStatements.push("ALTER TABLE compliance_rules ADD COLUMN import_status TEXT NOT NULL DEFAULT 'approved'")
+      }
+
+      if (!existingColumns.has('last_modified_at')) {
+        migrationStatements.push('ALTER TABLE compliance_rules ADD COLUMN last_modified_at DATETIME')
+      }
+
+      if (migrationStatements.length === 0) {
+        resolve()
+        return
+      }
+
+      let completed = 0
+      migrationStatements.forEach((statement) => {
+        database.run(statement, (migrationErr: Error | null) => {
+          if (migrationErr) {
+            reject(migrationErr)
+            return
+          }
+
+          completed += 1
+          if (completed === migrationStatements.length) {
+            resolve()
+          }
+        })
+      })
+    })
+  })
+
+// --- Utility: Insert HS codes ---
+const insertHSCodes = (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[]): Promise<void> => {
+  return new Promise((resolve, _reject) => {
+    let count = 0
+    const total = hsCodesData.length
+
+    if (total === 0) {
+      resolve()
+      return
+    }
+
+    hsCodesData.forEach((item) => {
+      database.run(
+        'INSERT OR IGNORE INTO hs_codes (code, description, category) VALUES (?, ?, ?)',
+        [item.code, item.description, item.category],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting HS code ${item.code}:`, err)
+          }
+          count++
+          if (count === total) {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+}
+
+// --- Utility: Insert tariff schedules ---
+const insertTariffSchedules = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve, _reject) => {
+    let count = 0
+    const total = seededTariffSchedules.length
+    if (total === 0) {
+      resolve()
+      return
+    }
+    seededTariffSchedules.forEach((item) => {
+      database.run(
+        `
+          INSERT INTO tariff_schedules (code, display_name, is_active)
+          VALUES (?, ?, 1)
+          ON CONFLICT(code) DO UPDATE SET
+            display_name = excluded.display_name,
+            is_active = 1
+        `,
+        [item.code, item.displayName],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting tariff schedule ${item.code}:`, err)
+          }
+          count += 1
+          if (count === total) {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+}
+
+// --- Utility: Insert tax types ---
+const insertTaxTypes = (database: sqlite3.Database): Promise<void> => {
+  const taxTypes = [
+    { code: 'DUTY', display_name: 'Customs Duty', description: 'Standard import duty', legal_basis: 'Tariff Schedules', is_schedule_based: 1 },
+    { code: 'VAT', display_name: 'Value-Added Tax', description: 'VAT on imports', legal_basis: 'NIRC/BIR', is_schedule_based: 1 },
+    { code: 'EXCISE', display_name: 'Excise Tax', description: 'Excise on specific goods', legal_basis: 'NIRC/BIR', is_schedule_based: 0 },
+    { code: 'SAFEGUARD', display_name: 'Safeguard Duty', description: 'Safeguard measures', legal_basis: 'Safeguard Measures Act', is_schedule_based: 0 },
+    { code: 'ANTI_DUMPING', display_name: 'Anti-Dumping Duty', description: 'Anti-dumping measures', legal_basis: 'Anti-Dumping Act', is_schedule_based: 0 },
+  ]
+  return new Promise((resolve, _reject) => {
+    let count = 0
+    const total = taxTypes.length
+    taxTypes.forEach((item) => {
+      database.run(
+        `INSERT INTO tax_types (code, display_name, description, legal_basis, is_schedule_based) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(code) DO UPDATE SET display_name = excluded.display_name, description = excluded.description, legal_basis = excluded.legal_basis, is_schedule_based = excluded.is_schedule_based`,
+        [item.code, item.display_name, item.description, item.legal_basis, item.is_schedule_based],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting tax type ${item.code}:`, err)
+          }
+          count += 1
+          if (count === total) {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+}
+
+// --- Utility: Insert tariff rates ---
+const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve, _reject) => {
+    const tariffData = [
+      { hs_code: '8471.30', schedule_code: 'MFN', duty_rate: 0.05, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8517.62', schedule_code: 'MFN', duty_rate: 0.03, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '6204.62', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '6203.42', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8704.21', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8421.23', schedule_code: 'MFN', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8511.10', schedule_code: 'MFN', duty_rate: 0.07, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.30', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.80', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8708.99', schedule_code: 'MFN', duty_rate: 0.1, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '0207.14', schedule_code: 'MFN', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '0406.10', schedule_code: 'MFN', duty_rate: 0.2, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '8544.30', schedule_code: 'MFN', duty_rate: 0.08, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '7326.90', schedule_code: 'MFN', duty_rate: 0.12, vat_rate: 0.12, surcharge_rate: 0 },
+      { hs_code: '4418.90', schedule_code: 'MFN', duty_rate: 0.15, vat_rate: 0.12, surcharge_rate: 0 },
+    ]
+
+    const todayDate = new Date().toISOString().split('T')[0]
+    let count = 0
+    const total = tariffData.length
+
+    tariffData.forEach((item) => {
+      database.run(
+        `
+          INSERT INTO tariff_rates (hs_code, schedule_code, duty_rate, vat_rate, surcharge_rate, effective_date)
+          SELECT ?, ?, ?, ?, ?, ?
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM tariff_rates
+            WHERE hs_code = ?
+              AND COALESCE(schedule_code, 'MFN') = ?
+              AND duty_rate = ?
+              AND vat_rate = ?
+              AND surcharge_rate = ?
+              AND effective_date = ?
+              AND end_date IS NULL
+              AND source_id IS NULL
+              AND (import_status = 'approved' OR import_status IS NULL)
+          )
+        `,
+        [
+          item.hs_code,
+          item.schedule_code,
+          item.duty_rate,
+          item.vat_rate,
+          item.surcharge_rate,
+          todayDate,
+          item.hs_code,
+          item.schedule_code,
+          item.duty_rate,
+          item.vat_rate,
+          item.surcharge_rate,
+          todayDate,
+        ],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting tariff for ${item.hs_code}:`, err)
+          }
+          count++
+          if (count === total) {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+}
+
+// --- Utility: Insert compliance rules ---
+const insertComplianceRules = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve, _reject) => {
+    const complianceData = [
+      {
+        hs_code_range: '8471.30',
+        category: 'Electronics',
+        required_documents: 'Commercial Invoice, Bill of Lading, Certificate of Origin',
+        restrictions: 'None',
+        special_conditions: 'None',
+      },
+      {
+        hs_code_range: '8517.62',
+        category: 'Electronics',
+        required_documents: 'Commercial Invoice, Bill of Lading, NTC Certification',
+        restrictions: 'Must comply with Philippine radio regulations',
+        special_conditions: 'NTC Type Approval Certificate Required',
+      },
+      {
+        hs_code_range: '6204.62',
+        category: 'Textiles',
+        required_documents: 'Commercial Invoice, Bill of Lading, Certificate of Origin',
+        restrictions: 'Subject to Rules of Origin - must meet COO requirements',
+        special_conditions: 'Possible safeguard duties may apply',
+      },
+      {
+        hs_code_range: '8421.23',
+        category: 'Vehicles',
+        required_documents: 'Commercial Invoice, Bill of Lading, Certificate of Origin',
+        restrictions: 'None',
+        special_conditions: 'Verify compatibility with declared vehicle model when applicable',
+      },
+      {
+        hs_code_range: '0207.14',
+        category: 'Food',
+        required_documents: 'Commercial Invoice, Bill of Lading, Health Certificate, BOC Permit',
+        restrictions: 'Requires Bureau of Animal Industry (BAI) clearance',
+        special_conditions: 'Cold storage monitoring required during transit',
+      },
+    ]
+
+    let count = 0
+    const total = complianceData.length
+
+    complianceData.forEach((item) => {
+      database.run(
+        `
+          INSERT INTO compliance_rules (hs_code_range, category, required_documents, restrictions, special_conditions)
+          SELECT ?, ?, ?, ?, ?
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM compliance_rules
+            WHERE hs_code_range = ?
+              AND category = ?
+              AND IFNULL(required_documents, '') = ?
+              AND IFNULL(restrictions, '') = ?
+              AND IFNULL(special_conditions, '') = ?
+              AND source_id IS NULL
+              AND effective_date IS NULL
+              AND end_date IS NULL
+              AND (import_status = 'approved' OR import_status IS NULL)
+          )
+        `,
+        [
+          item.hs_code_range,
+          item.category,
+          item.required_documents,
+          item.restrictions,
+          item.special_conditions,
+          item.hs_code_range,
+          item.category,
+          item.required_documents,
+          item.restrictions,
+          item.special_conditions,
+        ],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting compliance rule for ${item.hs_code_range}:`, err)
+          }
+          count++
+          if (count === total) {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+}
+
 export const initializeDatabase = (): Promise<void> => {
   return new Promise((resolve, reject) => {
-    const database = getDatabase()
-    let completed = 0
+    const database = getDatabase();
+    let completed = 0;
 
     const executeNextStatement = () => {
       if (completed >= schema.length) {
         ensureTariffRatesSchemaCompatibility(database)
           .then(() => seedInitialData())
+          .then(() => seedTariffSchedules(database))
           .then(resolve)
-          .catch(reject)
-        return
+          .catch(reject);
+        return;
       }
-
       database.run(schema[completed], (err: Error | null) => {
         if (err) {
-          console.error('Database initialization error:', err)
-          reject(err)
-          return
+          console.error('Database initialization error:', err);
+          reject(err);
+          return;
         }
-        completed++
-        executeNextStatement()
-      })
-    }
-
-    executeNextStatement()
-  })
+        completed++;
+        executeNextStatement();
+      });
+    };
+    executeNextStatement();
+  });
 }
 
-const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
+// Seed the tariff schedules table
+const seedTariffSchedules = (database: sqlite3.Database): Promise<void> => {
+  return new Promise((resolve) => {
+    let count = 0;
+    const total = seededTariffSchedules.length;
+    if (total === 0) {
+      resolve();
+      return;
+    }
+    seededTariffSchedules.forEach((item) => {
+      database.run(
+        `INSERT INTO tariff_schedules (code, display_name, is_active)
+          VALUES (?, ?, 1)
+          ON CONFLICT(code) DO UPDATE SET
+            display_name = excluded.display_name,
+            is_active = 1`,
+        [item.code, item.displayName],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting tariff schedule ${item.code}:`, err);
+          }
+          count += 1;
+          if (count === total) {
+            resolve();
+          }
+        }
+      );
+    });
+  });
+
+
+// --- Exported utility for schema compatibility ---
+export const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database): Promise<void> => {
   return new Promise((resolve, reject) => {
     database.all("PRAGMA table_info('tariff_rates')", (err: Error | null, rows: TableInfoRow[]) => {
       if (err) {
@@ -513,11 +941,16 @@ const insertTariffRates = (database: sqlite3.Database): Promise<void> => {
   })
 }
 
+
+// Prepare for official-source ingestion: this will be replaced by import pipeline.
 const insertTariffSchedules = (database: sqlite3.Database): Promise<void> => {
   return new Promise((resolve, _reject) => {
     let count = 0
     const total = seededTariffSchedules.length
-
+    if (total === 0) {
+      resolve()
+      return
+    }
     seededTariffSchedules.forEach((item) => {
       database.run(
         `
@@ -531,6 +964,37 @@ const insertTariffSchedules = (database: sqlite3.Database): Promise<void> => {
         (err: Error | null) => {
           if (err) {
             console.error(`Error inserting tariff schedule ${item.code}:`, err)
+          }
+          count += 1
+          if (count === total) {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+}
+
+// Seed basic tax types for dev/test (duty, VAT, excise, safeguard, etc.)
+const insertTaxTypes = (database: sqlite3.Database): Promise<void> => {
+  const taxTypes = [
+    { code: 'DUTY', display_name: 'Customs Duty', description: 'Standard import duty', legal_basis: 'Tariff Schedules', is_schedule_based: 1 },
+    { code: 'VAT', display_name: 'Value-Added Tax', description: 'VAT on imports', legal_basis: 'NIRC/BIR', is_schedule_based: 1 },
+    { code: 'EXCISE', display_name: 'Excise Tax', description: 'Excise on specific goods', legal_basis: 'NIRC/BIR', is_schedule_based: 0 },
+    { code: 'SAFEGUARD', display_name: 'Safeguard Duty', description: 'Safeguard measures', legal_basis: 'Safeguard Measures Act', is_schedule_based: 0 },
+    { code: 'ANTI_DUMPING', display_name: 'Anti-Dumping Duty', description: 'Anti-dumping measures', legal_basis: 'Anti-Dumping Act', is_schedule_based: 0 },
+  ]
+  return new Promise((resolve, _reject) => {
+    let count = 0
+    const total = taxTypes.length
+    taxTypes.forEach((item) => {
+      database.run(
+        `INSERT INTO tax_types (code, display_name, description, legal_basis, is_schedule_based) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(code) DO UPDATE SET display_name = excluded.display_name, description = excluded.description, legal_basis = excluded.legal_basis, is_schedule_based = excluded.is_schedule_based`,
+        [item.code, item.display_name, item.description, item.legal_basis, item.is_schedule_based],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting tax type ${item.code}:`, err)
           }
           count += 1
           if (count === total) {
@@ -630,6 +1094,8 @@ const insertComplianceRules = (database: sqlite3.Database): Promise<void> => {
   })
 }
 
+// --- Exported utility for seeding initial data ---
+// (fixed: added missing closing brace above)
 export const seedInitialData = async (): Promise<void> => {
   const database = getDatabase()
 
@@ -654,8 +1120,11 @@ export const seedInitialData = async (): Promise<void> => {
 
     await insertHSCodes(database, hsCodesData)
     await insertTariffSchedules(database)
+    await insertTaxTypes(database)
     await insertTariffRates(database)
     await insertComplianceRules(database)
+
+    // TODO: Add official-source ingestion for schedules and tax rules in future
 
     console.log('Seed data synchronization completed')
   } catch (error) {
