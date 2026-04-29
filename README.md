@@ -11,6 +11,7 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 - Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions and local fallback results.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
 - Automated regulatory fetcher: cron-scheduled job discovers and ingests data files from BOC, BIR, and Tariff Commission pages; all auto-fetched rows go to the human review queue before being applied.
+- Batch shipment import now supports reordered CSV headers and common alias mapping, not just the template column order.
 - Current focus: admin data-management UI and automated Customs/BIR source adapters.
 
 ## Project Overview
@@ -60,6 +61,7 @@ Full release details:
 - [x] Compliance requirement checks by HS code/category/value
 - [x] Calculator page with real-time results and FX context display
 - [x] Batch Import page with CSV parse, preview, calculate, and export
+- [x] Batch Import CSV alias mapping and template guidance for reordered headers
 - [x] Tariff Browser page with search and category filtering
 - [x] Browser report export for calculation output
 - [x] HS catalog import pipeline for CSV/XLS sources into `hs_codes`
@@ -75,7 +77,7 @@ Full release details:
 
 ### Planned
 - [ ] Automated historical tariff tracking and comparison dashboards
-- [ ] Data import/export tooling improvements (templates, mapping, conflict resolution UX)
+- [ ] Data import/export tooling improvements (tariff import templates, richer conflict-resolution UX, and additional export options)
 - [ ] Offline mode enhancements
 
 ## Setup Instructions

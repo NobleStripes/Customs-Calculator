@@ -2,6 +2,12 @@
 
 All notable changes to this project are tracked in versioned release-note files.
 
+## Unreleased
+
+- Implemented the dedicated BOC and Tariff Commission HTML tariff parser used by the auto-fetch HTML fallback path.
+- Fixed Batch Import CSV parsing so reordered headers and common alias names are mapped correctly.
+- Removed the misleading Batch Import conflict-resolution control that was not connected to shipment-calculation behavior.
+
 ## Releases
 
 - [v0.4.0](docs/changelog/v0.4.0.md) - Current

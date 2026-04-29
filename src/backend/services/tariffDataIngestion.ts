@@ -1830,7 +1830,7 @@ export class TariffDataIngestionService {
 
     return {
       rows: extractedRows,
-      confidence: extractedRows.length > 0 ? 65 : 0,
+      confidence: extractedRows.length > 0 ? 60 : 0,
     }
   }
 }

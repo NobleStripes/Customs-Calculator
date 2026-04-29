@@ -46,7 +46,7 @@ customs-calculator/
 │   │       ├── tariffDataIngestion.ts
 │   │       ├── autoFetcher.ts     # Cron-based regulatory data fetcher and ingestor
 │   │       ├── websiteFetcher.ts  # Allowlisted HTTP fetcher for regulatory sources
-│   │       └── tariffHtmlParser.ts # HTML table extraction stub for BOC/Tariff Commission
+│   │       └── tariffHtmlParser.ts # HTML table extraction for BOC/Tariff Commission fallback imports
 │   ├── server/
 │   │   └── index.ts               # Express API and static hosting
 │   └── types/
@@ -255,7 +255,7 @@ CREATE TABLE rate_change_audit (
 - `getRateChangeAudit(hsCode?, limit, offset)` returns paginated rate change audit entries.
 - `getTariffSources(limit)` returns recent tariff source records.
 - `getCalculationHistory(limit)` returns recent calculation history entries.
-- `parseHtmlTables(htmlContent, sourceUrl)` attempts to extract HS code/rate tables from raw HTML (used by the auto-fetcher as a fallback when no data file links are found).
+- `parseHtmlTables(htmlContent, sourceUrl)` attempts to extract HS code/rate tables from raw HTML (used by the auto-fetcher as a fallback when no data file links are found) via the shared `tariffHtmlParser`.
 
 ### `DocumentGenerator`
 
