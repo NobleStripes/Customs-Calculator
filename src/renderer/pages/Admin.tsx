@@ -105,6 +105,8 @@ type TariffImportResult = {
   status: 'completed' | 'completed_with_errors' | 'failed'
 }
 
+type TariffUploadMode = 'csv-text' | 'file-binary'
+
 type Tab = 'review' | 'jobs' | 'audit' | 'sources'
 
 const PAGE_SIZE = 20
@@ -135,6 +137,32 @@ const toCsvCell = (value: string | number | null): string => {
     return `"${serialized.replace(/"/g, '""')}"`
   }
   return serialized
+}
+
+const downloadCsv = (fileName: string, rows: Array<Array<string | number | null>>): void => {
+  const content = rows.map((row) => row.map(toCsvCell).join(',')).join('\n')
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(url)
+}
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  const chunkSize = 0x8000
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize)
+    binary += String.fromCharCode(...chunk)
+  }
+
+  return btoa(binary)
 }
 
 const parseNormalizedRow = (row: ReviewRow): Record<string, unknown> | null => {
@@ -203,6 +231,8 @@ export const Admin: React.FC = () => {
   const [tariffImportSourceReference, setTariffImportSourceReference] = useState('')
   const [tariffImportCsvText, setTariffImportCsvText] = useState(TARIFF_IMPORT_TEMPLATE_CSV)
   const [tariffImportFileName, setTariffImportFileName] = useState('')
+  const [tariffImportFileContentBase64, setTariffImportFileContentBase64] = useState('')
+  const [tariffImportUploadMode, setTariffImportUploadMode] = useState<TariffUploadMode>('csv-text')
   const [tariffAutoApproveThreshold, setTariffAutoApproveThreshold] = useState('85')
   const [tariffForceApprove, setTariffForceApprove] = useState(false)
   const [tariffPreview, setTariffPreview] = useState<TariffImportPreviewResult | null>(null)
@@ -536,65 +566,44 @@ export const Admin: React.FC = () => {
   const handleExportAuditCsv = () => {
     if (auditRows.length === 0) return
 
-    const header = [
-      'id',
-      'hs_code',
-      'old_duty_rate',
-      'new_duty_rate',
-      'old_vat_rate',
-      'new_vat_rate',
-      'old_surcharge_rate',
-      'new_surcharge_rate',
-      'reason',
-      'source_id',
-      'import_job_id',
-      'changed_at',
-    ]
-
-    const lines = [
-      header.join(','),
-      ...auditRows.map((row) =>
-        [
-          row.id,
-          row.hs_code,
-          row.old_duty_rate,
-          row.new_duty_rate,
-          row.old_vat_rate,
-          row.new_vat_rate,
-          row.old_surcharge_rate,
-          row.new_surcharge_rate,
-          row.reason,
-          row.source_id,
-          row.import_job_id,
-          row.changed_at,
-        ]
-          .map(toCsvCell)
-          .join(',')
-      ),
-    ]
-
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    anchor.href = url
-    anchor.download = `rate-change-audit-${timestamp}.csv`
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-    URL.revokeObjectURL(url)
+    downloadCsv(`rate-change-audit-${timestamp}.csv`, [
+      [
+        'id',
+        'hs_code',
+        'old_duty_rate',
+        'new_duty_rate',
+        'old_vat_rate',
+        'new_vat_rate',
+        'old_surcharge_rate',
+        'new_surcharge_rate',
+        'reason',
+        'source_id',
+        'import_job_id',
+        'changed_at',
+      ],
+      ...auditRows.map((row) => [
+        row.id,
+        row.hs_code,
+        row.old_duty_rate,
+        row.new_duty_rate,
+        row.old_vat_rate,
+        row.new_vat_rate,
+        row.old_surcharge_rate,
+        row.new_surcharge_rate,
+        row.reason,
+        row.source_id,
+        row.import_job_id,
+        row.changed_at,
+      ]),
+    ])
   }
 
   const handleDownloadTariffTemplate = () => {
-    const blob = new Blob([TARIFF_IMPORT_TEMPLATE_CSV], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = 'tariff-import-template.csv'
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-    URL.revokeObjectURL(url)
+    downloadCsv(
+      'tariff-import-template.csv',
+      TARIFF_IMPORT_TEMPLATE_CSV.split('\n').map((line) => line.split(','))
+    )
   }
 
   const handleTariffFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -604,12 +613,24 @@ export const Admin: React.FC = () => {
     }
 
     try {
-      const text = await file.text()
-      setTariffImportCsvText(text)
+      const isWorkbook = /\.(xlsx|xls)$/i.test(file.name)
       setTariffImportFileName(file.name)
       setTariffImportError(null)
       setTariffImportSuccess(null)
       setTariffPreview(null)
+
+      if (isWorkbook) {
+        const buffer = await file.arrayBuffer()
+        setTariffImportFileContentBase64(arrayBufferToBase64(buffer))
+        setTariffImportCsvText('')
+        setTariffImportUploadMode('file-binary')
+      } else {
+        const text = await file.text()
+        setTariffImportCsvText(text)
+        setTariffImportFileContentBase64('')
+        setTariffImportUploadMode('csv-text')
+      }
+
       if (!tariffImportSourceReference.trim()) {
         setTariffImportSourceReference(file.name)
       }
@@ -625,8 +646,10 @@ export const Admin: React.FC = () => {
 
   const handlePreviewTariffImport = async () => {
     const csvText = tariffImportCsvText.trim()
-    if (!csvText) {
-      setTariffImportError('Paste CSV content or choose a CSV file before previewing.')
+    const hasWorkbookPayload = tariffImportUploadMode === 'file-binary' && Boolean(tariffImportFileContentBase64)
+
+    if (!csvText && !hasWorkbookPayload) {
+      setTariffImportError('Paste CSV content or choose a CSV/XLS/XLSX file before previewing.')
       setTariffPreview(null)
       return
     }
@@ -636,7 +659,14 @@ export const Admin: React.FC = () => {
     setTariffImportSuccess(null)
 
     try {
-      const result = await appApi.previewTariffImport({ csvText })
+      const result = await appApi.previewTariffImport(
+        hasWorkbookPayload
+          ? {
+              contentBase64: tariffImportFileContentBase64,
+              fileName: tariffImportFileName || 'tariff-import.xlsx',
+            }
+          : { csvText }
+      )
       if (!result.success || !result.data) {
         throw new Error(result.error || 'Preview failed')
       }
@@ -652,8 +682,10 @@ export const Admin: React.FC = () => {
 
   const handleRunTariffImport = async () => {
     const csvText = tariffImportCsvText.trim()
-    if (!csvText) {
-      setTariffImportError('Paste CSV content or choose a CSV file before importing.')
+    const hasWorkbookPayload = tariffImportUploadMode === 'file-binary' && Boolean(tariffImportFileContentBase64)
+
+    if (!csvText && !hasWorkbookPayload) {
+      setTariffImportError('Paste CSV content or choose a CSV/XLS/XLSX file before importing.')
       return
     }
 
@@ -672,10 +704,14 @@ export const Admin: React.FC = () => {
         sourceName: tariffImportSourceName.trim(),
         sourceType: tariffImportSourceType.trim() || DEFAULT_TARIFF_SOURCE_TYPE,
         sourceReference: tariffImportSourceReference.trim() || tariffImportFileName || undefined,
-        csvText,
+        ...(hasWorkbookPayload
+          ? {
+              contentBase64: tariffImportFileContentBase64,
+              fileName: tariffImportFileName || 'tariff-import.xlsx',
+            }
+          : { csvText }),
         autoApproveThreshold: Number.isFinite(parsedThreshold) ? parsedThreshold : undefined,
         forceApprove: tariffForceApprove,
-        fileName: tariffImportFileName || undefined,
       })
 
       if (!result.success || !result.data) {
@@ -689,6 +725,51 @@ export const Admin: React.FC = () => {
     } finally {
       setTariffImportLoading(false)
     }
+  }
+
+  const handleExportTariffPreviewCsv = () => {
+    if (!tariffPreview) return
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    downloadCsv(`tariff-import-preview-${timestamp}.csv`, [
+      ['row_number', 'status', 'hs_code', 'schedule_code', 'duty_rate', 'vat_rate', 'effective_date', 'notes', 'errors'],
+      ...tariffPreview.rows.map((row) => {
+        const normalized = row.normalized || {}
+        return [
+          row.rowNumber,
+          row.errors.length > 0 ? 'invalid' : 'valid',
+          String(normalized.hsCode ?? row.raw.hsCode ?? ''),
+          String(normalized.scheduleCode ?? row.raw.scheduleCode ?? 'MFN'),
+          String(normalized.dutyRate ?? row.raw.dutyRate ?? ''),
+          String(normalized.vatRate ?? row.raw.vatRate ?? ''),
+          String(normalized.effectiveDate ?? row.raw.effectiveDate ?? ''),
+          String(normalized.notes ?? row.raw.notes ?? ''),
+          row.errors.join('; '),
+        ]
+      }),
+    ])
+  }
+
+  const handleExportSourceGovernanceCsv = () => {
+    if (filteredSourceRows.length === 0) return
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    downloadCsv(`tariff-source-governance-${timestamp}.csv`, [
+      ['source_id', 'source_name', 'source_type', 'status', 'reference', 'fetched_at', 'imported_at', 'latest_job_id', 'latest_job_status', 'pending_review_rows', 'error_rows'],
+      ...filteredSourceRows.map(({ source, latestJob }) => [
+        source.id,
+        source.source_name,
+        source.source_type,
+        source.status,
+        source.source_reference || '',
+        source.fetched_at,
+        source.imported_at || '',
+        latestJob?.id ?? '',
+        latestJob?.status || '',
+        latestJob?.pending_review_rows ?? 0,
+        latestJob?.error_rows ?? 0,
+      ]),
+    ])
   }
 
   return (
@@ -1084,8 +1165,12 @@ export const Admin: React.FC = () => {
                   Download CSV Template
                 </button>
                 <label className="btn btn-outline btn-sm tariff-file-button">
-                  Load CSV File
-                  <input type="file" accept=".csv,text/csv" onChange={(event) => void handleTariffFileSelected(event)} />
+                  Load CSV/XLSX File
+                  <input
+                    type="file"
+                    accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    onChange={(event) => void handleTariffFileSelected(event)}
+                  />
                 </label>
               </div>
             </div>
@@ -1142,12 +1227,21 @@ export const Admin: React.FC = () => {
               <span className="tariff-import-file">Loaded file: {tariffImportFileName || 'None'}</span>
             </div>
 
+            {tariffImportUploadMode === 'file-binary' && tariffImportFileName && (
+              <div className="tariff-import-hint">
+                Workbook upload ready: {tariffImportFileName}. Preview/import will use the uploaded workbook instead of textarea CSV.
+              </div>
+            )}
+
             <label className="tariff-import-csv-field">
               <span>Tariff CSV content</span>
               <textarea
                 value={tariffImportCsvText}
                 onChange={(event) => {
                   setTariffImportCsvText(event.target.value)
+                  setTariffImportFileContentBase64('')
+                  setTariffImportUploadMode('csv-text')
+                  setTariffImportFileName('')
                   setTariffPreview(null)
                   setTariffImportSuccess(null)
                 }}
@@ -1196,6 +1290,12 @@ export const Admin: React.FC = () => {
                     <p className="metric-label">Invalid Rows</p>
                     <p className="metric-value">{tariffPreview.invalidRows}</p>
                   </div>
+                </div>
+
+                <div className="tariff-preview-actions">
+                  <button className="btn btn-outline btn-sm" onClick={handleExportTariffPreviewCsv}>
+                    Export Preview CSV
+                  </button>
                 </div>
 
                 <div className="table-wrap tariff-preview-table-wrap">
@@ -1294,6 +1394,9 @@ export const Admin: React.FC = () => {
             </select>
             <button className="btn btn-outline btn-sm" onClick={() => void loadSources()}>
               Refresh
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={handleExportSourceGovernanceCsv} disabled={filteredSourceRows.length === 0}>
+              Export Sources CSV
             </button>
           </div>
 

@@ -911,7 +911,7 @@ const getComplianceRequirementsRemote = async (payload: {
 const batchCalculateRemote = async (shipments: ShipmentRow[]) =>
   postApi<BatchResultRow[]>('/api/calculate/batch', { shipments })
 
-const previewTariffImportRemote = async (payload: { csvText?: string; rows?: Record<string, unknown>[] }) =>
+const previewTariffImportRemote = async (payload: { csvText?: string; contentBase64?: string; fileName?: string; rows?: Record<string, unknown>[] }) =>
   postApi<{ totalRows: number; validRows: number; invalidRows: number; rows: ImportPreviewRow[] }>('/api/import/tariff-rates/preview', payload)
 
 const importTariffDataRemote = async (payload: Record<string, unknown>) =>
@@ -1254,7 +1254,7 @@ export const appApi = {
     }
   },
 
-  previewTariffImport: async (payload: { csvText?: string; rows?: Record<string, unknown>[] }): ApiResponse<{ totalRows: number; validRows: number; invalidRows: number; rows: ImportPreviewRow[] }> => {
+  previewTariffImport: async (payload: { csvText?: string; contentBase64?: string; fileName?: string; rows?: Record<string, unknown>[] }): ApiResponse<{ totalRows: number; validRows: number; invalidRows: number; rows: ImportPreviewRow[] }> => {
     const remoteResult = await previewTariffImportRemote(payload)
     if (remoteResult.success && remoteResult.data) {
       return remoteResult

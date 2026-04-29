@@ -535,6 +535,11 @@
   margin-bottom: 12px;
 }
 
+.tariff-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .tariff-import-summary {
   border-radius: 8px;
   padding: 12px 14px;

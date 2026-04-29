@@ -398,8 +398,15 @@ app.post('/api/import/hs-codes', async (request, response) => {
 
 app.post('/api/import/tariff-rates/preview', async (request, response) => {
   try {
-    const rows = tariffDataIngestion.parseCsvText(typeof request.body?.csvText === 'string' ? request.body.csvText : '')
-    const result = tariffDataIngestion.previewRows(Array.isArray(request.body?.rows) ? request.body.rows : rows)
+    const payload = request.body || {}
+    const rows = Array.isArray(payload.rows)
+      ? payload.rows
+      : await tariffDataIngestion.parseTariffRows({
+          csvText: typeof payload.csvText === 'string' ? payload.csvText : undefined,
+          contentBase64: typeof payload.contentBase64 === 'string' ? payload.contentBase64 : undefined,
+          fileName: typeof payload.fileName === 'string' ? payload.fileName : undefined,
+        })
+    const result = tariffDataIngestion.previewRows(rows)
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 400, error)
@@ -416,7 +423,11 @@ app.post('/api/import/tariff-rates', async (request, response) => {
   try {
     const rows = Array.isArray(payload.rows)
       ? payload.rows
-      : tariffDataIngestion.parseCsvText(typeof payload.csvText === 'string' ? payload.csvText : '')
+      : await tariffDataIngestion.parseTariffRows({
+          csvText: typeof payload.csvText === 'string' ? payload.csvText : undefined,
+          contentBase64: typeof payload.contentBase64 === 'string' ? payload.contentBase64 : undefined,
+          fileName: typeof payload.fileName === 'string' ? payload.fileName : undefined,
+        })
 
     const result = await tariffDataIngestion.importRows({
       sourceName: payload.sourceName,

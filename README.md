@@ -6,7 +6,7 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
 - Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent, and missing tariff rows now fail explicitly instead of silently defaulting to zero.
-- New in 0.4.0: conflict-resolution review UX, provenance drill-downs, authority-ranked live lookup merge behavior, tariff history browsing mode, and full-sync idempotency/cutover hardening.
+- New in 0.4.1: Admin tariff import supports CSV/XLS/XLSX upload paths, preview/source CSV exports, stronger Tariff Commission HTML parsing coverage, and batch-import alias/header fixes.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
 - Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions and local fallback results.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
@@ -31,16 +31,16 @@ The project is in an active build-out phase: core calculation and operator workf
 
 ## Release Notes
 
-### Current Release: v0.4.0
+### Current Release: v0.4.1
 
-- Added conflict-aware review workflow with side-by-side decisioning and provenance drill-down support.
-- Added authority-ranked live HS search merge behavior with deterministic source prioritization.
-- Added explicit tariff history browsing mode and history API support.
-- Added full-sync idempotency guard and staged cutover controls for safer rollout.
-- Fixed tariff version uniqueness collisions to avoid hard failures on duplicate version keys.
+- Added CSV/XLS/XLSX upload support to the Admin tariff import workspace.
+- Added export/download actions for tariff import preview results and tariff source governance tables.
+- Added stronger Tariff Commission matrix parser coverage and BOC negative fixtures for HTML fallback extraction.
+- Fixed Batch Import CSV parsing so reordered headers and common alias names are mapped correctly.
 
 Full release details:
 
+- [docs/changelog/v0.4.1.md](docs/changelog/v0.4.1.md)
 - [docs/changelog/v0.4.0.md](docs/changelog/v0.4.0.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
@@ -65,7 +65,7 @@ Full release details:
 - [x] Tariff Browser page with search and category filtering
 - [x] Browser report export for calculation output
 - [x] HS catalog import pipeline for CSV/XLS sources into `hs_codes`
-- [x] Tariff data ingestion workflow stubbed in the website UI for future admin wiring
+- [x] Tariff data ingestion workflow with Admin preview/import workspace, including CSV/XLS/XLSX upload support
 - [x] Runtime settings operations panel (health state, latest source visibility, manual runtime refresh, and robust save/reset persistence)
 
 ### In Progress
@@ -77,7 +77,7 @@ Full release details:
 
 ### Planned
 - [ ] Automated historical tariff tracking and comparison dashboards
-- [ ] Data import/export tooling improvements (additional export options and richer conflict-resolution UX beyond the current Admin tariff import workspace)
+- [ ] Data import/export tooling improvements (broader export coverage and richer conflict-resolution UX beyond the current Admin preview/source CSV exports)
 - [ ] Offline mode enhancements
 
 ## Setup Instructions
