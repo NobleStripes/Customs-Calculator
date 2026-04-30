@@ -1,11 +1,11 @@
 # Philippines Customs Calculator
 
-Customs-Calculator is a browser-based tool for Philippine import costing and compliance pre-checks, built with React and TypeScript. The current website release supports HS code search with ranked suggestions, duty and VAT computation including surcharge-aware taxable base, multi-currency workflows with PHP as the computation base, batch shipment processing, tariff browsing, compliance checks, and browser-based report export. It is designed for SMEs, brokers, and operations teams that need consistent landed-cost estimates before final confirmation against official Bureau of Customs and BIR issuances.
+Customs-Calculator is a browser-based tool for Philippine import costing and compliance pre-checks, built with React and TypeScript. The current website release supports HS code search with ranked suggestions, duty/VAT/excise computation with surcharge-aware VAT base, Section 800 user-status exemptions, 2026 port-handling estimation (arrastre/wharfage/storage), valuation-reference risk indicators, multi-currency workflows with PHP as the computation base, batch shipment processing, tariff browsing, compliance checks, and browser-based report export. It is designed for SMEs, brokers, and operations teams that need consistent landed-cost estimates before final confirmation against official Bureau of Customs and BIR issuances.
 
 ## Quick Summary
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
-- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent, and missing tariff rows now fail explicitly instead of silently defaulting to zero.
+- Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, excise, taxes, and landed-cost outputs shown in PHP. Server-side fee logic includes brokerage, IPF/IPC, CSF, transit charge, CDS, DST/IRS, and LRF; Section 800 exemptions, valuation-reference risk flags, and port/handling estimates are integrated in the same pipeline so single-item and batch calculations stay consistent.
 - New in 0.5.0: Full PHL 2026 compliance fee engine (CMTA administrative fees, excise tax for 5 categories, corrected VAT base, BOC weekly FX rate, all entry tiers), goods classification engine (import type per CMTA, agency clearances, strategic trade/STMO flag, VAT-exempt flag, FTA Certificate of Origin identification), and Import Classification panel in the calculator results UI.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
 - Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions and local fallback results.
@@ -44,6 +44,48 @@ Full release details:
 - [docs/changelog/v0.5.0.md](docs/changelog/v0.5.0.md)
 - [docs/changelog/v0.4.1.md](docs/changelog/v0.4.1.md)
 - [CHANGELOG.md](CHANGELOG.md)
+
+## Calculation Model Snapshot (v0.5.0)
+
+The calculator currently follows this server-side sequence:
+
+1. Resolve HS code and schedule.
+2. Convert FOB to PHP using customs-priority FX flow.
+3. Apply Section 800 exemption rules (when eligible) and adjust FOB.
+4. Run de minimis check and entry-type classification.
+5. Compute dutiable value, duty/surcharge, and excise.
+6. Apply global/admin fees plus logistics costs.
+7. Build landed-cost subtotal (VAT base), then compute VAT and final landed cost.
+
+Core formulas used in the current engine:
+
+```text
+Adjusted FOB PHP = max(0, FOB PHP - Section800 Exempt Amount)
+Dutiable Value PHP = Adjusted FOB PHP + Insurance PHP + Freight PHP
+
+Landed Cost Subtotal PHP (VAT Base) =
+   Dutiable Value
+   + Duty + Surcharge + Excise
+   + Brokerage + IPF/IPC + CSF + Transit Charge
+   + CDS + DST/IRS + LRF
+   + Arrastre/Wharfage + Dox Stamp & Others
+
+VAT PHP = Landed Cost Subtotal PHP x VAT Rate
+Total Landed Cost PHP = Landed Cost Subtotal PHP + VAT PHP
+```
+
+Port and handling behavior in v0.5.0:
+
+- Arrival date selects 2026 tariff tranche for estimated arrastre/wharfage/storage.
+- Storage charges begin after the free-storage period (default 5 days).
+- Manual Arrastre/Wharfage input overrides estimated total when provided.
+
+Additional output layers:
+
+- Section 800 exemption result (eligible/not eligible, exempt amount, reason)
+- Valuation-reference risk indicator (low/medium/high)
+- EO 114 petroleum advisory notice (when conditions are met)
+- Import classification panel (CMTA import type, agency clearances, CoO, strategic-trade and VAT-exempt flags)
 
 ## Features
 
@@ -172,7 +214,7 @@ Contributor workflows, extension patterns, testing commands, and maintenance not
 
 ## Known Issues & Limitations
 
-1. **Exchange Rates:** Live rates are fetched from `exchangerate-api.com` (free tier, ~1,500 req/month) and cached for 24 hours in SQLite. Fallback hardcoded rates are used when the API is unavailable.
+1. **Exchange Rates:** The calculator prioritizes BOC weekly customs rates (when enabled), then live market API rates, then cached market rates, then hardcoded fallback rates. BOC page/source format changes can affect automated weekly-rate parsing until adapters are updated.
 2. **Structured Extraction:** The regulatory fetcher discovers and downloads linked tabular files (`.csv`/`.xls`/`.xlsx`) from approved government sources, extracts structured HTML tariff tables, and includes a PDF extraction path. Deeply formatted/scanned PDF memo parsing may still need source-specific refinements.
 3. **Seeded Data Scope:** The built-in dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage. Import your own tariff schedules via the CSV/XLS import pipeline.
 4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress, though tariff source visibility is now surfaced in the admin page.
@@ -209,4 +251,4 @@ The full changelog has moved out of this README into dedicated release-note file
 
 ---
 
-**Last Updated:** April 28, 2026
+**Last Updated:** April 30, 2026

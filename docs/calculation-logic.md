@@ -1,206 +1,292 @@
 # Calculation Logic
 
-This document describes the current landed-cost and tax calculation flow implemented by the app.
+This document describes the current landed-cost and tax computation flow used by the API calculator.
 
-## Principles
+## Scope and Principles
 
-- Shipment inputs such as FOB, freight, and insurance can be entered in non-PHP currencies.
-- The calculator converts the taxable shipment value to PHP before tariff math runs.
-- Computed duties, taxes, fees, VAT base, and landed-cost totals are kept and displayed in PHP.
-- Single-shipment and batch calculations follow the same formula model.
+- All computed amounts are normalized to PHP.
+- HS code and schedule resolution are always performed before any tariff math.
+- The server-side `/api/calculate/batch` path is the authoritative implementation.
+- Section 800 user-status exemptions, port handling estimates, and valuation-reference risk checks are part of the current model.
+- Outputs are estimates and must be validated against the latest BOC/BIR/PPA issuances before filing.
 
 ## Input Model
 
-The current shipment calculation accepts these major inputs:
+Core shipment inputs:
 
 - FOB value
 - Freight
 - Insurance
 - HS code
-- Tariff schedule, currently seeded with `MFN`
+- Tariff schedule code (defaults to `MFN`)
 - Origin country
 - Destination port
 - Input currency
-- Declaration type: `consumption`, `warehousing`, or `transit`
-- Container size: `none`, `20ft`, or `40ft`
-- Arrastre / Wharfage
+- Declaration type: `consumption`, `warehousing`, `transit`
+- Container size: `none`, `20ft`, `40ft`
+- Arrastre / Wharfage (optional manual override)
 - Dox Stamp & Others
 
-## Calculation Sequence
+New status and logistics inputs:
 
-For each shipment, the app performs these steps:
+- Date of arrival
+- Storage delay days
+- Item condition: `new` or `used`
+- Importer status: `standard`, `balikbayan`, `returning_resident`, `ofw`
+- Returning resident months abroad
+- Balikbayan boxes this year
+- Commercial quantity flag
+- OFW home appliance privilege flags
 
-1. Resolve the selected or typed HS code to the canonical tariff code.
-2. Resolve the tariff schedule, defaulting to `MFN` when no schedule is specified.
-3. Compute the taxable shipment input amount as FOB + Freight + Insurance.
-4. Convert that taxable amount to PHP when the input currency is not already PHP.
-5. Resolve the latest active approved tariff row for the HS code and tariff schedule.
-6. Compute duty and surcharge from the PHP taxable amount.
-7. Compute brokerage, declaration-specific fees, and fixed documentary charges.
-8. Build the VAT base in PHP.
-9. Compute VAT from that PHP VAT base.
-10. Return the duty, VAT, fee breakdown, and total landed cost in PHP.
+Excise-related inputs (when applicable):
 
-## Formulas
+- Excise category (or auto-detected from HS)
+- Excise quantity and unit
+- NRP/dutiable basis value
+- Sweetened beverage sugar type
+- Petroleum product type
 
-### Taxable Value in PHP
+## High-Level Sequence
+
+For each shipment:
+
+1. Normalize and resolve HS code and schedule code.
+2. Convert FOB to PHP (for exemption and valuation checks).
+3. Evaluate Section 800 exemption and compute exempt amount.
+4. Derive adjusted FOB: `max(0, FOB PHP - exempt amount)`.
+5. Compute valuation-reference risk indicator (warning-only; no direct tax adjustment).
+6. Evaluate de minimis from adjusted FOB and HS chapter rules.
+7. If de minimis-exempt, return zero tax amounts with logistics/context outputs.
+8. Otherwise convert freight/insurance to PHP, apply insurance benchmark when insurance is zero.
+9. Build dutiable value, entry type, duty/surcharge, and excise.
+10. Compute brokerage and global fees (IPF, CSF, transit, CDS, DST/IRS, LRF).
+11. Estimate port handling (arrastre, wharfage, storage) by arrival date tranche; use as fallback when manual arrastre/wharfage is zero.
+12. Build landed-cost subtotal (VAT base), compute VAT, and total landed cost.
+13. Attach import-classification data, compliance data, FX trace data, and notices (including EO 114 advisory for petroleum scenarios).
+
+## FX Rules
+
+The converter follows this precedence for PHP conversions:
+
+1. BOC weekly customs exchange rate (when runtime setting `fxPreferBocRate = true`)
+2. Live market API rate
+3. Cached market rate
+4. Hardcoded fallback rates
+
+BOC rates are cached with a 7-day TTL.
+
+## Section 800 Exemption Logic
+
+### Balikbayan
+
+- Eligible when all are true:
+  - boxes this year `<= 3`
+  - total FOB value `<= 150,000 PHP`
+  - not commercial quantity
+- Exempt amount: `min(FOB PHP, 150,000)`
+
+### Returning Resident
+
+- Requires used personal effects and sufficient months abroad.
+- Exemption cap by stay duration:
+  - `>= 6` months: `150,000 PHP`
+  - `>= 60` months: `250,000 PHP`
+  - `>= 120` months: `350,000 PHP`
+- Exempt amount: `min(FOB PHP, cap)`
+
+### OFW
+
+- Eligible when home-appliance privilege is claimed and not already availed in the year.
+- Estimate-mode exempt amount: `min(FOB PHP, 150,000)`
+
+When no Section 800 path is eligible, exempt amount is zero.
+
+## De Minimis and Entry Type
+
+### De Minimis
+
+- Threshold: `10,000 PHP` FOB equivalent.
+- Checked against adjusted FOB (after Section 800 exemption).
+- Exemption does not apply to chapter 22 and 24 goods (alcohol/tobacco excise-always-taxed chapters).
+
+### Entry Type
+
+- `de_minimis` when dutiable value `<= 10,000 PHP`
+- `informal` when dutiable value `10,001` to `50,000 PHP`
+- `formal` when dutiable value `> 50,000 PHP`
+
+## Core Tax and Fee Formulas
+
+### Dutiable Value
 
 ```text
-Taxable Value PHP = (FOB + Freight + Insurance) × FX Rate to PHP
+Dutiable Value PHP = Adjusted FOB PHP + Insurance PHP + Freight PHP
 ```
 
-If the input currency is already PHP, the FX rate step is skipped.
+Insurance benchmark rule:
 
-### Duty and Surcharge
+- If declared insurance is `0`:
+  - general goods: `2%` of FOB PHP
+  - dangerous goods chapters 28/36/38: `4%` of FOB PHP
+
+### Duty, Surcharge, Excise
 
 ```text
-Duty Amount = Taxable Value PHP × Duty Rate
-Surcharge Amount = Taxable Value PHP × Surcharge Rate
+Duty Amount PHP = Dutiable Value PHP x Duty Rate
+Surcharge PHP = Dutiable Value PHP x Surcharge Rate
+Excise PHP = category-specific (ad valorem + specific components)
 ```
 
 ### Brokerage Fee
 
-The current implementation uses a tiered brokerage schedule based on taxable value in PHP:
+Tiered brokerage schedule based on dutiable value (PHP):
 
 ```text
-<= 50,000 PHP      => 1,000
-<= 75,000 PHP      => 1,500
-<= 100,000 PHP     => 2,000
-<= 150,000 PHP     => 2,500
-<= 200,000 PHP     => 3,000
-<= 250,000 PHP     => 3,500
-<= 300,000 PHP     => 4,000
-<= 400,000 PHP     => 4,500
-<= 500,000 PHP     => 5,000
-<= 750,000 PHP     => 5,500
-<= 1,000,000 PHP   => 6,000
-<= 1,500,000 PHP   => 7,000
-<= 2,000,000 PHP   => 8,000
-<= 5,000,000 PHP   => 9,000
->  5,000,000 PHP   => 10,000
+<= 50,000       => 1,000
+<= 75,000       => 1,500
+<= 100,000      => 2,000
+<= 150,000      => 2,500
+<= 200,000      => 3,000
+<= 250,000      => 3,500
+<= 300,000      => 4,000
+<= 400,000      => 4,500
+<= 500,000      => 5,000
+<= 750,000      => 5,500
+<= 1,000,000    => 6,000
+<= 1,500,000    => 7,000
+<= 2,000,000    => 8,000
+<= 5,000,000    => 9,000
+>  5,000,000    => 10,000
 ```
 
-## Global Fees
-
-### Container Security Fee
-
-```text
-CSF USD = 0 for no container
-CSF USD = 5 for 20ft
-CSF USD = 10 for 40ft
-CSF PHP = CSF USD converted to PHP
-```
-
-### Import Processing Charge
+### Import Processing Fee (IPF)
 
 For non-transit declarations:
 
 ```text
-<= 25000 PHP   => 250
-<= 50000 PHP   => 500
-<= 250000 PHP  => 750
-<= 500000 PHP  => 1000
-<= 750000 PHP  => 1500
->  750000 PHP  => 2000
+<= 25,000       => 250
+<= 50,000       => 500
+<= 250,000      => 750
+<= 500,000      => 1,000
+<= 750,000      => 1,500
+<= 1,000,000    => 2,000
+<= 2,000,000    => 2,500
+<= 5,000,000    => 3,000
+>  5,000,000    => 4,000
 ```
 
-For transit declarations:
+Transit declaration override:
 
 ```text
+Transit Charge PHP = 1,000
 IPC PHP = 250
 ```
 
-### Transit Charge
+### CSF and Documentary Charges
 
 ```text
-Transit Charge PHP = 1000 when declaration type is transit
-Transit Charge PHP = 0 otherwise
-```
-
-### Fixed Documentary Charges
-
-```text
+CSF USD = 0 (none), 5 (20ft), 10 (40ft)
+CSF PHP = converted CSF USD
 CDS PHP = 100
-IRS PHP = 30
+IRS/DST PHP = 30
+LRF PHP = 10
 ```
 
-### Total Global Fees
+### Port and Handling Fee Estimate (2026)
+
+Tranche selection by arrival date:
+
+- `2026-h1`: 2026-01-01 to 2026-06-30
+- `2026-h2`: 2026-07-01 onward
+
+Estimator behavior:
+
+- Arrastre base for 20ft:
+  - `2026-h1`: `1,612 PHP`
+  - `2026-h2`: `1,758 PHP`
+- 40ft uses 2x multiplier.
+- Wharfage is estimated by dutiable-value percentage with a floor.
+- Storage starts after 5 free days: `max(0, floor(delayDays) - 5)`.
+
+If user-entered `arrastreWharfage > 0`, that manual value is used. Otherwise, the calculated port-handling total is used.
+
+### Global Fees Total
 
 ```text
-Total Global Fees PHP = Transit Charge + IPC + CSF + CDS + IRS
+Total Global Fees PHP = Transit Charge + IPC + CSF + CDS + IRS + LRF
 ```
 
-## VAT Base and VAT
+### VAT Base and VAT
 
 ```text
-VAT Base PHP =
-  Taxable Value PHP
+Landed Cost Subtotal PHP (VAT Base) =
+  Dutiable Value
   + Duty Amount
-  + Surcharge Amount
-  + Brokerage Fee PHP
-  + Arrastre / Wharfage PHP
-  + Dox Stamp & Others PHP
-  + Total Global Fees PHP
+  + Surcharge
+  + Excise
+  + Brokerage
+  + IPC
+  + CDS
+  + IRS
+  + LRF
+  + Transit Charge
+  + CSF
+  + Arrastre/Wharfage
+  + Dox Stamp & Others
 
-VAT Amount PHP = VAT Base PHP × 12%
+VAT PHP = Landed Cost Subtotal PHP x VAT Rate
 ```
 
-## Totals
+For most rows VAT rate is `12%`; exemptions are represented through classification flags and tariff data behavior.
+
+### Final Totals
 
 ```text
-Total Item Tax PHP = Duty Amount + VAT Amount
-Total Tax and Fees PHP = Duty Amount + VAT Amount + Total Global Fees PHP
-Total Landed Cost PHP = VAT Base PHP + VAT Amount PHP
+Total Item Tax PHP = Duty + Surcharge + Excise + VAT
+Total Tax and Fees PHP = Total Item Tax + Total Global Fees
+Total Landed Cost PHP = Landed Cost Subtotal + VAT
 ```
 
-## Worked Example
+## Valuation Reference Risk Indicator
 
-This example uses the current implemented flow, not the older simplified duty-plus-VAT-only model.
+This does not directly change taxes in the current engine. It emits warnings when declared value appears materially below heading-level indicative references.
 
-### Inputs
+Risk levels:
 
-- FOB: 1,000 USD
-- Freight: 100 USD
-- Insurance: 25 USD
-- FX rate: 56 PHP per USD
-- Duty rate: 5%
-- Surcharge rate: 0%
-- Declaration type: consumption
-- Container size: 20ft
-- Arrastre / Wharfage: 4,500 PHP
-- Dox Stamp & Others: 265 PHP
+- `high`: declared value below 50% of indicative reference
+- `medium`: declared value below 100% of indicative reference
+- `low`: no trigger or within range
 
-### Computation
+## EO 114 Advisory Hook
 
-```text
-Taxable Value PHP = (1000 + 100 + 25) × 56 = 63000.00
-Duty Amount PHP = 63000.00 × 0.05 = 3150.00
-Surcharge Amount PHP = 0.00
-Brokerage Fee PHP = 5000.00
-CSF PHP = 5 USD × 56 = 280.00
-IPC PHP = 750.00
-CDS PHP = 100.00
-IRS PHP = 30.00
-Total Global Fees PHP = 0 + 750 + 280 + 100 + 30 = 1160.00
-VAT Base PHP = 63000 + 3150 + 0 + 5000 + 4500 + 265 + 1160 = 77075.00
-VAT Amount PHP = 77075.00 × 0.12 = 9249.00
-Total Landed Cost PHP = 77075.00 + 9249.00 = 86324.00
-```
+When excise category is petroleum and arrival date is on/after `2026-03-01`, the response includes an advisory notice that temporary energy-emergency relief may affect effective excise treatment.
 
-## Validation Rules
+The advisory is informational and does not automatically override excise rates.
 
-- HS code is required before calculation can run.
-- Typed HS codes are validated against known tariff rows.
-- Declared FOB value must be greater than 0.
-- Freight and insurance must be numeric when supplied.
-- Destination port is required for compliance checks and is normalized to supported Philippine port codes.
-- Unknown tariff codes return handled errors instead of partial silent results.
-- Missing approved tariff rows for the selected HS code and tariff schedule return handled errors instead of defaulting to zero.
+## Output Model
 
-## Output Rules
+Each result row returns:
 
-- Input values remain associated with the shipment input currency.
-- FX metadata is retained for traceability.
-- Duties, VAT, brokerage, global fees, VAT base, total tax and fees, and total landed cost are output in PHP.
-- Batch calculations follow the same rule: computed amounts are returned in PHP even when the row input currency is not PHP.
-- Outputs are estimate-only and should be validated against current BOC/BIR requirements before filing.
+- Duty, surcharge, VAT, excise breakdown
+- Cost base and fee breakdowns (including LRF)
+- De minimis state and entry type
+- Insurance benchmark flag
+- Import classification panel data
+- Section 800 exemption result
+- Port handling fee estimate result
+- Valuation-reference risk result
+- Optional EO 114 advisory notice
+- FX metadata (`applied`, `rateToPhp`, source, timestamp)
+
+## Validation and Error Rules
+
+- HS code is required and resolved before computation.
+- FOB must be a valid number > 0.
+- Freight and insurance must be numeric.
+- Unknown HS/tariff rows return handled errors.
+- Missing approved tariff rows for HS + schedule return handled errors.
+- Destination port is normalized to supported port aliases.
+
+## Compliance and Classification Sidecar Data
+
+The calculation response includes compliance requirement output and import-classification output (import type, agency clearances, strategic trade flag, VAT-exempt flag, and CoO requirement), which are displayed in the results UI but are not arithmetic operands in the core landed-cost formulas.
