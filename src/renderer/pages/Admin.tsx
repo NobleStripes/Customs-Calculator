@@ -1072,6 +1072,38 @@ export const Admin: React.FC = () => {
 
       {tab === 'audit' && (
         <div className="admin-panel">
+          {/* ── Summary Cards ─────────────────────────────────────── */}
+          {(() => {
+            const lastImport = sources
+              .map((s) => s.imported_at)
+              .filter(Boolean)
+              .sort()
+              .at(-1)
+            const lastImportSource = lastImport
+              ? sources.find((s) => s.imported_at === lastImport)?.source_name ?? '—'
+              : '—'
+            const mostRecent = auditRows[0]?.changed_at
+            return (
+              <div className="audit-summary-cards">
+                <div className="audit-summary-card">
+                  <span className="audit-summary-label">Last Tariff Update</span>
+                  <span className="audit-summary-value">{lastImport ? formatDate(lastImport) : 'No data'}</span>
+                  <span className="audit-summary-meta">{lastImportSource}</span>
+                </div>
+                <div className="audit-summary-card">
+                  <span className="audit-summary-label">Total Rate Changes</span>
+                  <span className="audit-summary-value">{auditRows.length}{auditRows.length === PAGE_SIZE ? '+' : ''}</span>
+                  <span className="audit-summary-meta">{auditHsFilter ? `filtered: ${auditHsFilter}` : 'current page'}</span>
+                </div>
+                <div className="audit-summary-card">
+                  <span className="audit-summary-label">Most Recent Change</span>
+                  <span className="audit-summary-value">{mostRecent ? formatDate(mostRecent) : '—'}</span>
+                  <span className="audit-summary-meta">{auditRows[0]?.hs_code ?? ''}</span>
+                </div>
+              </div>
+            )
+          })()}
+
           <div className="audit-toolbar">
             <input
               type="text"
@@ -1109,6 +1141,7 @@ export const Admin: React.FC = () => {
                     <th>New Surcharge</th>
                     <th>Reason</th>
                     <th>Changed At</th>
+                    <th>Source</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1123,6 +1156,7 @@ export const Admin: React.FC = () => {
                       <td>{formatPct(entry.new_surcharge_rate)}</td>
                       <td>{entry.reason || '-'}</td>
                       <td>{formatDate(entry.changed_at)}</td>
+                      <td>{sources.find((s) => s.id === entry.source_id)?.source_name ?? (entry.source_id != null ? `Source #${entry.source_id}` : '—')}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -17,7 +17,7 @@ import {
   normalizeExactHsCode,
 } from '../shared/hsLookupQuery'
 import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
-import { startAutoFetching } from '../backend/services/autoFetcher'
+import * as autoFetcher from '../backend/services/autoFetcher'
 import {
   BIR_DOCUMENTARY_STAMP_TAX_PHP,
   CUSTOMS_DOCUMENTARY_STAMP_PHP,
@@ -52,6 +52,13 @@ const tariffDataIngestion = new TariffDataIngestionService()
 const tariffCalculator = new TariffCalculator()
 const currencyConverter = new CurrencyConverter()
 const documentGenerator = new DocumentGenerator()
+const bufferedDocumentGenerator = documentGenerator as DocumentGenerator & {
+  generateCalculationReportBuffer: (payload: {
+    formData: unknown
+    results: unknown
+    generatedAt?: string
+  }) => Promise<Buffer>
+}
 const officialHsLookup = new OfficialHsLookupService()
 const port = Number(process.env.PORT || 8787)
 const __filename = fileURLToPath(import.meta.url)
@@ -1123,7 +1130,7 @@ app.post('/api/export/calculation-document/pdf', async (request, response) => {
   }
 
   try {
-    const pdfBuffer = await documentGenerator.generateCalculationReportBuffer({
+    const pdfBuffer = await bufferedDocumentGenerator.generateCalculationReportBuffer({
       formData: payload.formData,
       results: payload.results,
       generatedAt: new Date().toISOString(),
@@ -1279,7 +1286,8 @@ app.get('*', (_request, response) => {
 const startServer = async () => {
   await initializeDatabase()
   currencyConverter.clearOldCache()
-  startAutoFetching()
+  const startAutoFetching = (autoFetcher as { startAutoFetching?: () => void }).startAutoFetching
+  startAutoFetching?.()
 
   app.listen(port, () => {
     console.log(`Customs Calculator server listening on http://127.0.0.1:${port}`)

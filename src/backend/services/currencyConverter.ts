@@ -11,6 +11,15 @@ const BOC_EXCHANGE_RATE_URL = 'https://customs.gov.ph/exchange-rates/'
 // BOC rates are valid for one week; cache them with a 7-day TTL.
 const BOC_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+// BSP (Bangko Sentral ng Pilipinas) publishes the Philippine Deal System Fixing (PDSF) daily
+// reference rate — the legally mandated rate for customs valuation under RA 8183.
+// Updated every business day; cache with a 24-hour TTL.
+// The BSP publishes reference rates via their main statistics page; the exact URL may require
+// a session cookie from their portal. Fallback path: BSP → BOC → market API.
+const BSP_REFERENCE_RATE_URL = 'https://www.bsp.gov.ph/SitePages/Statistics/ExternalAccounts/PDSF.aspx'
+const BSP_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const BSP_CACHE_KEY_PREFIX = 'BSP_'
+
 type ExchangeRateCacheRow = {
   rate: number
   last_updated: string
@@ -36,7 +45,7 @@ export class CurrencyConverter {
     convertedAmount: number
     targetCurrency: string
     rate: number
-    source: 'cache' | 'live' | 'fallback' | 'identity' | 'boc'
+    source: 'cache' | 'live' | 'fallback' | 'identity' | 'boc' | 'bsp'
     timestamp: string
   }> {
     try {
@@ -78,7 +87,7 @@ export class CurrencyConverter {
     fromCurrency: string
     toCurrency: string
     rate: number
-    source: 'cache' | 'live' | 'fallback' | 'identity' | 'boc'
+    source: 'cache' | 'live' | 'fallback' | 'identity' | 'boc' | 'bsp'
     timestamp: string
   }> {
     const from = this.normalizeCurrencyCode(fromCurrency)
@@ -101,6 +110,45 @@ export class CurrencyConverter {
       rate,
       source,
       timestamp: new Date().toISOString(),
+    }
+  }
+
+  /**
+   * Fetch the BSP (Bangko Sentral ng Pilipinas) PDSF daily reference rate.
+   * This is the legally mandated rate for customs valuation under RA 8183.
+   * Returns PHP per 1 unit of `fromCurrency`, or null if unavailable.
+   */
+  private async fetchBspExchangeRate(fromCurrency: string): Promise<number | null> {
+    if (fromCurrency === 'PHP') return 1
+    try {
+      const response = await axios.get<string>(BSP_REFERENCE_RATE_URL, {
+        timeout: 8000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CustomsCalc/2026)' },
+        responseType: 'text',
+      })
+      const html: string = response.data
+      const upperCurrency = fromCurrency.toUpperCase()
+
+      // BSP PDSF table rows contain currency code and rate in adjacent cells.
+      const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
+      let match: RegExpExecArray | null
+      while ((match = rowPattern.exec(html)) !== null) {
+        const row = match[1]
+        const cells = [...row.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(
+          (m) => m[1].replace(/<[^>]+>/g, '').trim()
+        )
+        const currencyIdx = cells.findIndex((c) => c.toUpperCase() === upperCurrency)
+        if (currencyIdx >= 0) {
+          for (let i = currencyIdx + 1; i < cells.length; i++) {
+            const rate = parseFloat(cells[i].replace(/,/g, ''))
+            if (Number.isFinite(rate) && rate > 0) return rate
+          }
+        }
+      }
+      return null
+    } catch (error) {
+      console.warn('BSP reference rate fetch failed:', error)
+      return null
     }
   }
 
@@ -147,35 +195,62 @@ export class CurrencyConverter {
    */
   private async getExchangeRate(fromCurrency: string, toCurrency: string): Promise<{
     rate: number
-    source: 'cache' | 'live' | 'fallback' | 'boc'
+    source: 'cache' | 'live' | 'fallback' | 'boc' | 'bsp'
   }> {
     return new Promise((resolve, reject) => {
       const pair = `${fromCurrency}_${toCurrency}`
       const bocPair = `BOC_${fromCurrency}_${toCurrency}`
+      const bspPair = `${BSP_CACHE_KEY_PREFIX}${fromCurrency}_${toCurrency}`
       const settings = getRuntimeSettings()
 
-      // Try to get from cache first (check BOC cache if preferred)
+      // Try to get from cache first — check BSP cache when official rates are preferred
       this.db.get(
         'SELECT rate, last_updated FROM exchange_rates WHERE currency_pair = ?',
-        [settings.fxPreferBocRate ? bocPair : pair],
+        [settings.fxPreferBocRate ? bspPair : pair],
         async (err, row: ExchangeRateCacheRow | undefined) => {
           if (err) {
             reject(err)
             return
           }
 
-          const bocCacheTtl = BOC_CACHE_TTL_MS
           if (row) {
             const cacheAge = Date.now() - new Date(row.last_updated).getTime()
-            const ttl = settings.fxPreferBocRate ? bocCacheTtl : this.getCacheDurationMs()
+            const ttl = settings.fxPreferBocRate ? BSP_CACHE_TTL_MS : this.getCacheDurationMs()
             if (cacheAge < ttl) {
-              resolve({ rate: row.rate, source: settings.fxPreferBocRate ? 'boc' : 'cache' })
+              resolve({ rate: row.rate, source: settings.fxPreferBocRate ? 'bsp' : 'cache' })
               return
             }
           }
 
-          // If BOC is preferred, try BOC first (only for X→PHP or PHP→X pairs)
+          // Official rate priority chain (only for X↔PHP pairs):
+          //   1. BSP PDSF daily reference rate  (RA 8183 — legally mandated for customs)
+          //   2. BOC weekly rate                (matches BOC's own published table)
+          //   3. Market API / fallback
           if (settings.fxPreferBocRate && (toCurrency === 'PHP' || fromCurrency === 'PHP')) {
+            try {
+              const foreignCurrency = toCurrency === 'PHP' ? fromCurrency : toCurrency
+
+              // Step 1 — BSP reference rate
+              const bspPhpRate = await this.fetchBspExchangeRate(foreignCurrency)
+              if (bspPhpRate !== null) {
+                const rate = toCurrency === 'PHP' ? bspPhpRate : 1 / bspPhpRate
+                this.db.run(
+                  `INSERT INTO exchange_rates (currency_pair, rate, last_updated)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(currency_pair) DO UPDATE SET
+                     rate = excluded.rate,
+                     last_updated = CURRENT_TIMESTAMP`,
+                  [bspPair, rate],
+                  (dbErr) => { if (dbErr) console.warn('Could not cache BSP exchange rate:', dbErr) }
+                )
+                resolve({ rate, source: 'bsp' })
+                return
+              }
+            } catch (bocError) {
+              console.warn('BSP rate fetch error, trying BOC rate:', bocError)
+            }
+
+            // Step 2 — BOC weekly rate
             try {
               const foreignCurrency = toCurrency === 'PHP' ? fromCurrency : toCurrency
               const bocPhpRate = await this.fetchBocExchangeRate(foreignCurrency)

@@ -3,6 +3,21 @@ import { appApi, type AppHsCodeRow } from '../lib/appApi'
 import { isCodeLikeQuery } from '../../shared/hsLookupQuery'
 import './HSCodeSearch.css'
 
+/** Returns a human-readable depth label based on the number of significant digits in a code. */
+const getHsDepthLabel = (code: string): string => {
+  const digits = code.replace(/[^0-9]/g, '').length
+  if (digits <= 2) return 'Chapter'
+  if (digits <= 4) return 'Heading'
+  if (digits <= 6) return 'Sub-heading'
+  if (digits <= 8) return 'AHTN Code'
+  return 'AHTN Extended'
+}
+
+/** Returns the 2-digit chapter prefix for grouping (e.g. "84" from "8471.30.10"). */
+const getChapterPrefix = (code: string): string => {
+  return code.replace(/[^0-9]/g, '').slice(0, 2).padStart(2, '0')
+}
+
 interface HSCodeSearchProps {
   onSelect: (code: string, selection?: AppHsCodeRow) => void
   selectedCode: string
@@ -180,21 +195,36 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
               {lookupMessage}
             </div>
           )}
-          {suggestions.map((item, index) => (
-            <button
-              key={`${item.code}-${item.sourceType || 'unknown'}-${item.sourceUrl || 'local'}-${item.officialScheduleCode || 'none'}`}
-              className={`suggestion-item ${activeIndex === index ? 'active' : ''}`}
-              onClick={() => handleSelect(item)}
-              onMouseEnter={() => setActiveIndex(index)}
-            >
-              <span className="code">{item.code}</span>
-              <span className="description">{item.description}</span>
-              <span className="description suggestion-meta">
-                {item.sourceLabel || 'HS catalog'}
-                {typeof item.confidence === 'number' ? ` • ${item.confidence}% confidence` : ''}
-              </span>
-            </button>
-          ))}
+          {suggestions.map((item, index) => {
+            const chapter = getChapterPrefix(item.code)
+            const prevChapter = index > 0 ? getChapterPrefix(suggestions[index - 1].code) : null
+            const showGroupHeader = chapter !== prevChapter
+
+            return (
+              <React.Fragment key={`${item.code}-${item.sourceType || 'unknown'}-${item.sourceUrl || 'local'}-${item.officialScheduleCode || 'none'}`}>
+                {showGroupHeader && (
+                  <div className="suggestion-group-header" aria-hidden="true">
+                    Chapter {chapter}
+                  </div>
+                )}
+                <button
+                  className={`suggestion-item ${activeIndex === index ? 'active' : ''}`}
+                  onClick={() => handleSelect(item)}
+                  onMouseEnter={() => setActiveIndex(index)}
+                >
+                  <span className="code">
+                    {item.code}
+                    <span className="depth-badge">{getHsDepthLabel(item.code)}</span>
+                  </span>
+                  <span className="description">{item.description}</span>
+                  <span className="description suggestion-meta">
+                    {item.sourceLabel || 'HS catalog'}
+                    {typeof item.confidence === 'number' ? ` • ${item.confidence}% confidence` : ''}
+                  </span>
+                </button>
+              </React.Fragment>
+            )
+          })}
         </div>
       )}
 

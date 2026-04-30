@@ -69,7 +69,10 @@ export class DocumentGenerator {
     generatedAt?: string
   }): void {
     const calculationCurrency = 'PHP'
-    const now = payload.generatedAt || new Date().toISOString()
+    const now = payload.generatedAt ? new Date(payload.generatedAt) : new Date()
+    const dateStr = now.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
+    const entryRef = `IE-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getTime()).slice(-5)}`
+
     const dutyRate = payload.results.duty?.rate || 0
     const dutyAmount = payload.results.duty?.amount || 0
     const surcharge = payload.results.duty?.surcharge || 0
@@ -88,90 +91,115 @@ export class DocumentGenerator {
     const irs = payload.results.breakdown?.globalFees?.irs || 0
     const totalGlobalTax = payload.results.breakdown?.globalFees?.totalGlobalTax || (transitCharge + ipc + csf + cds + irs)
     const totalTaxAndFees = payload.results.breakdown?.totalTaxAndFees || (itemTaxTotal + totalGlobalTax)
+    const fob = payload.formData.value
+    const freight = payload.formData.freight || 0
+    const insurance = payload.formData.insurance || 0
+    const cif = fob + freight + insurance
+    const totalPayable = totalTaxAndFees + surcharge
 
-    doc.fontSize(20).text('Philippines Customs Calculation Report', { align: 'left' })
-    doc.moveDown(0.5)
-    doc.fontSize(10).fillColor('#666').text(`Generated: ${now}`)
-    doc.moveDown(1)
-
-    doc.fillColor('#000').fontSize(13).text('Shipment Details')
-    doc.moveDown(0.3)
-    doc.fontSize(11)
-    doc.text(`HS Code: ${payload.formData.hsCode}`)
-    doc.text(`Tariff Schedule: ${payload.results.tariff?.scheduleCode || payload.formData.scheduleCode || 'MFN'}`)
-    doc.text(`FOB Value: ${payload.formData.value.toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`Freight: ${(payload.formData.freight || 0).toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`Insurance: ${(payload.formData.insurance || 0).toFixed(2)} ${payload.formData.currency}`)
-    doc.text(`Origin Country: ${payload.formData.originCountry || 'N/A'}`)
-    doc.text(`Destination Port: ${payload.formData.destinationPort}`)
-    doc.text(`Declaration Type: ${payload.formData.declarationType || 'consumption'}`)
-    doc.text(`Container Size: ${payload.formData.containerSize || 'none'}`)
-    doc.text(`Arrastre / Wharfage: ${(payload.formData.arrastreWharfage || 0).toFixed(2)} PHP`)
-    doc.text(`Dox Stamp & Others: ${(payload.formData.doxStampOthers || 0).toFixed(2)} PHP`)
-    doc.moveDown(1)
-
-    doc.fontSize(13).text('Tax and Duty Breakdown')
-    doc.moveDown(0.3)
-    doc.fontSize(11)
-    doc.text(`Taxable Value PH: ${taxableValue.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`Brokerage Fee: ${brokerageFee.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`Arrastre / Wharfage: ${arrastreWharfage.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`Dox Stamp & Others: ${doxStampOthers.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`VAT Base / TLC: ${vatBase.toFixed(2)} ${calculationCurrency}`)
-    doc.moveDown(0.3)
-    doc.text(`CUD: ${dutyAmount.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`VAT: ${vatAmount.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`Total Item Tax: ${itemTaxTotal.toFixed(2)} ${calculationCurrency}`)
-    doc.moveDown(0.3)
-    if (transitCharge > 0) {
-      doc.text(`TC: ${transitCharge.toFixed(2)} ${calculationCurrency}`)
+    const php = (n: number) => `PHP ${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    const lbl = (label: string, value: string) => {
+      doc.fontSize(10)
+      const savedX = doc.x
+      doc.text(label, savedX, doc.y, { continued: true, width: 200 })
+      doc.text(value, { align: 'right' })
     }
-    doc.text(`IPC: ${ipc.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`CSF: ${csf.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`CDS: ${cds.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`IRS: ${irs.toFixed(2)} ${calculationCurrency}`)
-    doc.text(`Total Global Tax: ${totalGlobalTax.toFixed(2)} ${calculationCurrency}`)
-    doc.moveDown(0.3)
-    doc.text(`Duty Rate: ${dutyRate.toFixed(2)}%`)
-    doc.text(`VAT Rate: ${vatRate.toFixed(2)}%`)
-    doc.text(`Surcharge: ${surcharge.toFixed(2)} ${calculationCurrency}`)
-    doc.moveDown(0.7)
-    doc.fontSize(12).text(
-      `Total Tax and Fees: ${totalTaxAndFees.toFixed(2)} ${calculationCurrency}`,
-      { underline: true }
-    )
-    doc.moveDown(0.4)
-    doc.fontSize(12).text(
-      `Total Landed Cost: ${payload.results.totalLandedCost.toFixed(2)} ${calculationCurrency}`,
-      { underline: true }
-    )
+
+    const sectionHeader = (title: string) => {
+      doc.moveDown(0.4)
+      doc.rect(48, doc.y, doc.page.width - 96, 18).fill('#2c3e50')
+      doc.fillColor('#ffffff').fontSize(10).font('Helvetica-Bold')
+        .text(title, 52, doc.y - 14)
+      doc.font('Helvetica').fillColor('#000000')
+      doc.moveDown(0.6)
+    }
+
+    doc.font('Helvetica-Bold').fontSize(14).text('REPUBLIC OF THE PHILIPPINES', { align: 'center' })
+    doc.fontSize(12).text('BUREAU OF CUSTOMS', { align: 'center' })
+    doc.fontSize(9).font('Helvetica').fillColor('#555').text('Informal Entry Declaration (Reference Document)', { align: 'center' })
+    doc.fillColor('#000').moveDown(0.6)
+    doc.font('Helvetica').fontSize(10)
+    doc.text(`Entry Reference No.:  ${entryRef}`, { align: 'right' })
+    doc.text(`Date:  ${dateStr}`, { align: 'right' })
+    doc.text(`Customs Station:  ${payload.formData.destinationPort || 'N/A'}`, { align: 'right' })
+    doc.moveDown(0.8)
+
+    sectionHeader('A. GOODS IDENTIFICATION')
+    doc.fontSize(10)
+    lbl('HS Code (AHTN):', payload.formData.hsCode)
+    lbl('Tariff Schedule:', payload.results.tariff?.scheduleCode || payload.formData.scheduleCode || 'MFN (Most Favoured Nation)')
+    lbl('Country of Origin:', payload.formData.originCountry || 'N/A')
+    lbl('Port of Discharge:', payload.formData.destinationPort || 'N/A')
+    lbl('Declaration Type:', payload.formData.declarationType || 'consumption')
+    lbl('Container Size:', payload.formData.containerSize || 'none')
+
+    sectionHeader('B. CUSTOMS VALUATION (Transaction Value Method — RA 9135)')
+    doc.fontSize(10)
+    lbl('FOB Value:', `${fob.toFixed(2)} ${payload.formData.currency}`)
+    lbl('Freight:', `${freight.toFixed(2)} ${payload.formData.currency}`)
+    lbl('Insurance:', `${insurance.toFixed(2)} ${payload.formData.currency}`)
+    lbl('CIF / Dutiable Value:', `${cif.toFixed(2)} ${payload.formData.currency}`)
+    lbl('Dutiable Value (PHP):', php(taxableValue))
+    lbl('VAT Base (Landed Cost):', php(vatBase))
+
+    sectionHeader('C. DUTY AND TAX ASSESSMENT')
+    doc.fontSize(10)
+    lbl(`Customs Duty (CUD) @ ${dutyRate.toFixed(2)}%:`, php(dutyAmount))
+    if (surcharge > 0) {
+      lbl('Surcharge:', php(surcharge))
+    }
+    lbl(`VAT @ ${vatRate.toFixed(2)}%:`, php(vatAmount))
+    lbl('Total Item Tax (CUD + VAT):', php(itemTaxTotal))
+    doc.moveDown(0.2)
+    doc.font('Helvetica').fontSize(9).fillColor('#555')
+    doc.text('Government Fees:')
+    doc.fillColor('#000')
+    if (transitCharge > 0) lbl('  Transit Charge (TC):', php(transitCharge))
+    lbl('  Import Processing Fee (IPF):', php(ipc))
+    lbl('  Container Security Fee (CSF):', php(csf))
+    lbl('  Customs Documentary Stamp (CDS):', php(cds))
+    lbl('  Import Record Stamp (IRS):', php(irs))
+    lbl('  Brokerage Fee:', php(brokerageFee))
+    lbl('  Arrastre / Wharfage:', php(arrastreWharfage))
+    if (doxStampOthers > 0) lbl('  Doc Stamp & Others:', php(doxStampOthers))
+    lbl('Total Government Fees:', php(totalGlobalTax))
+
+    sectionHeader('D. TOTAL ASSESSMENT')
+    doc.fontSize(11).font('Helvetica-Bold')
+    lbl('TOTAL TAX AND FEES:', php(totalTaxAndFees))
+    lbl('TOTAL LANDED COST:', php(payload.results.totalLandedCost))
+    lbl('TOTAL PAYABLE TO BOC:', php(totalPayable))
+    doc.font('Helvetica').fontSize(10)
 
     const compliance = payload.results.compliance
     if (compliance) {
-      doc.moveDown(1)
-      doc.fontSize(13).text('Compliance Notes')
-      doc.moveDown(0.3)
+      sectionHeader('E. COMPLIANCE REQUIREMENTS')
+      doc.fontSize(10)
 
       const writeList = (title: string, entries: string[] = []) => {
-        doc.fontSize(11).text(title)
-        if (entries.length === 0) {
-          doc.text('- None')
-          return
-        }
-        entries.forEach((entry) => doc.text(`- ${entry}`))
+        if (entries.length === 0) return
+        doc.font('Helvetica-Bold').text(title)
+        doc.font('Helvetica')
+        entries.forEach((entry) => doc.text(`  • ${entry}`))
+        doc.moveDown(0.3)
       }
 
-      writeList('Required Documents', compliance.requiredDocuments || [])
-      doc.moveDown(0.3)
-      writeList('Restrictions', compliance.restrictions || [])
-      doc.moveDown(0.3)
-      writeList('Warnings', compliance.warnings || [])
+      writeList('Required Documents:', compliance.requiredDocuments || [])
+      writeList('Import Restrictions:', compliance.restrictions || [])
+      writeList('Compliance Warnings:', compliance.warnings || [])
     }
 
     doc.moveDown(1)
-    doc.fontSize(9).fillColor('#666').text('For planning/reference purposes only. Validate with BOC before filing.', {
-      align: 'left',
-    })
+    doc.rect(48, doc.y, doc.page.width - 96, 1).fill('#cccccc')
+    doc.moveDown(0.4)
+    doc.fontSize(8).fillColor('#555').text(
+      'FOR PLANNING AND REFERENCE PURPOSES ONLY. This document is not an official Bureau of Customs filing. ' +
+      'All values must be validated with the BOC and confirmed with a licensed customs broker before lodging an entry. ' +
+      'Rates effective as of date of calculation. Generated by Customs Calculator.',
+      { align: 'center' }
+    )
+
+    void calculationCurrency
   }
 
   generateCalculationReportBuffer(payload: {

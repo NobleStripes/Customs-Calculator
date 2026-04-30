@@ -7,6 +7,32 @@ import { downloadSourceFileBase64, sourceAdapters } from './sourceAdapters'
 const CRON_SCHEDULE = '0 2 * * *'
 const MONTHLY_FULL_SYNC_SCHEDULE = '0 3 1 * *'
 const MAX_RETRIES = 3
+const OFFLINE_FAILURE_THRESHOLD = 3
+
+// Consecutive-failure counter per source. Resets on any successful fetch cycle.
+const sourceFailureCounts = new Map<string, number>()
+
+const markSourceOutcome = (source: string, success: boolean, note?: string): void => {
+  const prev = sourceFailureCounts.get(source) ?? 0
+  if (success) {
+    if (prev > 0) {
+      console.log(`[AutoFetcher] Source "${source}" recovered after ${prev} consecutive failure(s).`)
+    }
+    sourceFailureCounts.set(source, 0)
+    return
+  }
+
+  const next = prev + 1
+  sourceFailureCounts.set(source, next)
+  if (next >= OFFLINE_FAILURE_THRESHOLD) {
+    console.warn(
+      `[AutoFetcher] Source "${source}" has failed ${next} consecutive time(s) — may be offline or HTML structure has changed.` +
+      (note ? ` Details: ${note}` : '')
+    )
+  } else {
+    console.warn(`[AutoFetcher] Source "${source}" failure #${next}. ${note ?? ''}`)
+  }
+}
 
 type SyncMode = 'incremental' | 'full-sync'
 
@@ -128,8 +154,10 @@ const fetchAndIngest = async (source: RegulatorySource, mode: SyncMode = 'increm
   let updates
   try {
     updates = await fetcher.fetchRegulatoryUpdates(source)
+    markSourceOutcome(source, true)
   } catch (err) {
     console.error(`[AutoFetcher] Failed to fetch regulatory updates for ${source}:`, err)
+    markSourceOutcome(source, false, String(err))
     return
   }
 
@@ -147,7 +175,11 @@ const fetchAndIngest = async (source: RegulatorySource, mode: SyncMode = 'increm
         try {
           const { rows, confidence } = await ingestion.parseHtmlTables(update.rawHtml, update.url)
           if (rows.length === 0) {
-            console.log(`[AutoFetcher] No HS-code/rate tables found in HTML on ${update.url}`)
+            console.warn(
+              `[AutoFetcher] No HS-code/rate tables found in HTML on ${update.url} — ` +
+              `the page structure may have changed. Manual review recommended.`
+            )
+            markSourceOutcome(source, false, `0 rows parsed from ${update.url} — possible HTML structure change`)
             continue
           }
 

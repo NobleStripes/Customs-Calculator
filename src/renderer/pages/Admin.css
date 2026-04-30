@@ -394,6 +394,53 @@
   cursor: not-allowed;
 }
 
+/* Audit summary cards */
+.audit-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.audit-summary-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #667eea;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-summary-label {
+  font-size: 0.75rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.audit-summary-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.audit-summary-meta {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .audit-summary-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Audit toolbar */
 .audit-toolbar {
   display: flex;

@@ -635,6 +635,39 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
       </div>
       )}
 
+      {/* Fee breakdown chart — shown when there are non-zero fee components */}
+      {!results.deMinimisExempt && (dutyAmount + exciseAmount + vatAmount + globalTaxTotal) > 0 && (() => {
+        const chartTotal = dutyAmount + exciseAmount + vatAmount + globalTaxTotal
+        const toPct = (n: number) => Math.max(2, Math.round((n / chartTotal) * 100))
+        const barItems: Array<{ label: string; amount: number; color: string }> = [
+          { label: 'Customs Duty (CUD)', amount: dutyAmount, color: '#3498db' },
+          { label: 'Excise Tax', amount: exciseAmount, color: '#e67e22' },
+          { label: 'VAT', amount: vatAmount, color: '#2ecc71' },
+          { label: 'Government Fees (IPF/CSF/CDS/IRS/LRF)', amount: globalTaxTotal, color: '#9b59b6' },
+        ].filter((item) => item.amount > 0)
+
+        return (
+          <div className="result-card fee-chart-card">
+            <h3>Fee Breakdown</h3>
+            <div className="fee-chart">
+              {barItems.map((item) => (
+                <div key={item.label} className="fee-bar-row">
+                  <span className="fee-bar-label">{item.label}</span>
+                  <div className="fee-bar-track">
+                    <div
+                      className="fee-bar"
+                      style={{ width: `${toPct(item.amount)}%`, background: item.color }}
+                      title={`${item.label}: ${formatCurrency(item.amount, calculationCurrency)}`}
+                    />
+                  </div>
+                  <span className="fee-bar-amount">{formatCurrency(item.amount, calculationCurrency)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {results.compliance?.warnings && results.compliance.warnings.length > 0 && (
         <div className="compliance-section warning">
           <h3>⚠️ Compliance Warnings</h3>

@@ -475,3 +475,68 @@
 }
 
 .vat-exempt-note p { margin: 0; }
+
+/* ── Fee Breakdown Chart ────────────────────────────────────────────── */
+
+.fee-chart-card {
+  grid-column: 1 / -1;
+  border-left: 4px solid #667eea;
+}
+
+.fee-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.fee-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fee-bar-label {
+  flex: 0 0 220px;
+  font-size: 0.82rem;
+  color: #4a5568;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fee-bar-track {
+  flex: 1;
+  background: #f0f2f5;
+  border-radius: 4px;
+  height: 18px;
+  overflow: hidden;
+}
+
+.fee-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.45s ease;
+  min-width: 4px;
+}
+
+.fee-bar-amount {
+  flex: 0 0 110px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #2c3e50;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .fee-bar-label {
+    flex: 0 0 120px;
+    font-size: 0.76rem;
+  }
+
+  .fee-bar-amount {
+    flex: 0 0 80px;
+    font-size: 0.76rem;
+  }
+}

@@ -69,6 +69,16 @@ export class ComplianceChecker {
           }
 
           // Value-based checks
+          // De minimis threshold: Section 423, CMTA (RA 10863) — imports at or below ₱10,000 are
+          // exempt from duties and taxes. Above ₱10,000 requires a Packing List.
+          if (value > 0 && value <= 10000) {
+            warnings.push(
+              'De Minimis Entry: Shipments with a declared value at or below ₱10,000 are exempt ' +
+              'from customs duties and taxes under Section 423 of the CMTA (RA 10863). ' +
+              'Present proof of value to the BOC releasing officer.'
+            )
+          }
+
           if (value > 10000) {
             requiredDocuments.push('Packing List')
             warnings.push('High value shipment - expect detailed inspection')
@@ -80,12 +90,35 @@ export class ComplianceChecker {
 
             if (hsCategory === 'Electronics') {
               requiredDocuments.push("Manufacturer's Specification Sheet")
+              // Radio / telecommunications equipment (Chapters 84-85) requires NTC type acceptance
+              const hsChapter = hsCode.replace(/[^0-9]/g, '').slice(0, 2)
+              if (hsChapter === '84' || hsChapter === '85') {
+                requiredDocuments.push('NTC Type Acceptance Certificate')
+                restrictions.push(
+                  'Radio and telecommunications equipment must carry a valid NTC Type Acceptance Certificate ' +
+                  'issued by the National Telecommunications Commission (NTC) per RA 7925.'
+                )
+              }
             }
 
             if (hsCategory === 'Food') {
               requiredDocuments.push('Health Certificate')
               requiredDocuments.push('Certificate of Free Sale')
+              requiredDocuments.push('FDA Import Clearance / SFD-NRD Certificate of Product Registration')
               restrictions.push('Subject to Bureau of Animal Industry (BAI) clearance')
+              restrictions.push(
+                'Processed food products require FDA Import Clearance from the Philippine Food and Drug Administration (FDA) ' +
+                'under the Food Safety Act of 2013 (RA 10611).'
+              )
+            }
+
+            if (hsCategory === 'Pharmaceutical' || hsCategory === 'Medical' || hsCategory === 'Cosmetics') {
+              requiredDocuments.push('FDA Certificate of Product Registration (CPR)')
+              requiredDocuments.push('FDA Import Permit / LTO (License to Operate as Importer)')
+              restrictions.push(
+                'Pharmaceutical products, medical devices, and cosmetics require FDA clearance (Certificate of Product ' +
+                'Registration and Import Permit) issued by the Food and Drug Administration per RA 9711 (FDA Act of 2009).'
+              )
             }
 
             if (hsCategory === 'Textiles') {

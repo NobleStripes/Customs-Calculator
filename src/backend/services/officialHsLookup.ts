@@ -9,6 +9,8 @@ export const OFFICIAL_TARIFF_LOOKUP_CONFIG = {
   textQueryParam: 'keyword',
   maxResults: 20,
   cacheTtlMs: 5 * 60 * 1000,
+  // Maximum number of queries held in memory at once; oldest entry evicted when exceeded.
+  maxCacheEntries: 100,
 } as const
 
 const TRADE_AGREEMENT_CODES = [
@@ -364,12 +366,31 @@ export class OfficialHsLookupService {
       cacheExpiresAt: new Date(expiresAt).toISOString(),
     }
 
+    // LRU eviction: when at capacity, remove the oldest inserted entry.
+    if (this.cache.size >= OFFICIAL_TARIFF_LOOKUP_CONFIG.maxCacheEntries) {
+      const oldestKey = this.cache.keys().next().value
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey)
+      }
+    }
+
     this.cache.set(query, {
       expiresAt,
       payload: cachedPayload,
     })
 
     return cachedPayload
+  }
+
+  getCacheStats(): { size: number; maxSize: number; entries: Array<{ query: string; expiresAt: string }> } {
+    return {
+      size: this.cache.size,
+      maxSize: OFFICIAL_TARIFF_LOOKUP_CONFIG.maxCacheEntries,
+      entries: Array.from(this.cache.entries()).map(([query, entry]) => ({
+        query,
+        expiresAt: new Date(entry.expiresAt).toISOString(),
+      })),
+    }
   }
 
   async search(query: string): Promise<OfficialHsLookupResponse> {
