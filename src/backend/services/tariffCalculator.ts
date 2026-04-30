@@ -114,7 +114,7 @@ type VatRateRow = NotesRateRow & {
   vat_rate?: number
 }
 
-type HSCodeLookupRow = {
+export type HSCodeLookupRow = {
   code: string
   description: string
   category: string
@@ -135,7 +135,7 @@ const tokenizeSearchText = (value: string): string[] =>
     .map((term) => term.trim())
     .filter(Boolean)
 
-const hasChapter99Intent = (query: string): boolean => {
+export const hasChapter99Intent = (query: string): boolean => {
   const normalized = query.toUpperCase()
   if (/\bCHAPTER\s*99\b/.test(normalized)) {
     return true
@@ -145,7 +145,7 @@ const hasChapter99Intent = (query: string): boolean => {
   return digits.startsWith('99')
 }
 
-const getSynonymProfile = (query: string): {
+export const getSynonymProfile = (query: string): {
   expandedTerms: string[]
   preferredPrefixes: string[]
 } => {
@@ -173,7 +173,7 @@ const getSynonymProfile = (query: string): {
   }
 }
 
-const scoreHsSearchResult = (
+export const scoreHsSearchResult = (
   row: HSCodeLookupRow,
   normalizedQuery: string,
   compactQuery: string,

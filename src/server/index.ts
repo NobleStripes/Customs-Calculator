@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 import { initializeDatabase } from '../backend/db/database'
 import { ComplianceChecker } from '../backend/services/complianceChecker'
 import { TariffDataIngestionService } from '../backend/services/tariffDataIngestion'
-import { TariffCalculator } from '../backend/services/tariffCalculator'
+import { TariffCalculator, hasChapter99Intent, getSynonymProfile, scoreHsSearchResult } from '../backend/services/tariffCalculator'
 import { CurrencyConverter } from '../backend/services/currencyConverter'
 import { DocumentGenerator } from '../backend/services/documentGenerator'
 import { OfficialHsLookupService } from '../backend/services/officialHsLookup'
@@ -855,19 +855,31 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
       }
     }
 
-    const rankedResults = Array.from(mergedByCode.values()).sort((left, right) => {
-      const leftRank = Number((left as { authorityRank?: number }).authorityRank ?? 99)
-      const rightRank = Number((right as { authorityRank?: number }).authorityRank ?? 99)
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank
-      }
-      const leftConfidence = Number((left as { confidence?: number }).confidence ?? 0)
-      const rightConfidence = Number((right as { confidence?: number }).confidence ?? 0)
-      if (leftConfidence !== rightConfidence) {
-        return rightConfidence - leftConfidence
-      }
-      return String((left as { code?: string }).code || '').localeCompare(String((right as { code?: string }).code || ''))
-    })
+    const { expandedTerms, preferredPrefixes } = getSynonymProfile(normalizedQuery)
+    const chapter99Intent = hasChapter99Intent(normalizedQuery)
+    const normalizedQueryUpper = normalizedQuery.toUpperCase()
+    const compactQuery = normalizedQueryUpper.replace(/[^0-9A-Z]/g, '')
+
+    // Official-site results get a +20 authority bonus, official-cache +10, local-catalog +0.
+    // This keeps authority preference intact while letting the synonym/chapter-99 scoring
+    // override when the relevance delta is large enough (e.g. chapter-99 de-boost of -90).
+    const authorityBonus = (rank: number): number => (rank === 1 ? 20 : rank === 2 ? 10 : 0)
+
+    const rankedResults = Array.from(mergedByCode.values())
+      .map((item) => {
+        const itemAny = item as { code?: string; description?: string; category?: string; authorityRank?: number }
+        const row = { code: itemAny.code ?? '', description: itemAny.description ?? '', category: itemAny.category ?? '' }
+        const baseScore = scoreHsSearchResult(row, normalizedQueryUpper, compactQuery, expandedTerms, preferredPrefixes, chapter99Intent)
+        const effectiveScore = baseScore + authorityBonus(Number(itemAny.authorityRank ?? 99))
+        return { item, effectiveScore }
+      })
+      .sort((a, b) => {
+        if (b.effectiveScore !== a.effectiveScore) {
+          return b.effectiveScore - a.effectiveScore
+        }
+        return String((a.item as { code?: string }).code || '').localeCompare(String((b.item as { code?: string }).code || ''))
+      })
+      .map(({ item }) => item)
 
     if (rankedResults.length > 0) {
       return response.json({

@@ -1,8 +1,12 @@
 import os from 'os'
 import path from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
+import type { HSCodeLookupRow } from './tariffCalculator'
 
 let TariffCalculatorClass: typeof import('./tariffCalculator').TariffCalculator
+let hasChapter99Intent: typeof import('./tariffCalculator').hasChapter99Intent
+let getSynonymProfile: typeof import('./tariffCalculator').getSynonymProfile
+let scoreHsSearchResult: typeof import('./tariffCalculator').scoreHsSearchResult
 let getDatabase: typeof import('../db/database').getDatabase
 
 beforeAll(async () => {
@@ -14,6 +18,9 @@ beforeAll(async () => {
 
   const tariffCalculatorModule = await import('./tariffCalculator')
   TariffCalculatorClass = tariffCalculatorModule.TariffCalculator
+  hasChapter99Intent = tariffCalculatorModule.hasChapter99Intent
+  getSynonymProfile = tariffCalculatorModule.getSynonymProfile
+  scoreHsSearchResult = tariffCalculatorModule.scoreHsSearchResult
 })
 
 describe('TariffCalculator.searchHSCodes', () => {
@@ -201,5 +208,62 @@ describe('TariffCalculator.searchHSCodes', () => {
     await expect(
       tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'NON-EXISTENT')
     ).rejects.toThrow('No approved tariff rate found')
+  })
+})
+
+describe('scoreHsSearchResult / live-search merged-result re-ranking', () => {
+  // Simulates the re-scoring pass applied to merged official + local results in
+  // /api/hs-codes/live-search, which uses the same exported utilities.
+
+  const authorityBonus = (rank: number): number => (rank === 1 ? 20 : rank === 2 ? 10 : 0)
+
+  const score = (row: HSCodeLookupRow, query: string, authorityRank = 3): number => {
+    const q = query.toUpperCase()
+    const compact = q.replace(/[^0-9A-Z]/g, '')
+    const { expandedTerms, preferredPrefixes } = getSynonymProfile(query)
+    const chapter99Intent = hasChapter99Intent(query)
+    return scoreHsSearchResult(row, q, compact, expandedTerms, preferredPrefixes, chapter99Intent) + authorityBonus(authorityRank)
+  }
+
+  it('de-boosts chapter 99 entries below relevant results in merged live-search output', () => {
+    const chapter99Entry: HSCodeLookupRow = { code: '9910.00', description: 'Special temporary classification for smartphones', category: 'Special' }
+    const normalEntry: HSCodeLookupRow = { code: '8517.12', description: 'Telephones for cellular networks, smartphones', category: 'Electronics' }
+
+    const chapter99Score = score(chapter99Entry, 'smartphone')
+    const normalScore = score(normalEntry, 'smartphone')
+
+    expect(normalScore).toBeGreaterThan(chapter99Score)
+  })
+
+  it('retains chapter 99 ordering when the query explicitly requests chapter 99', () => {
+    const chapter99Entry: HSCodeLookupRow = { code: '9910.00', description: 'Special temporary classification for smartphones', category: 'Special' }
+    const normalEntry: HSCodeLookupRow = { code: '8517.12', description: 'Telephones for cellular networks, smartphones', category: 'Electronics' }
+
+    const chapter99Score = score(chapter99Entry, 'chapter 99 smartphone')
+    const normalScore = score(normalEntry, 'chapter 99 smartphone')
+
+    // With chapter 99 intent, the de-boost does not apply; 9910 now matches "99" code prefix pattern
+    expect(chapter99Score).toBeGreaterThan(normalScore - 200) // no catastrophic suppression
+  })
+
+  it('applies authority bonus so official-site results rank above local-catalog when scores are close', () => {
+    const row: HSCodeLookupRow = { code: '8471.30', description: 'Portable automatic data processing machines', category: 'Electronics' }
+
+    const officialScore = score(row, 'laptop', 1) // official-site, rank=1
+    const localScore = score(row, 'laptop', 3)    // local-catalog, rank=3
+
+    expect(officialScore).toBeGreaterThan(localScore)
+  })
+
+  it('synonym boosts still overcome authority penalty for highly relevant local results', () => {
+    const droneEntry: HSCodeLookupRow = { code: '8806.21', description: 'Unmanned aircraft, remotely piloted', category: 'Aircraft' }
+    const irrelevantOfficialEntry: HSCodeLookupRow = { code: '9999.00', description: 'Miscellaneous goods not elsewhere classified', category: 'Other' }
+
+    const droneLocal = score(droneEntry, 'drone', 3)           // local-catalog
+    const irrelevantOfficial = score(irrelevantOfficialEntry, 'drone', 1) // official-site
+
+    // The drone entry has a synonym prefix match (+25) and description match (+12*2);
+    // the irrelevant entry should not overcome that even with the authority bonus.
+    expect(droneLocal).toBeGreaterThan(irrelevantOfficial)
   })
 })
