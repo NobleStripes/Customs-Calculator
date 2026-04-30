@@ -225,8 +225,24 @@ export const Settings: React.FC = () => {
         <section className="settings-card">
           <h2>Exchange Rate Cache</h2>
 
+          <div className="settings-field settings-field--checkbox">
+            <label>
+              <input
+                type="checkbox"
+                checked={localSettings.fxPreferBocRate ?? true}
+                onChange={(e) => setLocalSettings((prev) => ({ ...prev, fxPreferBocRate: e.target.checked }))}
+              />
+              <span>Use BOC Weekly Exchange Rate (recommended for compliance)</span>
+            </label>
+            <p className="settings-hint">
+              When enabled, the Bureau of Customs weekly published rate is used as the primary FX source for
+              PHP conversion (cached for 7 days). Falls back to live market rates if the BOC page is unavailable.
+              Required for formal entry declarations per BOC regulations.
+            </p>
+          </div>
+
           <div className="settings-field">
-            <label htmlFor="fx-ttl">FX Cache TTL</label>
+            <label htmlFor="fx-ttl">Market FX Cache TTL (fallback rates)</label>
             <select
               id="fx-ttl"
               value={localSettings.fxCacheTtlHours}
@@ -236,7 +252,7 @@ export const Settings: React.FC = () => {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <p className="settings-hint">How long cached exchange rates are considered fresh. Longer TTL reduces external API calls.</p>
+            <p className="settings-hint">How long cached market exchange rates are considered fresh when BOC rate is unavailable. Longer TTL reduces external API calls.</p>
           </div>
         </section>
 

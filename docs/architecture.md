@@ -6,59 +6,118 @@ This document covers the runtime structure, service boundaries, storage model, a
 
 Customs-Calculator runs as a browser-first application with a small Express backend.
 
-- `src/renderer/` contains the React single-page app used by operators for calculator, batch, and tariff-browser workflows.
+- `src/renderer/` contains the React single-page app used by operators for calculator, batch, tariff-browser, admin, and settings workflows.
 - `src/renderer/lib/appApi.ts` is the browser-facing application API. It handles search, calculations, export, import previews, and remote-first calls to the Express backend.
 - `src/server/` contains the Express server that serves health endpoints, calculation/import endpoints, approved website fetch proxy routes, and the built frontend in production.
-- `src/backend/` contains shared Node-side services for tariff lookup, compliance checks, currency conversion, document generation, ingestion, and SQLite access.
+- `src/backend/` contains Node-side services for tariff lookup, compliance checks, currency conversion, document generation, import classification, excise/customs rules, ingestion, and SQLite access.
+- `src/shared/` contains shared query normalization and helper logic used across runtime boundaries.
 
 ## Project Structure
 
 ```text
 customs-calculator/
-├── src/
-│   ├── renderer/                  # React frontend
-│   │   ├── App.tsx                # Main app component
-│   │   ├── index.tsx              # React entry point
-│   │   ├── index.css              # Global styles
-│   │   ├── App.css                # App layout styles
-│   │   ├── lib/
-│   │   │   ├── appApi.ts          # Browser-native app API and local fallbacks
-│   │   │   └── settingsStore.ts   # Zustand store for user preferences (localStorage)
-│   │   ├── pages/
-│   │   │   ├── Calculator.tsx
-│   │   │   ├── BatchImport.tsx
-│   │   │   ├── TariffBrowser.tsx
-│   │   │   ├── Admin.tsx          # Review queue, import jobs, and rate change audit
-│   │   │   └── Settings.tsx       # App preferences (schedule, FX TTL, auto-fetcher)
-│   │   └── components/
-│   │       ├── Sidebar.tsx
-│   │       ├── HSCodeSearch.tsx
-│   │       └── CalculationResults.tsx
-│   ├── backend/
-│   │   ├── db/
-│   │   │   └── database.ts        # SQLite setup, migrations, seed sync, duplicate cleanup
-│   │   └── services/
-│   │       ├── tariffCalculator.ts
-│   │       ├── officialHsLookup.ts # Tariff Commission Finder live HS lookup + cache
-│   │       ├── complianceChecker.ts
-│   │       ├── currencyConverter.ts
-│   │       ├── documentGenerator.ts
-│   │       ├── tariffDataIngestion.ts
-│   │       ├── autoFetcher.ts     # Cron-based regulatory data fetcher and ingestor
-│   │       ├── websiteFetcher.ts  # Allowlisted HTTP fetcher for regulatory sources
-│   │       └── tariffHtmlParser.ts # HTML table extraction for BOC/Tariff Commission fallback imports
-│   ├── server/
-│   │   └── index.ts               # Express API and static hosting
-│   └── types/
+├── .eslintrc
+├── .prettierrc
+├── .gitignore
+├── CHANGELOG.md
+├── LICENSE
+├── README.md
 ├── docs/
 │   ├── architecture.md
 │   ├── calculation-logic.md
-│   └── development-guide.md
+│   ├── development-guide.md
+│   └── changelog/
+│       ├── v0.1.0.md
+│       ├── v0.2.0.md
+│       ├── v0.3.0.md
+│       ├── v0.4.0.md
+│       ├── v0.4.1.md
+│       └── v0.5.0.md
 ├── index.html
+├── package-lock.json
 ├── package.json
+├── src/
+│   ├── backend/
+│   │   ├── db/
+│   │   │   └── database.ts
+│   │   ├── services/
+│   │   │   ├── autoFetcher.ts
+│   │   │   ├── complianceChecker.ts
+│   │   │   ├── complianceChecker.test.ts
+│   │   │   ├── currencyConverter.ts
+│   │   │   ├── currencyConverter.test.ts
+│   │   │   ├── customsRules.ts
+│   │   │   ├── customsRules.test.ts
+│   │   │   ├── documentGenerator.ts
+│   │   │   ├── exciseTax.ts
+│   │   │   ├── exciseTax.test.ts
+│   │   │   ├── importClassification.ts
+│   │   │   ├── importClassification.test.ts
+│   │   │   ├── officialHsLookup.ts
+│   │   │   ├── officialHsLookup.test.ts
+│   │   │   ├── reviewWorkflow.test.ts
+│   │   │   ├── runtimeSettings.ts
+│   │   │   ├── runtimeSettings.test.ts
+│   │   │   ├── sourceAdapters.ts
+│   │   │   ├── tariffCalculator.ts
+│   │   │   ├── tariffCalculator.test.ts
+│   │   │   ├── tariffDataIngestion.ts
+│   │   │   ├── tariffDataIngestion.test.ts
+│   │   │   ├── tariffHtmlParser.ts
+│   │   │   ├── tariffHtmlParser.test.ts
+│   │   │   ├── websiteFetcher.ts
+│   │   │   ├── websiteFetcher.test.ts
+│   │   │   └── fixtures/
+│   │   │       ├── boc-memoranda.fixture.html
+│   │   │       └── tariff-commission-search.fixture.html
+│   │   └── types/
+│   │       └── pdfkit.d.ts
+│   ├── main/                       # Currently empty (reserved runtime folder)
+│   ├── renderer/
+│   │   ├── App.css
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   ├── index.tsx
+│   │   ├── vite-env.d.ts
+│   │   ├── components/
+│   │   │   ├── CalculationResults.css
+│   │   │   ├── CalculationResults.tsx
+│   │   │   ├── HSCodeSearch.css
+│   │   │   ├── HSCodeSearch.tsx
+│   │   │   ├── Sidebar.css
+│   │   │   └── Sidebar.tsx
+│   │   ├── lib/
+│   │   │   ├── appApi.ts
+│   │   │   ├── appApi.test.ts
+│   │   │   ├── batchImportCsv.ts
+│   │   │   ├── batchImportCsv.test.ts
+│   │   │   ├── settingsStore.ts
+│   │   │   └── settingsStore.test.ts
+│   │   └── pages/
+│   │       ├── Admin.css
+│   │       ├── Admin.tsx
+│   │       ├── BatchImport.css
+│   │       ├── BatchImport.tsx
+│   │       ├── Calculator.css
+│   │       ├── Calculator.tsx
+│   │       ├── Settings.css
+│   │       ├── Settings.tsx
+│   │       ├── TariffBrowser.css
+│   │       └── TariffBrowser.tsx
+│   ├── server/
+│   │   └── index.ts
+│   ├── shared/
+│   │   ├── hsLookupQuery.ts
+│   │   └── hsLookupQuery.test.ts
+│   └── types/                      # Currently empty
+├── tmp-memo-pages/
+├── tmp-mistg-memo.pdf
+├── tmp-mistg-memo.txt
 ├── tsconfig.json
+├── tsconfig.node.json
+├── tsconfig.node.tsbuildinfo
 ├── vite.config.ts
-└── README.md
+└── (Generated/ignored folders omitted: .git, .venv, .vscode, node_modules, dist)
 ```
 
 ## Data Model
@@ -238,8 +297,9 @@ CREATE TABLE rate_change_audit (
 ### `CurrencyConverter`
 
 - `convert(amount, fromCurrency, toCurrency)` converts currencies and tracks whether the source was identity, cache, live, or fallback.
+- Prefers BOC weekly customs rates for PHP conversion paths when `fxPreferBocRate` is enabled.
+- Falls back to live market API, then cached market rates, then hardcoded fallback rates.
 - Cached rates are persisted in SQLite when available.
-- Fallback rates remain available when live conversion is unavailable.
 
 ### `TariffDataIngestionService`
 
@@ -290,6 +350,7 @@ Stub module (`tariffHtmlParser.ts`) for extracting `TariffImportRow` arrays from
 | `defaultOriginCountry` | `string` | `''` | Pre-populated origin country in the calculator |
 | `autoFetcherEnabled` | `boolean` | `true` | Whether the server-side auto-fetcher cron is active |
 | `fxCacheTtlHours` | `number` | `24` | How long cached exchange rates are considered fresh |
+| `fxPreferBocRate` | `boolean` | `true` | Prefer BOC weekly customs exchange rate when available |
 
 ## Browser App API
 
@@ -369,7 +430,29 @@ The Express server in `src/server/index.ts` exposes a same-origin API for the br
 
 ### Calculator (`Calculator.tsx`)
 
-Single-item duty and VAT calculator. Inputs include HS code, tariff schedule, FOB value, currency, freight, insurance, origin country, destination port, declaration type, and container size. Outputs include full cost breakdown with arrastre/wharfage, brokerage fee, IPC, CSF, CDS, IRS, VAT, and total landed cost.
+Single-item duty, VAT, and excise calculator with legal-status and logistics overlays.
+
+Inputs include:
+
+- HS code and tariff schedule
+- FOB value, freight, insurance, and input currency
+- Origin country and destination port
+- Declaration type and container size
+- Date of arrival and storage delay days
+- Item condition and importer status (`standard`, `balikbayan`, `returning_resident`, `ofw`)
+- Status-specific fields (months abroad, balikbayan boxes, OFW appliance privilege flags)
+- Arrastre/Wharfage manual input (optional override) and Dox Stamp & Others
+- Excise category/quantity/basis details when applicable
+
+Outputs include:
+
+- Duty, surcharge, VAT, and excise breakdown
+- Full fee stack (brokerage, IPC/IPF, CSF, CDS, IRS/DST, LRF)
+- Port and handling estimate (arrastre, wharfage, storage)
+- Section 800 exemption result
+- Valuation reference risk indicator
+- Import classification panel and EO 114 advisory notice when conditions are met
+- Final landed cost in PHP with FX source metadata
 
 The calculator’s HS code field now uses remote-first live suggestions from Tariff Commission Finder through the backend, surfaces whether results are live, cached, or local fallback, and still validates final calculation against approved local tariff data.
 
@@ -410,6 +493,25 @@ The auto-fetcher (`autoFetcher.ts`) runs a daily cron job at `0 2 * * *`:
 4. If no data files are found: calls `TariffDataIngestionService.parseHtmlTables` on the raw HTML as a fallback extraction method.
 
 The pipeline is gated by the `autoFetcherEnabled` setting from `settingsStore`.
+
+## Batch Calculation Contract
+
+`POST /api/calculate/batch` is the authoritative landed-cost endpoint and returns one result row per shipment.
+
+### Request fields (major)
+
+- Core: `hsCode`, `scheduleCode`, `value`, `freight`, `insurance`, `originCountry`, `destinationPort`, `currency`
+- Logistics: `declarationType`, `containerSize`, `arrivalDate`, `storageDelayDays`, `arrastreWharfage`, `doxStampOthers`
+- Status/exemption: `itemCondition`, `importerStatus`, `monthsAbroad`, `balikbayanBoxesThisYear`, `isCommercialQuantity`, `ofwHomeApplianceClaim`, `ofwHomeApplianceAlreadyAvailedThisYear`
+- Excise: `exciseCategory`, `exciseQuantity`, `exciseUnit`, `exciseNrp`, `sweetenedBeverageSugarType`, `petroleumProductType`
+
+### Response fields (major)
+
+- Core totals: `duty`, `exciseTax`, `vat`, `landedCostSubtotal`, `totalLandedCost`, `breakdown`
+- Entry state: `deMinimisExempt`, `deMinimisReason`, `entryType`, `insuranceBenchmarkApplied`
+- Classification/compliance: `importClassification`, `compliance`
+- New overlays: `section800Exemption`, `valuationReferenceRisk`, `portHandlingFees`, `energyEmergencyNotice`
+- FX trace: `fx` (`applied`, `rateToPhp`, `inputCurrency`, `source`, `timestamp`)
 
 ## Deployment and Local Runtime
 

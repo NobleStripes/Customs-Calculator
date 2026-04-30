@@ -26,6 +26,7 @@ describe('runtimeSettings', () => {
       defaultOriginCountry: 'PHL',
       autoFetcherEnabled: false,
       fxCacheTtlHours: 168,
+      fxPreferBocRate: true,
       calculatorMode: 'estimate',
       catalogMode: 'official-catalog-required',
       stagedCutoverEnabled: true,

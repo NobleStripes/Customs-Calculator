@@ -12,6 +12,8 @@ export interface RuntimeSettings {
   stagedCutoverEnabled: boolean
   cutoverCoverageThreshold: number
   fullSyncIdempotencyGuardEnabled: boolean
+  /** Use BOC weekly published exchange rate as primary FX source (falls back to live market rate). Default true. */
+  fxPreferBocRate: boolean
 }
 
 const SETTINGS_FILE_NAME = 'runtime-settings.json'
@@ -26,6 +28,7 @@ const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
   stagedCutoverEnabled: false,
   cutoverCoverageThreshold: 99,
   fullSyncIdempotencyGuardEnabled: true,
+  fxPreferBocRate: true,
 }
 
 const settingsFilePath = (): string => {
@@ -70,6 +73,9 @@ const sanitizeSettings = (raw: Partial<RuntimeSettings> | null | undefined): Run
     fullSyncIdempotencyGuardEnabled: typeof raw?.fullSyncIdempotencyGuardEnabled === 'boolean'
       ? raw.fullSyncIdempotencyGuardEnabled
       : DEFAULT_RUNTIME_SETTINGS.fullSyncIdempotencyGuardEnabled,
+    fxPreferBocRate: typeof raw?.fxPreferBocRate === 'boolean'
+      ? raw.fxPreferBocRate
+      : DEFAULT_RUNTIME_SETTINGS.fxPreferBocRate,
   }
 }
 

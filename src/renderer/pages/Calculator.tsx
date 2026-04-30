@@ -15,9 +15,31 @@ interface CalculationPayload {
   destinationPort: string
   currency: string
   containerSize: 'none' | '20ft' | '40ft'
+  arrivalDate: string
+  storageDelayDays: number
+  itemCondition: 'new' | 'used'
+  importerStatus: 'standard' | 'balikbayan' | 'returning_resident' | 'ofw'
+  monthsAbroad?: number
+  balikbayanBoxesThisYear?: number
+  isCommercialQuantity?: boolean
+  ofwHomeApplianceClaim?: boolean
+  ofwHomeApplianceAlreadyAvailedThisYear?: boolean
+  antiDumpingDutyRate?: number
+  countervailingDutyRate?: number
+  safeguardDutyRate?: number
+  assessedCustomsValue?: number
+  misclassificationDetected?: boolean
+  clericalError?: boolean
+  latePaymentDays?: number
   arrastreWharfage: number
   doxStampOthers: number
   declarationType: 'consumption' | 'warehousing' | 'transit'
+  exciseCategory?: string
+  exciseQuantity?: number
+  exciseUnit?: string
+  exciseNrp?: number
+  sweetenedBeverageSugarType?: string
+  petroleumProductType?: string
 }
 
 interface CalculationResultsData {
@@ -53,6 +75,7 @@ interface CalculationResultsData {
   breakdown: {
     itemTaxes: {
       cud: number
+      excise: number
       vat: number
       totalItemTax: number
     }
@@ -62,9 +85,77 @@ interface CalculationResultsData {
       csf: number
       cds: number
       irs: number
+      lrf: number
       totalGlobalTax: number
     }
     totalTaxAndFees: number
+  }
+  exciseTax: {
+    amount: number
+    adValorem: number
+    specific: number
+    category: string
+    basis: string
+    notes: string
+  }
+  landedCostSubtotal: number
+  deMinimisExempt: boolean
+  deMinimisReason?: string
+  entryType: 'de_minimis' | 'informal' | 'formal'
+  insuranceBenchmarkApplied: boolean
+  tradeRemedies?: {
+    antiDumping: number
+    countervailing: number
+    safeguard: number
+    total: number
+  }
+  penalties?: {
+    undervaluationSurcharge: number
+    misclassificationSurcharge: number
+    latePaymentInterest: number
+    totalPenalties: number
+    notes: string[]
+  }
+  totalPayable?: number
+  section800Exemption?: {
+    eligible: boolean
+    exemptionType: 'none' | 'balikbayan' | 'returning_resident' | 'ofw'
+    exemptAmountPhp: number
+    reason: string
+    warnings: string[]
+  }
+  valuationReferenceRisk?: {
+    flagged: boolean
+    level: 'low' | 'medium' | 'high'
+    declaredValuePhp: number
+    indicativeMinimumPhp?: number
+    referenceLabel?: string
+    notes: string[]
+  }
+  portHandlingFees?: {
+    arrivalDateApplied: string
+    tariffTranche: 'pre-2026' | '2026-h1' | '2026-h2'
+    arrastre: number
+    wharfage: number
+    storage: number
+    freeStorageDays: number
+    chargeableStorageDays: number
+    totalPortHandling: number
+    notes: string[]
+  }
+  energyEmergencyNotice?: string
+  importClassification?: {
+    importType: 'free' | 'regulated' | 'restricted' | 'prohibited'
+    agencies: string[]
+    agencyFullNames: string[]
+    notes: string
+    isStrategicTradeGood: boolean
+    strategicTradeNotes?: string
+    isVatExempt: boolean
+    vatExemptBasis?: string
+    requiresCertificateOfOrigin: boolean
+    certificateOfOriginForm?: string
+    warnings: string[]
   }
   totalLandedCost: number
   calculationCurrency: 'PHP'
@@ -73,7 +164,7 @@ interface CalculationResultsData {
     rateToPhp: number
     inputCurrency: string
     baseCurrency: 'PHP'
-    source?: 'cache' | 'live' | 'fallback' | 'identity'
+    source?: 'cache' | 'live' | 'fallback' | 'identity' | 'boc'
     timestamp?: string
   }
 }
@@ -104,6 +195,44 @@ const formatCurrency = (amount: number, currency = 'PHP') =>
     maximumFractionDigits: 2,
   }).format(amount)
 
+/** Detect excise category client-side for showing the excise input section. Mirrors server-side logic. */
+function detectExciseCategory(hsCode: string): string | null {
+  const compact = hsCode.replace(/\./g, '').replace(/\s/g, '')
+  if (compact.length < 4) return null
+  const chapter = parseInt(compact.slice(0, 2), 10)
+  if (chapter === 22) {
+    const heading = parseInt(compact.slice(0, 4), 10)
+    if (heading === 2208) return 'distilled_spirits'
+    if (heading === 2203) return 'fermented_liquors'
+    if (heading >= 2204 && heading <= 2206) return 'wines'
+    if (heading === 2202) return 'sweetened_beverages'
+    return null
+  }
+  if (chapter === 24) {
+    const heading = parseInt(compact.slice(0, 4), 10)
+    return heading === 2402 ? 'cigars' : 'cigarettes'
+  }
+  if (chapter === 27) return 'petroleum'
+  if (chapter === 87) {
+    const heading = parseInt(compact.slice(0, 4), 10)
+    if (heading >= 8703 && heading <= 8704) return 'automobiles'
+  }
+  return null
+}
+
+const EXCISE_UNIT_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  distilled_spirits: [{ value: 'proof_liter', label: 'Proof Liter' }, { value: 'liter', label: 'Liter' }],
+  fermented_liquors: [{ value: 'liter', label: 'Liter' }],
+  wines: [{ value: 'liter', label: 'Liter' }],
+  cigarettes: [{ value: 'pack_20s', label: 'Pack of 20' }],
+  cigars: [{ value: 'unit', label: 'Unit (stick)' }],
+  automobiles: [{ value: 'unit', label: 'Unit (vehicle)' }],
+  sweetened_beverages: [{ value: 'liter', label: 'Liter' }],
+  petroleum: [{ value: 'liter', label: 'Liter' }],
+}
+
+const EXCISE_NEEDS_NRP = new Set(['distilled_spirits', 'wines', 'cigars', 'automobiles'])
+
 export const Calculator: React.FC = () => {
   const settings = useSettingsStore((state) => state.settings)
   const [formData, setFormData] = useState<CalculationPayload>(() => ({
@@ -116,10 +245,34 @@ export const Calculator: React.FC = () => {
     destinationPort: 'MNL',
     currency: 'USD',
     containerSize: '20ft',
+    arrivalDate: new Date().toISOString().slice(0, 10),
+    storageDelayDays: 0,
+    itemCondition: 'new',
+    importerStatus: 'standard',
+    monthsAbroad: undefined,
+    balikbayanBoxesThisYear: 1,
+    isCommercialQuantity: false,
+    ofwHomeApplianceClaim: false,
+    ofwHomeApplianceAlreadyAvailedThisYear: false,
+    antiDumpingDutyRate: 0,
+    countervailingDutyRate: 0,
+    safeguardDutyRate: 0,
+    assessedCustomsValue: undefined,
+    misclassificationDetected: false,
+    clericalError: false,
+    latePaymentDays: 0,
     arrastreWharfage: 0,
     doxStampOthers: 0,
     declarationType: 'consumption',
+    exciseCategory: undefined,
+    exciseQuantity: undefined,
+    exciseUnit: undefined,
+    exciseNrp: undefined,
+    sweetenedBeverageSugarType: undefined,
+    petroleumProductType: undefined,
   }))
+
+  const [detectedExciseCategory, setDetectedExciseCategory] = useState<string | null>(null)
 
   const [results, setResults] = useState<CalculationResultsData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -265,7 +418,14 @@ export const Calculator: React.FC = () => {
   const handleHSCodeSelect = (code: string, selection?: AppHsCodeRow) => {
     setHsCodeValidationMessage(null)
     setSelectedLookupRow(selection || null)
-    setFormData((prev) => ({ ...prev, hsCode: code }))
+    const detectedCat = detectExciseCategory(code)
+    setDetectedExciseCategory(detectedCat)
+    setFormData((prev) => ({
+      ...prev,
+      hsCode: code,
+      exciseCategory: detectedCat ?? undefined,
+      exciseUnit: detectedCat ? (EXCISE_UNIT_OPTIONS[detectedCat]?.[0]?.value ?? undefined) : undefined,
+    }))
   }
 
   const handleCalculate = async () => {
@@ -309,8 +469,30 @@ export const Calculator: React.FC = () => {
         currency: formData.currency,
         declarationType: formData.declarationType,
         containerSize: formData.containerSize,
+        arrivalDate: formData.arrivalDate,
+        storageDelayDays: formData.storageDelayDays,
+        itemCondition: formData.itemCondition,
+        importerStatus: formData.importerStatus,
+        monthsAbroad: formData.monthsAbroad,
+        balikbayanBoxesThisYear: formData.balikbayanBoxesThisYear,
+        isCommercialQuantity: formData.isCommercialQuantity,
+        ofwHomeApplianceClaim: formData.ofwHomeApplianceClaim,
+        ofwHomeApplianceAlreadyAvailedThisYear: formData.ofwHomeApplianceAlreadyAvailedThisYear,
+        antiDumpingDutyRate: formData.antiDumpingDutyRate,
+        countervailingDutyRate: formData.countervailingDutyRate,
+        safeguardDutyRate: formData.safeguardDutyRate,
+        assessedCustomsValue: formData.assessedCustomsValue,
+        misclassificationDetected: formData.misclassificationDetected,
+        clericalError: formData.clericalError,
+        latePaymentDays: formData.latePaymentDays,
         arrastreWharfage: formData.arrastreWharfage,
         doxStampOthers: formData.doxStampOthers,
+        exciseCategory: formData.exciseCategory,
+        exciseQuantity: formData.exciseQuantity,
+        exciseUnit: formData.exciseUnit,
+        exciseNrp: formData.exciseNrp,
+        sweetenedBeverageSugarType: formData.sweetenedBeverageSugarType,
+        petroleumProductType: formData.petroleumProductType,
       }])
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -336,6 +518,20 @@ export const Calculator: React.FC = () => {
           vatBase: r.costBase.vatBase,
         },
         breakdown: r.breakdown,
+        exciseTax: r.exciseTax ?? { amount: 0, adValorem: 0, specific: 0, category: 'none', basis: '', notes: '' },
+        landedCostSubtotal: r.landedCostSubtotal ?? r.totalLandedCost,
+        deMinimisExempt: r.deMinimisExempt ?? false,
+        deMinimisReason: r.deMinimisReason,
+        entryType: r.entryType ?? 'informal',
+        insuranceBenchmarkApplied: r.insuranceBenchmarkApplied ?? false,
+        tradeRemedies: r.tradeRemedies,
+        penalties: r.penalties,
+        totalPayable: r.totalPayable,
+        section800Exemption: r.section800Exemption,
+        valuationReferenceRisk: r.valuationReferenceRisk,
+        portHandlingFees: r.portHandlingFees,
+        energyEmergencyNotice: r.energyEmergencyNotice,
+        importClassification: r.importClassification,
         totalLandedCost: r.totalLandedCost,
         calculationCurrency: 'PHP',
         fx: r.fx,
@@ -474,8 +670,201 @@ export const Calculator: React.FC = () => {
                   }
                   placeholder="0.00"
                 />
+                {formData.insurance === 0 && (
+                  <div className="field-help-text">Auto 2% benchmark will be applied if left at 0.</div>
+                )}
               </div>
             </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="arrival-date">Date of Arrival</label>
+                <input
+                  id="arrival-date"
+                  type="date"
+                  value={formData.arrivalDate}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      arrivalDate: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="storage-delay-days">Storage Delay Days</label>
+                <input
+                  id="storage-delay-days"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.storageDelayDays}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      storageDelayDays: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                    }))
+                  }
+                />
+                <div className="field-help-text">Storage fee estimate starts after 5 free days.</div>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="item-condition">Item Condition</label>
+                <select
+                  id="item-condition"
+                  value={formData.itemCondition}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      itemCondition: e.target.value as 'new' | 'used',
+                    }))
+                  }
+                >
+                  <option value="new">New</option>
+                  <option value="used">Used</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="importer-status">Importer Status</label>
+                <select
+                  id="importer-status"
+                  value={formData.importerStatus}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      importerStatus: e.target.value as CalculationPayload['importerStatus'],
+                    }))
+                  }
+                >
+                  <option value="standard">Standard Importer</option>
+                  <option value="balikbayan">Balikbayan</option>
+                  <option value="returning_resident">Returning Resident</option>
+                  <option value="ofw">OFW</option>
+                </select>
+              </div>
+            </div>
+
+            {formData.importerStatus === 'returning_resident' && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="months-abroad">Months Stayed Abroad</label>
+                  <input
+                    id="months-abroad"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.monthsAbroad ?? 0}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        monthsAbroad: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {formData.importerStatus === 'balikbayan' && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="balikbayan-boxes">Boxes This Year</label>
+                  <input
+                    id="balikbayan-boxes"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={formData.balikbayanBoxesThisYear ?? 1}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        balikbayanBoxesThisYear: Math.max(1, Math.floor(Number(e.target.value) || 1)),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.isCommercialQuantity)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          isCommercialQuantity: e.target.checked,
+                        }))
+                      }
+                    />
+                    Commercial Quantity
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {formData.importerStatus === 'ofw' && (
+              <div className="form-row">
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.ofwHomeApplianceClaim)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          ofwHomeApplianceClaim: e.target.checked,
+                        }))
+                      }
+                    />
+                    Claim OFW Home Appliance Privilege
+                  </label>
+                </div>
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.ofwHomeApplianceAlreadyAvailedThisYear)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          ofwHomeApplianceAlreadyAvailedThisYear: e.target.checked,
+                        }))
+                      }
+                    />
+                    Already Availed This Year
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* De minimis & entry type badges */}
+            {(() => {
+              const fxRate = fxPreview?.rateToPhp ?? (formData.currency.toUpperCase() === 'PHP' ? 1 : 56)
+              const fobPhp = formData.value * fxRate
+              const isDeMinimis = fobPhp > 0 && fobPhp <= 10000
+              const freightPhp = formData.freight * fxRate
+              const insurancePhp = formData.insurance > 0 ? formData.insurance * fxRate : formData.value * fxRate * 0.02
+              const dutiableValuePhp = fobPhp + freightPhp + insurancePhp
+              const isFormal = dutiableValuePhp > 50000
+              return (
+                <>
+                  {isDeMinimis && (
+                    <div className="badge badge-success">
+                      De Minimis — FOB ≤ ₱10,000. No duties or taxes assessed (unless alcohol/tobacco).
+                    </div>
+                  )}
+                  {!isDeMinimis && fobPhp > 0 && (
+                    <div className={`badge ${isFormal ? 'badge-warning' : 'badge-info'}`}>
+                      {isFormal ? 'Formal Entry' : 'Informal Entry'} — Dutiable Value ≈ {formatCurrency(dutiableValuePhp)}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
 
             <div className="form-row">
               <div className="form-group">
@@ -497,6 +886,11 @@ export const Calculator: React.FC = () => {
                   ))}
                 </select>
                 <div className="field-help-text">Schedule options now include the seeded FTA agreements, while imported tariff data still controls which rates are available under each code.</div>
+                {formData.scheduleCode && formData.scheduleCode !== 'MFN' && (
+                  <div className="coo-hint">
+                    <strong>Certificate of Origin required</strong> — The <em>{formData.scheduleCode}</em> preferential rate requires a valid CoO issued by the exporting country. Goods without a CoO will be assessed at MFN rate.
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -612,6 +1006,245 @@ export const Calculator: React.FC = () => {
                 />
               </div>
             </div>
+
+            <div className="form-section">
+              <h3>Trade Remedy Duties</h3>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="anti-dumping-rate">Anti-Dumping Duty Rate (%)</label>
+                  <input
+                    id="anti-dumping-rate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={(formData.antiDumpingDutyRate || 0) * 100}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        antiDumpingDutyRate: Math.max(0, (Number(e.target.value) || 0) / 100),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="countervailing-rate">Countervailing Duty Rate (%)</label>
+                  <input
+                    id="countervailing-rate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={(formData.countervailingDutyRate || 0) * 100}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        countervailingDutyRate: Math.max(0, (Number(e.target.value) || 0) / 100),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="safeguard-rate">Safeguard Duty Rate (%)</label>
+                  <input
+                    id="safeguard-rate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={(formData.safeguardDutyRate || 0) * 100}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        safeguardDutyRate: Math.max(0, (Number(e.target.value) || 0) / 100),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3>Surcharges and Penalties</h3>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="assessed-customs-value">Assessed Customs Value ({formData.currency})</label>
+                  <input
+                    id="assessed-customs-value"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.assessedCustomsValue ?? ''}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        assessedCustomsValue: e.target.value ? Number(e.target.value) : undefined,
+                      }))
+                    }
+                    placeholder="Optional: assessed value for deficiency check"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="late-payment-days">Late Payment Days</label>
+                  <input
+                    id="late-payment-days"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.latePaymentDays ?? 0}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        latePaymentDays: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.misclassificationDetected)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          misclassificationDetected: e.target.checked,
+                        }))
+                      }
+                    />
+                    Misclassification Detected
+                  </label>
+                </div>
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.clericalError)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          clericalError: e.target.checked,
+                        }))
+                      }
+                    />
+                    Clerical Error (waive misclassification surcharge)
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Excise tax section — shown when HS code maps to an excise category */}
+            {detectedExciseCategory && detectedExciseCategory !== 'none' && (
+              <div className="form-section excise-section">
+                <h3>Excise Tax Details</h3>
+                <p className="field-help-text">
+                  HS code maps to excise category: <strong>{detectedExciseCategory.replace(/_/g, ' ')}</strong>. Enter quantity to include excise in calculation.
+                </p>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="excise-quantity">Quantity</label>
+                    <input
+                      id="excise-quantity"
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={formData.exciseQuantity ?? ''}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          exciseQuantity: parseFloat(e.target.value) || undefined,
+                        }))
+                      }
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="excise-unit">Unit</label>
+                    <select
+                      id="excise-unit"
+                      value={formData.exciseUnit ?? ''}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, exciseUnit: e.target.value }))
+                      }
+                    >
+                      {(EXCISE_UNIT_OPTIONS[detectedExciseCategory] ?? []).map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {EXCISE_NEEDS_NRP.has(detectedExciseCategory) && (
+                  <div className="form-group">
+                    <label htmlFor="excise-nrp">
+                      {detectedExciseCategory === 'automobiles'
+                        ? 'Net Manufacturer Price (NMP) in input currency'
+                        : 'Net Retail Price (NRP) in input currency'}
+                    </label>
+                    <input
+                      id="excise-nrp"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={formData.exciseNrp ?? ''}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          exciseNrp: parseFloat(e.target.value) || undefined,
+                        }))
+                      }
+                      placeholder="0.00"
+                    />
+                  </div>
+                )}
+
+                {detectedExciseCategory === 'sweetened_beverages' && (
+                  <div className="form-group">
+                    <label htmlFor="sugar-type">Sugar Type</label>
+                    <select
+                      id="sugar-type"
+                      value={formData.sweetenedBeverageSugarType ?? 'sucrose_glucose'}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, sweetenedBeverageSugarType: e.target.value }))
+                      }
+                    >
+                      <option value="sucrose_glucose">Sucrose / Glucose / Other caloric sweeteners (₱6/L)</option>
+                      <option value="hfcs">High-Fructose Corn Syrup — HFCS (₱12/L)</option>
+                    </select>
+                  </div>
+                )}
+
+                {detectedExciseCategory === 'petroleum' && (
+                  <div className="form-group">
+                    <label htmlFor="petroleum-type">Petroleum Product</label>
+                    <select
+                      id="petroleum-type"
+                      value={formData.petroleumProductType ?? 'other'}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, petroleumProductType: e.target.value }))
+                      }
+                    >
+                      <option value="lubricating_oils">Lubricating Oils</option>
+                      <option value="processed_gas">Processed Gas</option>
+                      <option value="waxes_petrolatum">Waxes &amp; Petrolatum</option>
+                      <option value="denatured_alcohol">Denatured Alcohol</option>
+                      <option value="naphtha_gasoline">Naphtha / Unleaded Gasoline (₱10/L)</option>
+                      <option value="aviation_turbo">Aviation Turbo Jet Fuel (₱4/L)</option>
+                      <option value="kerosene">Kerosene (₱3/L)</option>
+                      <option value="diesel">Diesel Fuel (₱6/L)</option>
+                      <option value="liquefied_petroleum_gas">Liquefied Petroleum Gas (₱3/kg)</option>
+                      <option value="asphalts">Asphalts</option>
+                      <option value="bunker_fuel">Bunker Fuel Oil (₱2.50/L)</option>
+                      <option value="petroleum_coke">Petroleum Coke (₱2.50/kg)</option>
+                      <option value="other">Other Petroleum Products</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
 
             {error && <div className="error-message">{error}</div>}
 

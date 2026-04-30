@@ -97,6 +97,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.breakdown-row.subtotal-row {
+  font-weight: 600;
+  border-top: 1px dashed #a0aec0;
+  color: #2d3748;
+  font-style: italic;
+}
+
 .breakdown-row.total-row {
   font-weight: 700;
   border-top: 1px solid #95a5a6;
@@ -291,3 +298,180 @@
     font-size: 1.5rem;
   }
 }
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.badge-success { background: #d4edda; color: #155724; border-left: 3px solid #28a745; }
+.badge-info    { background: #d1ecf1; color: #0c5460; border-left: 3px solid #17a2b8; }
+.badge-warning { background: #fff3cd; color: #856404; border-left: 3px solid #ffc107; }
+
+/* De minimis exempt card */
+.result-card.de-minimis-card {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #d4edda 0%, #b2dfdb 100%);
+  border-left: 4px solid #28a745;
+  color: #155724;
+}
+
+.de-minimis-msg {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* Insurance benchmark note */
+.benchmark-note {
+  color: #856404;
+  font-style: italic;
+  margin-left: 4px;
+}
+
+/* ── Import Classification Panel ───────────────────────────────────── */
+
+.badge-danger { background: #f8d7da; color: #721c24; border-left: 3px solid #dc3545; }
+
+.import-class-panel {
+  background: #fff;
+  border: 1px solid #d6dde8;
+  border-left: 4px solid #264653;
+  border-radius: 6px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-class-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.import-class-header h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.import-class-notes {
+  font-size: 0.88rem;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.agency-list {
+  background: #f0f4ff;
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+}
+
+.agency-list strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #1e3a5f;
+}
+
+.agency-list ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.agency-list li {
+  padding: 3px 0;
+  color: #1f2937;
+}
+
+.agency-acronym {
+  font-weight: 700;
+  color: #264653;
+}
+
+.coo-alert {
+  background: #fff3cd;
+  border-left: 3px solid #ffc107;
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  color: #664d03;
+}
+
+.coo-alert strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.coo-alert p { margin: 0; }
+
+.strategic-trade-warning {
+  background: #f8d7da;
+  border-left: 3px solid #dc3545;
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  color: #491217;
+}
+
+.strategic-trade-warning strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.strategic-trade-warning p { margin: 0; }
+
+.vat-exempt-note {
+  background: #d4edda;
+  border-left: 3px solid #28a745;
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  color: #155724;
+}
+
+.section-800-card {
+  border-left: 4px solid #0d6efd;
+}
+
+.valuation-risk-card {
+  border-left: 4px solid #fd7e14;
+}
+
+.valuation-risk-card.high-risk {
+  border-left-color: #dc3545;
+  background: #fff5f5;
+}
+
+.valuation-risk-card.medium-risk {
+  background: #fffaf0;
+}
+
+.port-handling-card {
+  border-left: 4px solid #198754;
+}
+
+.energy-notice-card {
+  border-left: 4px solid #6f42c1;
+  background: #f8f2ff;
+}
+
+.detail-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.vat-exempt-note strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.vat-exempt-note p { margin: 0; }
