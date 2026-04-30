@@ -108,6 +108,23 @@
   line-height: 1.4;
 }
 
+.checkbox-group {
+  display: flex;
+  align-items: end;
+}
+
+.checkbox-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.checkbox-group input[type='checkbox'] {
+  width: auto;
+}
+
 .error-message {
   background-color: #f8d7da;
   color: #721c24;

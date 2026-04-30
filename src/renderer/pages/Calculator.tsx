@@ -15,6 +15,15 @@ interface CalculationPayload {
   destinationPort: string
   currency: string
   containerSize: 'none' | '20ft' | '40ft'
+  arrivalDate: string
+  storageDelayDays: number
+  itemCondition: 'new' | 'used'
+  importerStatus: 'standard' | 'balikbayan' | 'returning_resident' | 'ofw'
+  monthsAbroad?: number
+  balikbayanBoxesThisYear?: number
+  isCommercialQuantity?: boolean
+  ofwHomeApplianceClaim?: boolean
+  ofwHomeApplianceAlreadyAvailedThisYear?: boolean
   arrastreWharfage: number
   doxStampOthers: number
   declarationType: 'consumption' | 'warehousing' | 'transit'
@@ -87,6 +96,33 @@ interface CalculationResultsData {
   deMinimisReason?: string
   entryType: 'de_minimis' | 'informal' | 'formal'
   insuranceBenchmarkApplied: boolean
+  section800Exemption?: {
+    eligible: boolean
+    exemptionType: 'none' | 'balikbayan' | 'returning_resident' | 'ofw'
+    exemptAmountPhp: number
+    reason: string
+    warnings: string[]
+  }
+  valuationReferenceRisk?: {
+    flagged: boolean
+    level: 'low' | 'medium' | 'high'
+    declaredValuePhp: number
+    indicativeMinimumPhp?: number
+    referenceLabel?: string
+    notes: string[]
+  }
+  portHandlingFees?: {
+    arrivalDateApplied: string
+    tariffTranche: 'pre-2026' | '2026-h1' | '2026-h2'
+    arrastre: number
+    wharfage: number
+    storage: number
+    freeStorageDays: number
+    chargeableStorageDays: number
+    totalPortHandling: number
+    notes: string[]
+  }
+  energyEmergencyNotice?: string
   importClassification?: {
     importType: 'free' | 'regulated' | 'restricted' | 'prohibited'
     agencies: string[]
@@ -188,6 +224,15 @@ export const Calculator: React.FC = () => {
     destinationPort: 'MNL',
     currency: 'USD',
     containerSize: '20ft',
+    arrivalDate: new Date().toISOString().slice(0, 10),
+    storageDelayDays: 0,
+    itemCondition: 'new',
+    importerStatus: 'standard',
+    monthsAbroad: undefined,
+    balikbayanBoxesThisYear: 1,
+    isCommercialQuantity: false,
+    ofwHomeApplianceClaim: false,
+    ofwHomeApplianceAlreadyAvailedThisYear: false,
     arrastreWharfage: 0,
     doxStampOthers: 0,
     declarationType: 'consumption',
@@ -396,6 +441,15 @@ export const Calculator: React.FC = () => {
         currency: formData.currency,
         declarationType: formData.declarationType,
         containerSize: formData.containerSize,
+        arrivalDate: formData.arrivalDate,
+        storageDelayDays: formData.storageDelayDays,
+        itemCondition: formData.itemCondition,
+        importerStatus: formData.importerStatus,
+        monthsAbroad: formData.monthsAbroad,
+        balikbayanBoxesThisYear: formData.balikbayanBoxesThisYear,
+        isCommercialQuantity: formData.isCommercialQuantity,
+        ofwHomeApplianceClaim: formData.ofwHomeApplianceClaim,
+        ofwHomeApplianceAlreadyAvailedThisYear: formData.ofwHomeApplianceAlreadyAvailedThisYear,
         arrastreWharfage: formData.arrastreWharfage,
         doxStampOthers: formData.doxStampOthers,
         exciseCategory: formData.exciseCategory,
@@ -435,6 +489,10 @@ export const Calculator: React.FC = () => {
         deMinimisReason: r.deMinimisReason,
         entryType: r.entryType ?? 'informal',
         insuranceBenchmarkApplied: r.insuranceBenchmarkApplied ?? false,
+        section800Exemption: r.section800Exemption,
+        valuationReferenceRisk: r.valuationReferenceRisk,
+        portHandlingFees: r.portHandlingFees,
+        energyEmergencyNotice: r.energyEmergencyNotice,
         importClassification: r.importClassification,
         totalLandedCost: r.totalLandedCost,
         calculationCurrency: 'PHP',
@@ -579,6 +637,171 @@ export const Calculator: React.FC = () => {
                 )}
               </div>
             </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="arrival-date">Date of Arrival</label>
+                <input
+                  id="arrival-date"
+                  type="date"
+                  value={formData.arrivalDate}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      arrivalDate: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="storage-delay-days">Storage Delay Days</label>
+                <input
+                  id="storage-delay-days"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.storageDelayDays}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      storageDelayDays: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                    }))
+                  }
+                />
+                <div className="field-help-text">Storage fee estimate starts after 5 free days.</div>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="item-condition">Item Condition</label>
+                <select
+                  id="item-condition"
+                  value={formData.itemCondition}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      itemCondition: e.target.value as 'new' | 'used',
+                    }))
+                  }
+                >
+                  <option value="new">New</option>
+                  <option value="used">Used</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="importer-status">Importer Status</label>
+                <select
+                  id="importer-status"
+                  value={formData.importerStatus}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      importerStatus: e.target.value as CalculationPayload['importerStatus'],
+                    }))
+                  }
+                >
+                  <option value="standard">Standard Importer</option>
+                  <option value="balikbayan">Balikbayan</option>
+                  <option value="returning_resident">Returning Resident</option>
+                  <option value="ofw">OFW</option>
+                </select>
+              </div>
+            </div>
+
+            {formData.importerStatus === 'returning_resident' && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="months-abroad">Months Stayed Abroad</label>
+                  <input
+                    id="months-abroad"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.monthsAbroad ?? 0}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        monthsAbroad: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {formData.importerStatus === 'balikbayan' && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="balikbayan-boxes">Boxes This Year</label>
+                  <input
+                    id="balikbayan-boxes"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={formData.balikbayanBoxesThisYear ?? 1}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        balikbayanBoxesThisYear: Math.max(1, Math.floor(Number(e.target.value) || 1)),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.isCommercialQuantity)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          isCommercialQuantity: e.target.checked,
+                        }))
+                      }
+                    />
+                    Commercial Quantity
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {formData.importerStatus === 'ofw' && (
+              <div className="form-row">
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.ofwHomeApplianceClaim)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          ofwHomeApplianceClaim: e.target.checked,
+                        }))
+                      }
+                    />
+                    Claim OFW Home Appliance Privilege
+                  </label>
+                </div>
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.ofwHomeApplianceAlreadyAvailedThisYear)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          ofwHomeApplianceAlreadyAvailedThisYear: e.target.checked,
+                        }))
+                      }
+                    />
+                    Already Availed This Year
+                  </label>
+                </div>
+              </div>
+            )}
 
             {/* De minimis & entry type badges */}
             {(() => {

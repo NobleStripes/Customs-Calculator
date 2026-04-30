@@ -14,6 +14,9 @@ import {
   normalizeDestinationPort,
   checkDeMinimis,
   applyInsuranceBenchmark,
+  estimatePortHandlingFees,
+  evaluateSection800Exemption,
+  evaluateValuationReferenceRisk,
   getEntryType,
 } from './customsRules'
 
@@ -123,6 +126,71 @@ describe('customsRules', () => {
     it('classifies formal entry for DV > ₱50,000', () => {
       expect(getEntryType(50001)).toBe('formal')
       expect(getEntryType(1_000_000)).toBe('formal')
+    })
+  })
+
+  describe('estimatePortHandlingFees', () => {
+    it('applies 2026 H1 tranche for April arrivals', () => {
+      const result = estimatePortHandlingFees({
+        arrivalDate: '2026-04-20',
+        containerSize: '20ft',
+        storageDelayDays: 8,
+        dutiableValuePhp: 100000,
+      })
+      expect(result.tariffTranche).toBe('2026-h1')
+      expect(result.arrastre).toBe(1612)
+      expect(result.chargeableStorageDays).toBe(3)
+      expect(result.totalPortHandling).toBeGreaterThan(0)
+    })
+
+    it('applies 2026 H2 tranche for July arrivals', () => {
+      const result = estimatePortHandlingFees({
+        arrivalDate: '2026-07-10',
+        containerSize: '20ft',
+        storageDelayDays: 5,
+        dutiableValuePhp: 100000,
+      })
+      expect(result.tariffTranche).toBe('2026-h2')
+      expect(result.arrastre).toBe(1758)
+      expect(result.storage).toBe(0)
+    })
+  })
+
+  describe('evaluateSection800Exemption', () => {
+    it('grants balikbayan exemption when conditions are met', () => {
+      const result = evaluateSection800Exemption({
+        importerStatus: 'balikbayan',
+        fobValuePhp: 120000,
+        balikbayanBoxesThisYear: 2,
+        isCommercialQuantity: false,
+      })
+      expect(result.eligible).toBe(true)
+      expect(result.exemptAmountPhp).toBe(120000)
+    })
+
+    it('grants returning resident exemption for used personal effects with long stay abroad', () => {
+      const result = evaluateSection800Exemption({
+        importerStatus: 'returning_resident',
+        itemCondition: 'used',
+        monthsAbroad: 130,
+        fobValuePhp: 500000,
+      })
+      expect(result.eligible).toBe(true)
+      expect(result.exemptAmountPhp).toBe(350000)
+    })
+  })
+
+  describe('evaluateValuationReferenceRisk', () => {
+    it('flags high risk when declared value is far below reference value', () => {
+      const result = evaluateValuationReferenceRisk('8517.12.00', 5000)
+      expect(result.flagged).toBe(true)
+      expect(result.level).toBe('high')
+    })
+
+    it('returns low risk when value is within the indicative range', () => {
+      const result = evaluateValuationReferenceRisk('8471.30.00', 25000)
+      expect(result.flagged).toBe(false)
+      expect(result.level).toBe('low')
     })
   })
 })

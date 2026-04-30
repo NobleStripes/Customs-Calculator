@@ -25,6 +25,9 @@ import {
   TRANSIT_CHARGE_PHP,
   applyInsuranceBenchmark,
   checkDeMinimis,
+  estimatePortHandlingFees,
+  evaluateSection800Exemption,
+  evaluateValuationReferenceRisk,
   getBrokerageFeePhp,
   getContainerSecurityFeeUsd,
   getEntryType,
@@ -293,28 +296,59 @@ app.post('/api/calculate/batch', async (request, response) => {
       const fobConversion = await currencyConverter.convert(fobInput, shipmentCurrency, 'PHP')
       const fobPhp = shipmentCurrency === 'PHP' ? fobInput : fobConversion.convertedAmount
 
+      // --- Step 1.1: Section 800 user-status exemptions (estimate mode) ---
+      const section800Exemption = evaluateSection800Exemption({
+        importerStatus: typeof shipment.importerStatus === 'string' ? shipment.importerStatus : 'standard',
+        itemCondition: typeof shipment.itemCondition === 'string' ? shipment.itemCondition : 'new',
+        fobValuePhp: fobPhp,
+        monthsAbroad: Number.isFinite(Number(shipment.monthsAbroad)) ? Number(shipment.monthsAbroad) : undefined,
+        balikbayanBoxesThisYear: Number.isFinite(Number(shipment.balikbayanBoxesThisYear)) ? Number(shipment.balikbayanBoxesThisYear) : undefined,
+        isCommercialQuantity: Boolean(shipment.isCommercialQuantity),
+        ofwHomeApplianceClaim: Boolean(shipment.ofwHomeApplianceClaim),
+        ofwHomeApplianceAlreadyAvailedThisYear: Boolean(shipment.ofwHomeApplianceAlreadyAvailedThisYear),
+      })
+      const adjustedFobPhp = Math.max(0, fobPhp - section800Exemption.exemptAmountPhp)
+
+      // --- Step 1.2: Valuation reference risk indicator ---
+      const valuationReferenceRisk = evaluateValuationReferenceRisk(resolvedCode.code, adjustedFobPhp)
+
       // --- Step 2: De minimis check (uses FOB value only, per CMTA Sec. 423) ---
-      const deMinimisCheck = checkDeMinimis(fobPhp, resolvedCode.code)
+      const deMinimisCheck = checkDeMinimis(adjustedFobPhp, resolvedCode.code)
       if (deMinimisCheck.exempt) {
+        const estimatedPortFees = estimatePortHandlingFees({
+          arrivalDate: typeof shipment.arrivalDate === 'string' ? shipment.arrivalDate : undefined,
+          containerSize: typeof shipment.containerSize === 'string' ? shipment.containerSize : '20ft',
+          storageDelayDays: Number.isFinite(Number(shipment.storageDelayDays)) ? Number(shipment.storageDelayDays) : 0,
+          dutiableValuePhp: adjustedFobPhp,
+        })
+        const arrastreWharfagePhp = Number(shipment.arrastreWharfage || 0) > 0
+          ? Number(shipment.arrastreWharfage || 0)
+          : estimatedPortFees.totalPortHandling
+        const doxStampOthersPhp = Number(shipment.doxStampOthers || 0)
         results.push({
           ...shipment,
           hsCode: resolvedCode.code,
           scheduleCode,
           destinationPort,
           deMinimisExempt: true,
-          deMinimisReason: deMinimisCheck.reason,
+          deMinimisReason: section800Exemption.eligible
+            ? `${deMinimisCheck.reason} ${section800Exemption.reason}`
+            : deMinimisCheck.reason,
           entryType: 'de_minimis' as const,
           insuranceBenchmarkApplied: false,
           duty: { amount: 0, surcharge: 0, rate: 0, notes: 'De minimis exempt' },
           exciseTax: { amount: 0, adValorem: 0, specific: 0, category: 'none', basis: 'N/A', notes: 'De minimis exempt' },
           vat: { amount: 0, rate: 12 },
           importClassification: classifyImport(resolvedCode.code, scheduleCode),
+          section800Exemption,
+          valuationReferenceRisk,
+          portHandlingFees: estimatedPortFees,
           compliance: await complianceChecker.getRequirements(resolvedCode.code, fobPhp, destinationPort),
           costBase: {
-            taxableValue: fobPhp,
+            taxableValue: adjustedFobPhp,
             brokerageFee: 0,
-            arrastreWharfage: 0,
-            doxStampOthers: 0,
+            arrastreWharfage: arrastreWharfagePhp,
+            doxStampOthers: doxStampOthersPhp,
             vatBase: 0,
           },
           breakdown: {
@@ -322,8 +356,8 @@ app.post('/api/calculate/batch', async (request, response) => {
             globalFees: { transitCharge: 0, ipc: 0, csf: 0, cds: 0, irs: 0, lrf: 0, totalGlobalTax: 0 },
             totalTaxAndFees: 0,
           },
-          landedCostSubtotal: fobPhp,
-          totalLandedCost: fobPhp,
+          landedCostSubtotal: adjustedFobPhp + arrastreWharfagePhp + doxStampOthersPhp,
+          totalLandedCost: adjustedFobPhp + arrastreWharfagePhp + doxStampOthersPhp,
           calculationCurrency: 'PHP' as const,
           fx: {
             applied: shipmentCurrency !== 'PHP',
@@ -342,14 +376,21 @@ app.post('/api/calculate/batch', async (request, response) => {
         ? freightInput
         : (await currencyConverter.convert(freightInput, shipmentCurrency, 'PHP')).convertedAmount
       const { insurance: insurancePhp, benchmarkApplied: insuranceBenchmarkApplied } =
-        applyInsuranceBenchmark(fobPhp, insuranceInput > 0
+        applyInsuranceBenchmark(adjustedFobPhp, insuranceInput > 0
           ? (shipmentCurrency === 'PHP' ? insuranceInput : (await currencyConverter.convert(insuranceInput, shipmentCurrency, 'PHP')).convertedAmount)
           : 0,
         resolvedCode.code)
 
       // --- Step 4: Dutiable value = FOB + insurance + freight (all in PHP) ---
-      const dutiableValuePhp = fobPhp + insurancePhp + freightPhp
+      const dutiableValuePhp = adjustedFobPhp + insurancePhp + freightPhp
       const entryType = getEntryType(dutiableValuePhp)
+
+      const estimatedPortFees = estimatePortHandlingFees({
+        arrivalDate: typeof shipment.arrivalDate === 'string' ? shipment.arrivalDate : undefined,
+        containerSize: typeof shipment.containerSize === 'string' ? shipment.containerSize : '20ft',
+        storageDelayDays: Number.isFinite(Number(shipment.storageDelayDays)) ? Number(shipment.storageDelayDays) : 0,
+        dutiableValuePhp,
+      })
 
       // --- Step 5: Customs duty ---
       const dutyResult = await tariffCalculator.calculateDuty(dutiableValuePhp, resolvedCode.code, String(shipment.originCountry || ''), scheduleCode)
@@ -395,7 +436,9 @@ app.post('/api/calculate/batch', async (request, response) => {
       const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
       const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
       const lrfPhp = LEGAL_RESEARCH_FUND_PHP
-      const arrastreWharfagePhp = Number(shipment.arrastreWharfage || 0)
+      const arrastreWharfagePhp = Number(shipment.arrastreWharfage || 0) > 0
+        ? Number(shipment.arrastreWharfage || 0)
+        : estimatedPortFees.totalPortHandling
       const doxStampOthersPhp = Number(shipment.doxStampOthers || 0)
 
       // --- Step 8: Landed Cost (BOC formula — this is the VAT base) ---
@@ -433,6 +476,9 @@ app.post('/api/calculate/batch', async (request, response) => {
         entryType,
         insuranceBenchmarkApplied,
         importClassification,
+        section800Exemption,
+        valuationReferenceRisk,
+        portHandlingFees: estimatedPortFees,
         duty: {
           amount: dutyResult.amount,
           surcharge: dutyResult.surcharge,
@@ -481,6 +527,12 @@ app.post('/api/calculate/batch', async (request, response) => {
           source: fobConversion.source,
           timestamp: fobConversion.timestamp,
         },
+        energyEmergencyNotice:
+          exciseCategory === 'petroleum' &&
+          typeof shipment.arrivalDate === 'string' &&
+          shipment.arrivalDate >= '2026-03-01'
+            ? 'EO No. 114 energy-emergency relief may affect petroleum excise rates. Confirm the current effective BOC/BIR implementing issuance before filing.'
+            : undefined,
       })
     }
 

@@ -12,6 +12,15 @@ interface CalculationFormData {
   destinationPort: string
   currency: string
   containerSize: 'none' | '20ft' | '40ft'
+  arrivalDate?: string
+  storageDelayDays?: number
+  itemCondition?: 'new' | 'used'
+  importerStatus?: 'standard' | 'balikbayan' | 'returning_resident' | 'ofw'
+  monthsAbroad?: number
+  balikbayanBoxesThisYear?: number
+  isCommercialQuantity?: boolean
+  ofwHomeApplianceClaim?: boolean
+  ofwHomeApplianceAlreadyAvailedThisYear?: boolean
   arrastreWharfage: number
   doxStampOthers: number
   declarationType: 'consumption' | 'warehousing' | 'transit'
@@ -77,6 +86,33 @@ interface CalculationResultsData {
     certificateOfOriginForm?: string
     warnings: string[]
   }
+  section800Exemption?: {
+    eligible?: boolean
+    exemptionType?: 'none' | 'balikbayan' | 'returning_resident' | 'ofw'
+    exemptAmountPhp?: number
+    reason?: string
+    warnings?: string[]
+  }
+  valuationReferenceRisk?: {
+    flagged?: boolean
+    level?: 'low' | 'medium' | 'high'
+    declaredValuePhp?: number
+    indicativeMinimumPhp?: number
+    referenceLabel?: string
+    notes?: string[]
+  }
+  portHandlingFees?: {
+    arrivalDateApplied?: string
+    tariffTranche?: 'pre-2026' | '2026-h1' | '2026-h2'
+    arrastre?: number
+    wharfage?: number
+    storage?: number
+    freeStorageDays?: number
+    chargeableStorageDays?: number
+    totalPortHandling?: number
+    notes?: string[]
+  }
+  energyEmergencyNotice?: string
   deMinimisExempt?: boolean
   deMinimisReason?: string
   entryType?: 'de_minimis' | 'informal' | 'formal'
@@ -236,6 +272,80 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           </div>
         )
       })()}
+
+      {results.section800Exemption && (
+        <div className="result-card section-800-card">
+          <h3>Section 800 Exemption</h3>
+          <p className="detail">
+            Status: <strong>{results.section800Exemption.eligible ? 'Eligible' : 'Not Eligible'}</strong>
+          </p>
+          <p className="detail">{results.section800Exemption.reason}</p>
+          {(results.section800Exemption.exemptAmountPhp || 0) > 0 && (
+            <p className="detail">
+              Exempt Amount Applied: <strong>{formatCurrency(results.section800Exemption.exemptAmountPhp || 0, calculationCurrency)}</strong>
+            </p>
+          )}
+          {(results.section800Exemption.warnings || []).length > 0 && (
+            <ul className="detail-list">
+              {(results.section800Exemption.warnings || []).map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {results.valuationReferenceRisk?.flagged && (
+        <div className={`result-card valuation-risk-card ${results.valuationReferenceRisk.level === 'high' ? 'high-risk' : 'medium-risk'}`}>
+          <h3>Valuation Reference Risk</h3>
+          <p className="detail">
+            Risk Level: <strong>{String(results.valuationReferenceRisk.level || 'medium').toUpperCase()}</strong>
+          </p>
+          <p className="detail">
+            Declared Value: <strong>{formatCurrency(results.valuationReferenceRisk.declaredValuePhp || 0, calculationCurrency)}</strong>
+            {typeof results.valuationReferenceRisk.indicativeMinimumPhp === 'number'
+              ? ` vs Indicative Reference ${formatCurrency(results.valuationReferenceRisk.indicativeMinimumPhp, calculationCurrency)}`
+              : ''}
+          </p>
+          {(results.valuationReferenceRisk.notes || []).map((note) => (
+            <p key={note} className="detail">{note}</p>
+          ))}
+        </div>
+      )}
+
+      {results.portHandlingFees && (
+        <div className="result-card port-handling-card">
+          <h3>Port & Handling Fees</h3>
+          <div className="breakdown-table">
+            <div className="breakdown-row">
+              <span>Arrastre</span>
+              <strong>{formatCurrency(results.portHandlingFees.arrastre || 0, calculationCurrency)}</strong>
+            </div>
+            <div className="breakdown-row">
+              <span>Wharfage</span>
+              <strong>{formatCurrency(results.portHandlingFees.wharfage || 0, calculationCurrency)}</strong>
+            </div>
+            <div className="breakdown-row">
+              <span>Storage ({results.portHandlingFees.chargeableStorageDays || 0} chargeable days)</span>
+              <strong>{formatCurrency(results.portHandlingFees.storage || 0, calculationCurrency)}</strong>
+            </div>
+            <div className="breakdown-row subtotal-row">
+              <span>Total Port Handling</span>
+              <strong>{formatCurrency(results.portHandlingFees.totalPortHandling || 0, calculationCurrency)}</strong>
+            </div>
+          </div>
+          <p className="detail">
+            Arrival date {results.portHandlingFees.arrivalDateApplied || 'N/A'} • tariff tranche {results.portHandlingFees.tariffTranche || 'N/A'} • free storage {results.portHandlingFees.freeStorageDays || 5} days
+          </p>
+        </div>
+      )}
+
+      {results.energyEmergencyNotice && (
+        <div className="result-card energy-notice-card">
+          <h3>Regulatory Notice</h3>
+          <p className="detail">{results.energyEmergencyNotice}</p>
+        </div>
+      )}
 
       {/* De minimis exempt — short-circuit the full breakdown */}
       {results.deMinimisExempt && (

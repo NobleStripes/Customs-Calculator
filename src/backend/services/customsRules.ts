@@ -184,6 +184,284 @@ export const getBrokerageFeePhp = (taxableValuePhp: number): number => {
 export const getBrokerageFeeDescription = (): string =>
   'Tiered BOC brokerage schedule based on taxable value in PHP.'
 
+export type ImporterStatus = 'standard' | 'balikbayan' | 'returning_resident' | 'ofw'
+export type ItemCondition = 'new' | 'used'
+
+export type PortHandlingFeeResult = {
+  arrivalDateApplied: string
+  tariffTranche: 'pre-2026' | '2026-h1' | '2026-h2'
+  arrastre: number
+  wharfage: number
+  storage: number
+  freeStorageDays: number
+  chargeableStorageDays: number
+  totalPortHandling: number
+  notes: string[]
+}
+
+type PortHandlingFeeInput = {
+  arrivalDate?: string
+  containerSize?: string
+  storageDelayDays?: number
+  dutiableValuePhp: number
+}
+
+const getPortTariffTranche = (date: Date): PortHandlingFeeResult['tariffTranche'] => {
+  const h1Start = new Date('2026-01-01T00:00:00.000Z')
+  const h2Start = new Date('2026-07-01T00:00:00.000Z')
+  if (date >= h2Start) return '2026-h2'
+  if (date >= h1Start) return '2026-h1'
+  return 'pre-2026'
+}
+
+export const estimatePortHandlingFees = ({
+  arrivalDate,
+  containerSize,
+  storageDelayDays,
+  dutiableValuePhp,
+}: PortHandlingFeeInput): PortHandlingFeeResult => {
+  const parsedArrivalDate = arrivalDate ? new Date(`${arrivalDate}T00:00:00.000Z`) : new Date()
+  const arrival = Number.isNaN(parsedArrivalDate.getTime()) ? new Date() : parsedArrivalDate
+  const tranche = getPortTariffTranche(arrival)
+  const freeStorageDays = 5
+  const delay = Number.isFinite(Number(storageDelayDays)) ? Number(storageDelayDays) : 0
+  const chargeableStorageDays = Math.max(0, Math.floor(delay) - freeStorageDays)
+  const normalizedContainer = String(containerSize || 'none').toLowerCase()
+
+  const arrastre20ftByTranche = {
+    'pre-2026': 1465,
+    '2026-h1': 1612,
+    '2026-h2': 1758,
+  } as const
+
+  const wharfageRateByTranche = {
+    'pre-2026': 0.0014,
+    '2026-h1': 0.0016,
+    '2026-h2': 0.0018,
+  } as const
+
+  const storageDaily20ftByTranche = {
+    'pre-2026': 110,
+    '2026-h1': 120,
+    '2026-h2': 132,
+  } as const
+
+  const containerMultiplier = normalizedContainer === '40ft' ? 2 : normalizedContainer === '20ft' ? 1 : 0
+  const arrastre = containerMultiplier > 0 ? arrastre20ftByTranche[tranche] * containerMultiplier : 0
+  const wharfage = dutiableValuePhp > 0
+    ? Math.max(250, dutiableValuePhp * wharfageRateByTranche[tranche])
+    : 250
+  const storageDailyRate = containerMultiplier > 0
+    ? storageDaily20ftByTranche[tranche] * containerMultiplier
+    : Math.round(storageDaily20ftByTranche[tranche] * 0.75)
+  const storage = chargeableStorageDays * storageDailyRate
+  const totalPortHandling = arrastre + wharfage + storage
+
+  return {
+    arrivalDateApplied: arrival.toISOString().slice(0, 10),
+    tariffTranche: tranche,
+    arrastre,
+    wharfage,
+    storage,
+    freeStorageDays,
+    chargeableStorageDays,
+    totalPortHandling,
+    notes: [
+      'PPA handling tariff estimate uses 2026 tranche tables and container defaults.',
+      'Actual billed arrastre/wharfage/storage may vary by port operator and commodity class.',
+    ],
+  }
+}
+
+export type Section800ExemptionResult = {
+  eligible: boolean
+  exemptionType: 'none' | 'balikbayan' | 'returning_resident' | 'ofw'
+  exemptAmountPhp: number
+  reason: string
+  warnings: string[]
+}
+
+type Section800ExemptionInput = {
+  importerStatus?: string
+  itemCondition?: string
+  fobValuePhp: number
+  monthsAbroad?: number
+  balikbayanBoxesThisYear?: number
+  isCommercialQuantity?: boolean
+  ofwHomeApplianceClaim?: boolean
+  ofwHomeApplianceAlreadyAvailedThisYear?: boolean
+}
+
+const getReturningResidentExemptionCap = (monthsAbroad: number): number => {
+  if (monthsAbroad >= 120) return 350000
+  if (monthsAbroad >= 60) return 250000
+  if (monthsAbroad >= 6) return 150000
+  return 0
+}
+
+export const evaluateSection800Exemption = ({
+  importerStatus,
+  itemCondition,
+  fobValuePhp,
+  monthsAbroad,
+  balikbayanBoxesThisYear,
+  isCommercialQuantity,
+  ofwHomeApplianceClaim,
+  ofwHomeApplianceAlreadyAvailedThisYear,
+}: Section800ExemptionInput): Section800ExemptionResult => {
+  const normalizedStatus = (importerStatus || 'standard') as ImporterStatus
+  const normalizedCondition = (itemCondition || 'new') as ItemCondition
+
+  if (normalizedStatus === 'balikbayan') {
+    const boxes = Number.isFinite(Number(balikbayanBoxesThisYear)) ? Number(balikbayanBoxesThisYear) : 1
+    if (boxes <= 3 && fobValuePhp <= 150000 && !isCommercialQuantity) {
+      return {
+        eligible: true,
+        exemptionType: 'balikbayan',
+        exemptAmountPhp: Math.min(fobValuePhp, 150000),
+        reason: 'CMTA Sec. 800 balikbayan privilege applied (up to 3 boxes/year, non-commercial, up to ₱150,000 total).',
+        warnings: [],
+      }
+    }
+
+    return {
+      eligible: false,
+      exemptionType: 'none',
+      exemptAmountPhp: 0,
+      reason: 'Balikbayan exemption conditions are not met.',
+      warnings: [
+        boxes > 3 ? 'More than 3 balikbayan boxes declared for the year.' : '',
+        fobValuePhp > 150000 ? 'Declared value exceeds the ₱150,000 balikbayan exemption ceiling.' : '',
+        isCommercialQuantity ? 'Commercial quantity was indicated; balikbayan privilege does not apply.' : '',
+      ].filter(Boolean),
+    }
+  }
+
+  if (normalizedStatus === 'returning_resident') {
+    const months = Number.isFinite(Number(monthsAbroad)) ? Number(monthsAbroad) : 0
+    const cap = getReturningResidentExemptionCap(months)
+    if (normalizedCondition === 'used' && cap > 0) {
+      return {
+        eligible: true,
+        exemptionType: 'returning_resident',
+        exemptAmountPhp: Math.min(fobValuePhp, cap),
+        reason: `Returning resident personal-effects exemption applied (used goods, ${months} months abroad, cap ₱${cap.toLocaleString('en-PH')}).`,
+        warnings: [],
+      }
+    }
+
+    return {
+      eligible: false,
+      exemptionType: 'none',
+      exemptAmountPhp: 0,
+      reason: 'Returning resident exemption conditions are not met.',
+      warnings: [
+        normalizedCondition !== 'used' ? 'Returning resident exemption typically applies to used personal effects.' : '',
+        months < 6 ? 'Minimum 6 months stay abroad is usually required for Section 800 personal-effects exemption.' : '',
+      ].filter(Boolean),
+    }
+  }
+
+  if (normalizedStatus === 'ofw') {
+    if (ofwHomeApplianceClaim && !ofwHomeApplianceAlreadyAvailedThisYear) {
+      return {
+        eligible: true,
+        exemptionType: 'ofw',
+        exemptAmountPhp: Math.min(fobValuePhp, 150000),
+        reason: 'OFW home-appliance privilege applied (once per year, one of each kind; conservative cap applied in estimate mode).',
+        warnings: [],
+      }
+    }
+
+    return {
+      eligible: false,
+      exemptionType: 'none',
+      exemptAmountPhp: 0,
+      reason: 'OFW privilege conditions are not met.',
+      warnings: [
+        !ofwHomeApplianceClaim ? 'No OFW home-appliance privilege claim was selected.' : '',
+        ofwHomeApplianceAlreadyAvailedThisYear ? 'OFW appliance privilege appears already availed for the current year.' : '',
+      ].filter(Boolean),
+    }
+  }
+
+  return {
+    eligible: false,
+    exemptionType: 'none',
+    exemptAmountPhp: 0,
+    reason: 'No Section 800 exemption selected.',
+    warnings: [],
+  }
+}
+
+export type ValuationReferenceRisk = {
+  flagged: boolean
+  level: 'low' | 'medium' | 'high'
+  declaredValuePhp: number
+  indicativeMinimumPhp?: number
+  referenceLabel?: string
+  notes: string[]
+}
+
+const REFERENCE_MIN_BY_HEADING: Record<string, { minimumPhp: number; label: string }> = {
+  '8471': { minimumPhp: 18000, label: 'Portable ADP machines / laptops' },
+  '8517': { minimumPhp: 12000, label: 'Mobile phones and telecom devices' },
+  '8703': { minimumPhp: 300000, label: 'Passenger motor vehicles' },
+  '8802': { minimumPhp: 400000, label: 'Aircraft and helicopters' },
+}
+
+export const evaluateValuationReferenceRisk = (hsCode: string, declaredValuePhp: number): ValuationReferenceRisk => {
+  const compact = hsCode.replace(/[^0-9]/g, '')
+  const heading = compact.slice(0, 4)
+  const reference = REFERENCE_MIN_BY_HEADING[heading]
+
+  if (!reference || declaredValuePhp <= 0) {
+    return {
+      flagged: false,
+      level: 'low',
+      declaredValuePhp,
+      notes: ['No valuation reference trigger found for this heading.'],
+    }
+  }
+
+  if (declaredValuePhp < reference.minimumPhp * 0.5) {
+    return {
+      flagged: true,
+      level: 'high',
+      declaredValuePhp,
+      indicativeMinimumPhp: reference.minimumPhp,
+      referenceLabel: reference.label,
+      notes: [
+        'Declared value is significantly below indicative reference values for this heading.',
+        'BOC may apply customs valuation reference uplift, increasing duty and VAT.',
+      ],
+    }
+  }
+
+  if (declaredValuePhp < reference.minimumPhp) {
+    return {
+      flagged: true,
+      level: 'medium',
+      declaredValuePhp,
+      indicativeMinimumPhp: reference.minimumPhp,
+      referenceLabel: reference.label,
+      notes: [
+        'Declared value is below indicative reference values for this heading.',
+        'Supporting commercial documents may be requested during customs valuation review.',
+      ],
+    }
+  }
+
+  return {
+    flagged: false,
+    level: 'low',
+    declaredValuePhp,
+    indicativeMinimumPhp: reference.minimumPhp,
+    referenceLabel: reference.label,
+    notes: ['Declared value is within indicative reference range for this heading.'],
+  }
+}
+
 export const normalizeDestinationPort = (value: string | undefined): string => {
   const normalized = String(value || '')
     .trim()

@@ -438,6 +438,37 @@
   color: #155724;
 }
 
+.section-800-card {
+  border-left: 4px solid #0d6efd;
+}
+
+.valuation-risk-card {
+  border-left: 4px solid #fd7e14;
+}
+
+.valuation-risk-card.high-risk {
+  border-left-color: #dc3545;
+  background: #fff5f5;
+}
+
+.valuation-risk-card.medium-risk {
+  background: #fffaf0;
+}
+
+.port-handling-card {
+  border-left: 4px solid #198754;
+}
+
+.energy-notice-card {
+  border-left: 4px solid #6f42c1;
+  background: #f8f2ff;
+}
+
+.detail-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
 .vat-exempt-note strong {
   display: block;
   margin-bottom: 4px;
