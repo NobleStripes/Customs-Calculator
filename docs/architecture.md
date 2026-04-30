@@ -6,59 +6,118 @@ This document covers the runtime structure, service boundaries, storage model, a
 
 Customs-Calculator runs as a browser-first application with a small Express backend.
 
-- `src/renderer/` contains the React single-page app used by operators for calculator, batch, and tariff-browser workflows.
+- `src/renderer/` contains the React single-page app used by operators for calculator, batch, tariff-browser, admin, and settings workflows.
 - `src/renderer/lib/appApi.ts` is the browser-facing application API. It handles search, calculations, export, import previews, and remote-first calls to the Express backend.
 - `src/server/` contains the Express server that serves health endpoints, calculation/import endpoints, approved website fetch proxy routes, and the built frontend in production.
-- `src/backend/` contains shared Node-side services for tariff lookup, compliance checks, currency conversion, document generation, ingestion, and SQLite access.
+- `src/backend/` contains Node-side services for tariff lookup, compliance checks, currency conversion, document generation, import classification, excise/customs rules, ingestion, and SQLite access.
+- `src/shared/` contains shared query normalization and helper logic used across runtime boundaries.
 
 ## Project Structure
 
 ```text
 customs-calculator/
-├── src/
-│   ├── renderer/                  # React frontend
-│   │   ├── App.tsx                # Main app component
-│   │   ├── index.tsx              # React entry point
-│   │   ├── index.css              # Global styles
-│   │   ├── App.css                # App layout styles
-│   │   ├── lib/
-│   │   │   ├── appApi.ts          # Browser-native app API and local fallbacks
-│   │   │   └── settingsStore.ts   # Zustand store for user preferences (localStorage)
-│   │   ├── pages/
-│   │   │   ├── Calculator.tsx
-│   │   │   ├── BatchImport.tsx
-│   │   │   ├── TariffBrowser.tsx
-│   │   │   ├── Admin.tsx          # Review queue, import jobs, and rate change audit
-│   │   │   └── Settings.tsx       # App preferences (schedule, FX TTL, auto-fetcher)
-│   │   └── components/
-│   │       ├── Sidebar.tsx
-│   │       ├── HSCodeSearch.tsx
-│   │       └── CalculationResults.tsx
-│   ├── backend/
-│   │   ├── db/
-│   │   │   └── database.ts        # SQLite setup, migrations, seed sync, duplicate cleanup
-│   │   └── services/
-│   │       ├── tariffCalculator.ts
-│   │       ├── officialHsLookup.ts # Tariff Commission Finder live HS lookup + cache
-│   │       ├── complianceChecker.ts
-│   │       ├── currencyConverter.ts
-│   │       ├── documentGenerator.ts
-│   │       ├── tariffDataIngestion.ts
-│   │       ├── autoFetcher.ts     # Cron-based regulatory data fetcher and ingestor
-│   │       ├── websiteFetcher.ts  # Allowlisted HTTP fetcher for regulatory sources
-│   │       └── tariffHtmlParser.ts # HTML table extraction for BOC/Tariff Commission fallback imports
-│   ├── server/
-│   │   └── index.ts               # Express API and static hosting
-│   └── types/
+├── .eslintrc
+├── .prettierrc
+├── .gitignore
+├── CHANGELOG.md
+├── LICENSE
+├── README.md
 ├── docs/
 │   ├── architecture.md
 │   ├── calculation-logic.md
-│   └── development-guide.md
+│   ├── development-guide.md
+│   └── changelog/
+│       ├── v0.1.0.md
+│       ├── v0.2.0.md
+│       ├── v0.3.0.md
+│       ├── v0.4.0.md
+│       ├── v0.4.1.md
+│       └── v0.5.0.md
 ├── index.html
+├── package-lock.json
 ├── package.json
+├── src/
+│   ├── backend/
+│   │   ├── db/
+│   │   │   └── database.ts
+│   │   ├── services/
+│   │   │   ├── autoFetcher.ts
+│   │   │   ├── complianceChecker.ts
+│   │   │   ├── complianceChecker.test.ts
+│   │   │   ├── currencyConverter.ts
+│   │   │   ├── currencyConverter.test.ts
+│   │   │   ├── customsRules.ts
+│   │   │   ├── customsRules.test.ts
+│   │   │   ├── documentGenerator.ts
+│   │   │   ├── exciseTax.ts
+│   │   │   ├── exciseTax.test.ts
+│   │   │   ├── importClassification.ts
+│   │   │   ├── importClassification.test.ts
+│   │   │   ├── officialHsLookup.ts
+│   │   │   ├── officialHsLookup.test.ts
+│   │   │   ├── reviewWorkflow.test.ts
+│   │   │   ├── runtimeSettings.ts
+│   │   │   ├── runtimeSettings.test.ts
+│   │   │   ├── sourceAdapters.ts
+│   │   │   ├── tariffCalculator.ts
+│   │   │   ├── tariffCalculator.test.ts
+│   │   │   ├── tariffDataIngestion.ts
+│   │   │   ├── tariffDataIngestion.test.ts
+│   │   │   ├── tariffHtmlParser.ts
+│   │   │   ├── tariffHtmlParser.test.ts
+│   │   │   ├── websiteFetcher.ts
+│   │   │   ├── websiteFetcher.test.ts
+│   │   │   └── fixtures/
+│   │   │       ├── boc-memoranda.fixture.html
+│   │   │       └── tariff-commission-search.fixture.html
+│   │   └── types/
+│   │       └── pdfkit.d.ts
+│   ├── main/                       # Currently empty (reserved runtime folder)
+│   ├── renderer/
+│   │   ├── App.css
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   ├── index.tsx
+│   │   ├── vite-env.d.ts
+│   │   ├── components/
+│   │   │   ├── CalculationResults.css
+│   │   │   ├── CalculationResults.tsx
+│   │   │   ├── HSCodeSearch.css
+│   │   │   ├── HSCodeSearch.tsx
+│   │   │   ├── Sidebar.css
+│   │   │   └── Sidebar.tsx
+│   │   ├── lib/
+│   │   │   ├── appApi.ts
+│   │   │   ├── appApi.test.ts
+│   │   │   ├── batchImportCsv.ts
+│   │   │   ├── batchImportCsv.test.ts
+│   │   │   ├── settingsStore.ts
+│   │   │   └── settingsStore.test.ts
+│   │   └── pages/
+│   │       ├── Admin.css
+│   │       ├── Admin.tsx
+│   │       ├── BatchImport.css
+│   │       ├── BatchImport.tsx
+│   │       ├── Calculator.css
+│   │       ├── Calculator.tsx
+│   │       ├── Settings.css
+│   │       ├── Settings.tsx
+│   │       ├── TariffBrowser.css
+│   │       └── TariffBrowser.tsx
+│   ├── server/
+│   │   └── index.ts
+│   ├── shared/
+│   │   ├── hsLookupQuery.ts
+│   │   └── hsLookupQuery.test.ts
+│   └── types/                      # Currently empty
+├── tmp-memo-pages/
+├── tmp-mistg-memo.pdf
+├── tmp-mistg-memo.txt
 ├── tsconfig.json
+├── tsconfig.node.json
+├── tsconfig.node.tsbuildinfo
 ├── vite.config.ts
-└── README.md
+└── (Generated/ignored folders omitted: .git, .venv, .vscode, node_modules, dist)
 ```
 
 ## Data Model
