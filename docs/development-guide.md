@@ -19,6 +19,17 @@ This document covers common contributor workflows for extending and maintaining 
 
 4. Refresh the browser app or restart the local server so the updated seed data is applied.
 
+### 2026 Catalog Curation Guidance
+
+When extending HS coverage, prefer a weighted-catalog model over a blind full-list import:
+
+1. Keep a curated high-usage core (consumer/e-commerce heavy headings).
+2. Rely on official lookup for long-tail industrial headings.
+3. Prefer adding 8-digit AHTN rows for computation paths; keep 6-digit entries as search helpers only.
+4. Prioritize permit-sensitive headings (NTC/FDA/FPA/etc.) so compliance warnings trigger early.
+
+For future nomenclature transitions, avoid hardcoding a single static edition. Keep import/migration pipelines ready for AHTN version rollover.
+
 ## Adding New Compliance Rules
 
 Edit `src/backend/db/database.ts` in the `seedInitialData()` function and add a rule like this:

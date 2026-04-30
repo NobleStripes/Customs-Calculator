@@ -120,6 +120,105 @@ type HSCodeLookupRow = {
   category: string
 }
 
+const HS_SEARCH_SYNONYMS: Array<{ trigger: string; expansions: string[]; preferredCodePrefixes?: string[] }> = [
+  { trigger: 'DRONE', expansions: ['UNMANNED', 'AIRCRAFT', 'UAV'], preferredCodePrefixes: ['8806'] },
+  { trigger: 'RUBBER SHOES', expansions: ['FOOTWEAR', 'OUTER SOLES OF RUBBER', 'RUBBER'], preferredCodePrefixes: ['6402', '6404'] },
+  { trigger: 'WIRELESS ROUTER', expansions: ['ROUTER', 'TRANSMISSION', 'NETWORK', 'WLAN'], preferredCodePrefixes: ['8517'] },
+  { trigger: 'SMARTPHONE', expansions: ['TELEPHONE', 'CELLULAR', 'HANDSET'], preferredCodePrefixes: ['8517'] },
+  { trigger: 'LAPTOP', expansions: ['PORTABLE', 'AUTOMATIC DATA PROCESSING', 'COMPUTER'], preferredCodePrefixes: ['8471'] },
+]
+
+const tokenizeSearchText = (value: string): string[] =>
+  value
+    .toUpperCase()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean)
+
+const hasChapter99Intent = (query: string): boolean => {
+  const normalized = query.toUpperCase()
+  if (/\bCHAPTER\s*99\b/.test(normalized)) {
+    return true
+  }
+
+  const digits = normalized.replace(/[^0-9]/g, '')
+  return digits.startsWith('99')
+}
+
+const getSynonymProfile = (query: string): {
+  expandedTerms: string[]
+  preferredPrefixes: string[]
+} => {
+  const normalized = query.toUpperCase()
+  const terms = new Set(tokenizeSearchText(normalized))
+  const preferredPrefixes = new Set<string>()
+
+  for (const profile of HS_SEARCH_SYNONYMS) {
+    if (!normalized.includes(profile.trigger)) {
+      continue
+    }
+
+    for (const expansion of profile.expansions) {
+      tokenizeSearchText(expansion).forEach((term) => terms.add(term))
+    }
+
+    for (const prefix of profile.preferredCodePrefixes || []) {
+      preferredPrefixes.add(prefix)
+    }
+  }
+
+  return {
+    expandedTerms: Array.from(terms),
+    preferredPrefixes: Array.from(preferredPrefixes),
+  }
+}
+
+const scoreHsSearchResult = (
+  row: HSCodeLookupRow,
+  normalizedQuery: string,
+  compactQuery: string,
+  expandedTerms: string[],
+  preferredPrefixes: string[],
+  chapter99Intent: boolean
+): number => {
+  const normalizedCode = row.code.toUpperCase()
+  const compactCode = normalizedCode.replace(/\./g, '')
+  const normalizedDescription = row.description.toUpperCase()
+
+  let score = 0
+
+  if (compactCode === compactQuery) score += 140
+  else if (normalizedCode === normalizedQuery) score += 130
+  else if (compactCode.startsWith(compactQuery) || normalizedCode.startsWith(normalizedQuery)) score += 80
+
+  if (normalizedDescription.includes(normalizedQuery)) {
+    score += 50
+  }
+
+  for (const term of expandedTerms) {
+    if (term.length < 2) {
+      continue
+    }
+    if (normalizedDescription.includes(term)) {
+      score += 12
+    }
+  }
+
+  for (const prefix of preferredPrefixes) {
+    if (compactCode.startsWith(prefix)) {
+      score += 25
+      break
+    }
+  }
+
+  if (!chapter99Intent && compactCode.startsWith('99')) {
+    score -= 90
+  }
+
+  score -= row.code.length
+  return score
+}
+
 type TariffCatalogDbRow = {
   hs_code: string
   schedule_code: string
@@ -286,8 +385,10 @@ export class TariffCalculator {
     return new Promise((resolve, reject) => {
       const normalizedQuery = query.trim().toUpperCase()
       const compactQuery = normalizedQuery.replace(/\./g, '')
-      const queryTerms = normalizedQuery.split(/\s+/).filter(Boolean)
+      const { expandedTerms, preferredPrefixes } = getSynonymProfile(normalizedQuery)
+      const queryTerms = expandedTerms
       const limit = Math.max(5, Math.min(100, Math.floor(options?.limit || 20)))
+      const expandedLimit = Math.max(limit * 6, 40)
 
       if (!normalizedQuery) {
         resolve([])
@@ -299,7 +400,7 @@ export class TariffCalculator {
       const startsWithQuery = `${normalizedQuery}%`
       const compactStartsWithQuery = `${compactQuery}%`
       const descriptionTermClause = queryTerms.length > 0
-        ? queryTerms.map(() => 'UPPER(description) LIKE ?').join(' AND ')
+        ? queryTerms.map(() => 'UPPER(description) LIKE ?').join(' OR ')
         : '0'
       const descriptionTermParams = queryTerms.map((term) => `%${term}%`)
 
@@ -337,8 +438,10 @@ export class TariffCalculator {
         compactSearchQuery,
         searchQuery,
         ...descriptionTermParams,
-        limit,
+        expandedLimit,
       ]
+
+      const chapter99Intent = hasChapter99Intent(normalizedQuery)
 
       this.db.all(
         sql,
@@ -350,12 +453,32 @@ export class TariffCalculator {
           return
         }
 
+        const rankedRows = (rows || [])
+          .map((row) => ({
+            ...row,
+            _score: scoreHsSearchResult(
+              row,
+              normalizedQuery,
+              compactQuery,
+              expandedTerms,
+              preferredPrefixes,
+              chapter99Intent
+            ),
+          }))
+          .sort((left, right) =>
+            right._score - left._score ||
+            left.code.length - right.code.length ||
+            left.code.localeCompare(right.code) ||
+            left.description.localeCompare(right.description)
+          )
+          .slice(0, limit)
+
         resolve(
-          rows?.map((r) => ({
-            code: r.code,
-            description: r.description,
-            category: r.category,
-          })) || []
+          rankedRows.map((row) => ({
+            code: row.code,
+            description: row.description,
+            category: row.category,
+          }))
         )
       }
       )

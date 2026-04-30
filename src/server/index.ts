@@ -114,6 +114,14 @@ const normalizeExactHsCodeFromRequest = (value: unknown): string | null => {
   return normalizeExactHsCode(value)
 }
 
+const normalizeComputationHsCodeFromRequest = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  return normalizeExactHsCode(value, { allowedDigitLengths: [8, 10] })
+}
+
 const isSeedFallbackMode = (): boolean => getRuntimeSettings().catalogMode === 'seed-fallback'
 
 const sendError = (response: express.Response, statusCode: number, error: unknown) => {
@@ -191,9 +199,9 @@ app.post('/api/calculate/duty', async (request, response) => {
     return sendError(response, 400, 'Request body field "value" must be a valid number')
   }
 
-  const normalizedHsCode = normalizeExactHsCodeFromRequest(hsCode)
+  const normalizedHsCode = normalizeComputationHsCodeFromRequest(hsCode)
   if (!normalizedHsCode) {
-    return sendError(response, 400, 'Request body field "hsCode" must be a valid 6, 8, or 10-digit HS code')
+    return sendError(response, 400, 'Request body field "hsCode" must be a valid 8 or 10-digit HS code for calculation')
   }
 
   if (typeof originCountry !== 'string' || !originCountry.trim()) {
@@ -215,9 +223,9 @@ app.post('/api/calculate/vat', async (request, response) => {
     return sendError(response, 400, 'Request body field "dutiableValue" must be a valid number')
   }
 
-  const normalizedHsCode = normalizeExactHsCodeFromRequest(hsCode)
+  const normalizedHsCode = normalizeComputationHsCodeFromRequest(hsCode)
   if (!normalizedHsCode) {
-    return sendError(response, 400, 'Request body field "hsCode" must be a valid 6, 8, or 10-digit HS code')
+    return sendError(response, 400, 'Request body field "hsCode" must be a valid 8 or 10-digit HS code for calculation')
   }
 
   try {
@@ -231,9 +239,9 @@ app.post('/api/calculate/vat', async (request, response) => {
 app.post('/api/compliance/requirements', async (request, response) => {
   const { hsCode, value, destination } = request.body || {}
 
-  const normalizedHsCode = normalizeExactHsCodeFromRequest(hsCode)
+  const normalizedHsCode = normalizeComputationHsCodeFromRequest(hsCode)
   if (!normalizedHsCode) {
-    return sendError(response, 400, 'Request body field "hsCode" must be a valid 6, 8, or 10-digit HS code')
+    return sendError(response, 400, 'Request body field "hsCode" must be a valid 8 or 10-digit HS code for compliance checks')
   }
 
   if (!Number.isFinite(Number(value))) {
@@ -279,7 +287,12 @@ app.post('/api/calculate/batch', async (request, response) => {
         throw new Error('Each shipment must include an hsCode')
       }
 
-      const resolvedCode = await tariffCalculator.getHSCodeDetails(shipment.hsCode)
+      const normalizedShipmentHsCode = normalizeComputationHsCodeFromRequest(shipment.hsCode)
+      if (!normalizedShipmentHsCode) {
+        throw new Error('Each shipment hsCode must be a valid 8 or 10-digit HS code for calculation')
+      }
+
+      const resolvedCode = await tariffCalculator.getHSCodeDetails(normalizedShipmentHsCode)
       if (!resolvedCode) {
         throw new Error(`Unknown HS code: ${shipment.hsCode}`)
       }
@@ -645,8 +658,11 @@ app.post('/api/calculate/batch', async (request, response) => {
 
 app.post('/api/import/hs-codes/preview', async (request, response) => {
   try {
-    const rows = await tariffDataIngestion.parseHSCatalogRows(request.body || {})
-    const result = tariffDataIngestion.previewHSCatalogRows(rows)
+    const payload = request.body || {}
+    const rows = await tariffDataIngestion.parseHSCatalogRows(payload)
+    const result = tariffDataIngestion.previewHSCatalogRows(rows, {
+      defaultCatalogVersion: typeof payload.catalogVersion === 'string' ? payload.catalogVersion : undefined,
+    })
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 400, error)
@@ -671,6 +687,7 @@ app.post('/api/import/hs-codes', async (request, response) => {
           sourceName: payload.sourceName,
           sourceType: typeof payload.sourceType === 'string' ? payload.sourceType : 'hs-catalog',
           sourceReference: typeof payload.sourceReference === 'string' ? payload.sourceReference : payload.fileName,
+          catalogVersion: typeof payload.catalogVersion === 'string' ? payload.catalogVersion : undefined,
           rows,
           batchSize,
         })
@@ -678,6 +695,7 @@ app.post('/api/import/hs-codes', async (request, response) => {
           sourceName: payload.sourceName,
           sourceType: typeof payload.sourceType === 'string' ? payload.sourceType : 'hs-catalog',
           sourceReference: typeof payload.sourceReference === 'string' ? payload.sourceReference : payload.fileName,
+          catalogVersion: typeof payload.catalogVersion === 'string' ? payload.catalogVersion : undefined,
           rows,
         })
 
@@ -697,7 +715,9 @@ app.post('/api/import/tariff-rates/preview', async (request, response) => {
           contentBase64: typeof payload.contentBase64 === 'string' ? payload.contentBase64 : undefined,
           fileName: typeof payload.fileName === 'string' ? payload.fileName : undefined,
         })
-    const result = tariffDataIngestion.previewRows(rows)
+    const result = tariffDataIngestion.previewRows(rows, {
+      defaultCatalogVersion: typeof payload.catalogVersion === 'string' ? payload.catalogVersion : undefined,
+    })
     return response.json({ success: true, data: result })
   } catch (error) {
     return sendError(response, 400, error)
@@ -724,6 +744,7 @@ app.post('/api/import/tariff-rates', async (request, response) => {
       sourceName: payload.sourceName,
       sourceType: typeof payload.sourceType === 'string' ? payload.sourceType : 'tariff-rates',
       sourceReference: typeof payload.sourceReference === 'string' ? payload.sourceReference : payload.fileName,
+      catalogVersion: typeof payload.catalogVersion === 'string' ? payload.catalogVersion : undefined,
       rows,
       autoApproveThreshold: typeof payload.autoApproveThreshold === 'number' ? payload.autoApproveThreshold : undefined,
       forceApprove: Boolean(payload.forceApprove),

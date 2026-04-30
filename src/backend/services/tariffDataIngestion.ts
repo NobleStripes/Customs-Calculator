@@ -19,6 +19,7 @@ export interface HSCatalogImportRow {
   hsCode: string
   description: string
   category?: string
+  catalogVersion?: string
   chapterCode?: string
   sectionCode?: string
   sectionName?: string
@@ -32,6 +33,7 @@ export interface HSCatalogImportPreviewRow {
     hsCode: string
     description: string
     category: string
+    catalogVersion: string
     chapterCode: string
     sectionCode: string
     sectionName: string
@@ -51,12 +53,14 @@ export interface HSCatalogImportRequest {
   sourceName: string
   sourceType?: string
   sourceReference?: string
+  catalogVersion?: string
   rows: HSCatalogImportRow[]
 }
 
 export interface TariffImportRow {
   hsCode: string
   scheduleCode?: string
+  catalogVersion?: string
   description?: string
   category?: string
   dutyRate: string | number
@@ -74,6 +78,7 @@ export interface TariffImportPreviewRow {
   normalized?: {
     hsCode: string
     scheduleCode: string
+    catalogVersion: string
     description: string
     category: string
     chapterCode: string
@@ -118,6 +123,7 @@ export interface TariffImportRequest {
   sourceName: string
   sourceType?: string
   sourceReference?: string
+  catalogVersion?: string
   rows: TariffImportRow[]
   autoApproveThreshold?: number
   forceApprove?: boolean
@@ -149,6 +155,12 @@ export interface BatchedHSCatalogImportSummary extends TariffImportSummary {
 }
 
 const DEFAULT_THRESHOLD = 85
+const DEFAULT_CATALOG_VERSION = 'AHTN-2022'
+
+const normalizeCatalogVersion = (value: string | undefined): string => {
+  const normalized = String(value || '').trim().toUpperCase().replace(/\s+/g, '-')
+  return normalized || DEFAULT_CATALOG_VERSION
+}
 
 const inferTariffHtmlSource = (sourceUrl: string): 'boc' | 'tariff-commission' => {
   const normalized = sourceUrl.toLowerCase()
@@ -262,6 +274,7 @@ const getFieldValue = (row: Record<string, unknown>, aliases: string[]): string 
 const mapTabularRecordToTariffImportRow = (row: Record<string, unknown>): TariffImportRow => ({
   hsCode: getFieldValue(row, ['hscode', 'hs_code', 'code']),
   scheduleCode: getFieldValue(row, ['schedulecode', 'schedule_code', 'tariffschedule', 'tariff_schedule', 'schedule']) || undefined,
+  catalogVersion: getFieldValue(row, ['catalogversion', 'catalog_version', 'nomenclatureversion', 'nomenclature_version']) || undefined,
   description: getFieldValue(row, ['description', 'goodsdescription', 'productdescription']) || undefined,
   category: getFieldValue(row, ['category', 'section', 'chapterdescription']) || undefined,
   dutyRate: getFieldValue(row, ['dutyrate', 'dutyratepercent', 'duty_rate', 'duty']) || '',
@@ -463,11 +476,16 @@ const buildHsMetadata = (hsCode: string): {
   }
 }
 
-const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPreviewRow => {
+const validateRow = (
+  row: TariffImportRow,
+  rowNumber: number,
+  options?: { defaultCatalogVersion?: string }
+): TariffImportPreviewRow => {
   const errors: string[] = []
 
   const hsCode = normalizeExactHsCode(row.hsCode || '')
   const scheduleCode = normalizeScheduleCode(row.scheduleCode)
+  const catalogVersion = normalizeCatalogVersion(row.catalogVersion || options?.defaultCatalogVersion)
   if (!hsCode) {
     errors.push('HS code must be a valid 6, 8, or 10-digit code')
   }
@@ -504,6 +522,7 @@ const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPrevi
     : {
         hsCode,
         scheduleCode,
+      catalogVersion,
         ...buildHsMetadata(hsCode),
         description: (row.description || 'Imported from source').trim() || 'Imported from source',
         category: (row.category || buildHsMetadata(hsCode).sectionName || 'Imported').trim() || 'Imported',
@@ -524,11 +543,16 @@ const validateRow = (row: TariffImportRow, rowNumber: number): TariffImportPrevi
   }
 }
 
-const validateHSCatalogRow = (row: HSCatalogImportRow, rowNumber: number): HSCatalogImportPreviewRow => {
+const validateHSCatalogRow = (
+  row: HSCatalogImportRow,
+  rowNumber: number,
+  options?: { defaultCatalogVersion?: string }
+): HSCatalogImportPreviewRow => {
   const errors: string[] = []
   const hsCode = normalizeExactHsCode(row.hsCode || '')
   const description = String(row.description || '').trim()
   const category = String(row.category || 'Imported').trim() || 'Imported'
+  const catalogVersion = normalizeCatalogVersion(row.catalogVersion || options?.defaultCatalogVersion)
 
   if (!hsCode) {
     errors.push('HS code must be a valid 6, 8, or 10-digit code')
@@ -547,6 +571,7 @@ const validateHSCatalogRow = (row: HSCatalogImportRow, rowNumber: number): HSCat
           hsCode,
           description,
           category: category || buildHsMetadata(hsCode).sectionName || 'Imported',
+          catalogVersion,
           ...buildHsMetadata(hsCode),
         },
     errors,
@@ -602,6 +627,7 @@ const upsertHsCode = async (normalized: {
   hsCode: string
   description: string
   category: string
+  catalogVersion?: string
   chapterCode?: string
   sectionCode?: string
   sectionName?: string
@@ -609,11 +635,12 @@ const upsertHsCode = async (normalized: {
 }): Promise<void> => {
   await run(
     `
-      INSERT INTO hs_codes (code, description, category, chapter_code, section_code, section_name, metadata_source)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO hs_codes (code, description, category, catalog_version, chapter_code, section_code, section_name, metadata_source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(code) DO UPDATE SET
         description = excluded.description,
         category = excluded.category,
+        catalog_version = excluded.catalog_version,
         chapter_code = excluded.chapter_code,
         section_code = excluded.section_code,
         section_name = excluded.section_name,
@@ -623,6 +650,7 @@ const upsertHsCode = async (normalized: {
       normalized.hsCode,
       normalized.description,
       normalized.category,
+      normalizeCatalogVersion(normalized.catalogVersion),
       normalized.chapterCode || null,
       normalized.sectionCode || null,
       normalized.sectionName || null,
@@ -841,6 +869,7 @@ export class TariffDataIngestionService {
       hsCode: getFieldValue(row, ['hscode', 'hs_code', 'code', 'commoditycode', 'commodity_code', 'tariffcode', 'tariff_code']),
       description: getFieldValue(row, ['description', 'goodsdescription', 'productdescription', 'commoditydescription', 'commodity_description']),
       category: getFieldValue(row, ['category', 'section', 'chapterdescription', 'chapter_description']) || undefined,
+      catalogVersion: getFieldValue(row, ['catalogversion', 'catalog_version', 'nomenclatureversion', 'nomenclature_version']) || undefined,
     }))
   }
 
@@ -851,8 +880,8 @@ export class TariffDataIngestionService {
     return rows
   }
 
-  previewRows(rows: TariffImportRow[]): TariffImportPreviewResult {
-    const parsedRows = rows.map((row, idx) => validateRow(row, idx + 1))
+  previewRows(rows: TariffImportRow[], options?: { defaultCatalogVersion?: string }): TariffImportPreviewResult {
+    const parsedRows = rows.map((row, idx) => validateRow(row, idx + 1, options))
     const validRows = parsedRows.filter((row) => row.errors.length === 0).length
 
     return {
@@ -863,8 +892,8 @@ export class TariffDataIngestionService {
     }
   }
 
-  previewHSCatalogRows(rows: HSCatalogImportRow[]): HSCatalogImportPreviewResult {
-    const parsedRows = rows.map((row, idx) => validateHSCatalogRow(row, idx + 1))
+  previewHSCatalogRows(rows: HSCatalogImportRow[], options?: { defaultCatalogVersion?: string }): HSCatalogImportPreviewResult {
+    const parsedRows = rows.map((row, idx) => validateHSCatalogRow(row, idx + 1, options))
     const validRows = parsedRows.filter((row) => row.errors.length === 0).length
 
     return {
@@ -876,7 +905,8 @@ export class TariffDataIngestionService {
   }
 
   async importHSCatalog(request: HSCatalogImportRequest): Promise<TariffImportSummary> {
-    const preview = this.previewHSCatalogRows(request.rows)
+    const defaultCatalogVersion = normalizeCatalogVersion(request.catalogVersion)
+    const preview = this.previewHSCatalogRows(request.rows, { defaultCatalogVersion })
 
     const sourceInsert = await run(
       `
@@ -927,7 +957,7 @@ export class TariffDataIngestionService {
           continue
         }
 
-        const dedupeKey = `${row.normalized.hsCode}:${row.normalized.description}:${row.normalized.category}`
+        const dedupeKey = `${row.normalized.hsCode}:${row.normalized.catalogVersion}:${row.normalized.description}:${row.normalized.category}`
         if (seenInPayload.has(dedupeKey)) {
           duplicateRows += 1
           skippedRows += 1
@@ -935,21 +965,28 @@ export class TariffDataIngestionService {
         }
         seenInPayload.add(dedupeKey)
 
-        const existingCatalogRow = await get<{ description: string; category: string }>(
-          'SELECT description, category FROM hs_codes WHERE code = ? LIMIT 1',
+        const existingCatalogRow = await get<{ description: string; category: string; catalog_version: string | null }>(
+          'SELECT description, category, catalog_version FROM hs_codes WHERE code = ? LIMIT 1',
           [row.normalized.hsCode]
         )
-        if (existingCatalogRow && (existingCatalogRow.description !== row.normalized.description || existingCatalogRow.category !== row.normalized.category)) {
+        if (
+          existingCatalogRow && (
+            existingCatalogRow.description !== row.normalized.description ||
+            existingCatalogRow.category !== row.normalized.category ||
+            normalizeCatalogVersion(existingCatalogRow.catalog_version || undefined) !== row.normalized.catalogVersion
+          )
+        ) {
           conflictRows += 1
         }
 
         await run(
           `
-            INSERT INTO hs_codes (code, description, category, chapter_code, section_code, section_name, metadata_source)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO hs_codes (code, description, category, catalog_version, chapter_code, section_code, section_name, metadata_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(code) DO UPDATE SET
               description = excluded.description,
               category = excluded.category,
+              catalog_version = excluded.catalog_version,
               chapter_code = excluded.chapter_code,
               section_code = excluded.section_code,
               section_name = excluded.section_name,
@@ -959,6 +996,7 @@ export class TariffDataIngestionService {
             row.normalized.hsCode,
             row.normalized.description,
             row.normalized.category,
+            row.normalized.catalogVersion,
             row.normalized.chapterCode || null,
             row.normalized.sectionCode || null,
             row.normalized.sectionName || null,
@@ -1029,6 +1067,7 @@ export class TariffDataIngestionService {
         sourceReference: request.sourceReference
           ? `${request.sourceReference}#batch-${batchNumber}`
           : `batch-${batchNumber}`,
+        catalogVersion: request.catalogVersion,
         rows: batchRows,
       })
 
@@ -1060,7 +1099,8 @@ export class TariffDataIngestionService {
 
   async importRows(request: TariffImportRequest): Promise<TariffImportSummary> {
     const threshold = request.autoApproveThreshold ?? DEFAULT_THRESHOLD
-    const preview = this.previewRows(request.rows)
+    const defaultCatalogVersion = normalizeCatalogVersion(request.catalogVersion)
+    const preview = this.previewRows(request.rows, { defaultCatalogVersion })
     const sourceType = request.sourceType || 'manual'
     const runtimeSettings = getRuntimeSettings()
 

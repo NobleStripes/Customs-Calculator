@@ -138,6 +138,32 @@ CREATE TABLE hs_codes (
 );
 ```
 
+Recommended 2026+ extension for nomenclature versioning:
+
+```sql
+CREATE TABLE hs_catalog_versions (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   version_code TEXT UNIQUE NOT NULL, -- e.g. 'AHTN-2022'
+   effective_date DATE,
+   retired_date DATE,
+   status TEXT NOT NULL DEFAULT 'active',
+   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE hs_code_mappings (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   from_version TEXT NOT NULL,
+   to_version TEXT NOT NULL,
+   from_code TEXT NOT NULL,
+   to_code TEXT NOT NULL,
+   mapping_type TEXT NOT NULL, -- one-to-one, split, merge, retired
+   notes TEXT,
+   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+This preserves backward compatibility during edition changes (e.g. AHTN 2022 -> AHTN 2028) and supports deterministic migration/audit workflows.
+
 #### `tariff_rates`
 
 ```sql

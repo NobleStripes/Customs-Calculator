@@ -52,6 +52,86 @@ describe('TariffCalculator.searchHSCodes', () => {
     expect(results.length).toBeLessThanOrEqual(5)
   })
 
+  it('boosts synonym-driven results for discovery terms like drone', async () => {
+    const database = getDatabase()
+    const tariffCalculator = new TariffCalculatorClass()
+
+    await new Promise<void>((resolve, reject) => {
+      database.run(
+        `
+          INSERT INTO hs_codes (code, description, category, catalog_version, metadata_source)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(code) DO UPDATE SET
+            description = excluded.description,
+            category = excluded.category,
+            catalog_version = excluded.catalog_version,
+            metadata_source = excluded.metadata_source
+        `,
+        ['8806.21', 'Unmanned aircraft (drones), remotely piloted', 'Aircraft', 'AHTN-2022', 'test'],
+        (error: Error | null) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        }
+      )
+    })
+
+    const results = await tariffCalculator.searchHSCodes('drone', { limit: 10 })
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results[0]?.code).toBe('8806.21')
+  })
+
+  it('de-boosts chapter 99 noise unless the query explicitly targets chapter 99', async () => {
+    const database = getDatabase()
+    const tariffCalculator = new TariffCalculatorClass()
+
+    await new Promise<void>((resolve, reject) => {
+      database.serialize(() => {
+        database.run(
+          `
+            INSERT INTO hs_codes (code, description, category, catalog_version, metadata_source)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(code) DO UPDATE SET
+              description = excluded.description,
+              category = excluded.category,
+              catalog_version = excluded.catalog_version,
+              metadata_source = excluded.metadata_source
+          `,
+          ['9910.00', 'Chapter 99 special temporary classification for routers', 'Special', 'AHTN-2022', 'test']
+        )
+        database.run(
+          `
+            INSERT INTO hs_codes (code, description, category, catalog_version, metadata_source)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(code) DO UPDATE SET
+              description = excluded.description,
+              category = excluded.category,
+              catalog_version = excluded.catalog_version,
+              metadata_source = excluded.metadata_source
+          `,
+          ['8517.62', 'Wireless routers and network transmission apparatus', 'Electronics', 'AHTN-2022', 'test'],
+          (error: Error | null) => {
+            if (error) {
+              reject(error)
+              return
+            }
+            resolve()
+          }
+        )
+      })
+    })
+
+    const genericResults = await tariffCalculator.searchHSCodes('wireless router', { limit: 10 })
+    const chapter99Results = await tariffCalculator.searchHSCodes('chapter 99 wireless router', { limit: 10 })
+
+    expect(genericResults.length).toBeGreaterThan(0)
+    expect(genericResults[0]?.code).toBe('8517.62')
+    expect(chapter99Results.some((row) => row.code.startsWith('99'))).toBe(true)
+  })
+
   it('selects schedule-specific tariff rates when a non-default schedule is requested', async () => {
     const database = getDatabase()
     const tariffCalculator = new TariffCalculatorClass()

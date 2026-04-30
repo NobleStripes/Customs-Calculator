@@ -14,6 +14,7 @@ type HSCodeSeedRow = {
   code: string
   description: string
   category: string
+  catalogVersion?: string
   chapterCode?: string
   sectionCode?: string
   sectionName?: string
@@ -74,10 +75,30 @@ const schema = [
     code TEXT UNIQUE NOT NULL,
     description TEXT NOT NULL,
     category TEXT NOT NULL,
+    catalog_version TEXT NOT NULL DEFAULT 'AHTN-2022',
     chapter_code TEXT,
     section_code TEXT,
     section_name TEXT,
     metadata_source TEXT NOT NULL DEFAULT 'seed',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS hs_catalog_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version_code TEXT UNIQUE NOT NULL,
+    effective_date DATE,
+    retired_date DATE,
+    status TEXT NOT NULL DEFAULT 'active',
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS hs_code_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_version TEXT NOT NULL,
+    to_version TEXT NOT NULL,
+    from_code TEXT NOT NULL,
+    to_code TEXT NOT NULL,
+    mapping_type TEXT NOT NULL,
+    notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS tax_types (
@@ -241,6 +262,8 @@ const schema = [
   `CREATE INDEX IF NOT EXISTS idx_review_queue_status ON extracted_rows_review(review_status)`,
   `CREATE INDEX IF NOT EXISTS idx_review_queue_job_id ON extracted_rows_review(import_job_id)`,
   `CREATE INDEX IF NOT EXISTS idx_rate_change_audit_hs_code ON rate_change_audit(hs_code)`,
+  `CREATE INDEX IF NOT EXISTS idx_hs_code_mappings_from_version ON hs_code_mappings(from_version)`,
+  `CREATE INDEX IF NOT EXISTS idx_hs_code_mappings_to_version ON hs_code_mappings(to_version)`,
 ]
 
 const backfillHsMetadata = async (database: sqlite3.Database): Promise<void> => {
@@ -286,6 +309,9 @@ const ensureHsCodesSchemaCompatibility = (database: sqlite3.Database): Promise<v
       if (!existingColumns.has('chapter_code')) {
         migrationStatements.push('ALTER TABLE hs_codes ADD COLUMN chapter_code TEXT')
       }
+      if (!existingColumns.has('catalog_version')) {
+        migrationStatements.push("ALTER TABLE hs_codes ADD COLUMN catalog_version TEXT NOT NULL DEFAULT 'AHTN-2022'")
+      }
       if (!existingColumns.has('section_code')) {
         migrationStatements.push('ALTER TABLE hs_codes ADD COLUMN section_code TEXT')
       }
@@ -298,9 +324,11 @@ const ensureHsCodesSchemaCompatibility = (database: sqlite3.Database): Promise<v
 
       const applyBackfillAndIndexes = () => {
         backfillHsMetadata(database)
+          .then(() => runStatement(database, "UPDATE hs_codes SET catalog_version = 'AHTN-2022' WHERE catalog_version IS NULL OR TRIM(catalog_version) = ''"))
           .then(() => runStatement(database, "UPDATE hs_codes SET metadata_source = 'seed' WHERE metadata_source IS NULL OR TRIM(metadata_source) = ''"))
           .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_hs_codes_chapter_code ON hs_codes(chapter_code)'))
           .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_hs_codes_section_code ON hs_codes(section_code)'))
+          .then(() => runStatement(database, 'CREATE INDEX IF NOT EXISTS idx_hs_codes_catalog_version ON hs_codes(catalog_version)'))
           .then(resolve)
           .catch(reject)
       }
@@ -534,13 +562,14 @@ const insertHSCodes = (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[])
       database.run(
         `
           INSERT OR IGNORE INTO hs_codes
-          (code, description, category, chapter_code, section_code, section_name, metadata_source)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          (code, description, category, catalog_version, chapter_code, section_code, section_name, metadata_source)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           item.code,
           item.description,
           item.category,
+          item.catalogVersion || 'AHTN-2022',
           item.chapterCode || null,
           item.sectionCode || null,
           item.sectionName || null,
@@ -549,6 +578,49 @@ const insertHSCodes = (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[])
         (err: Error | null) => {
           if (err) {
             console.error(`Error inserting HS code ${item.code}:`, err)
+          }
+          count += 1
+          if (count === total) {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+}
+
+const insertCatalogVersions = (database: sqlite3.Database): Promise<void> => {
+  const versions = [
+    {
+      versionCode: 'AHTN-2022',
+      effectiveDate: '2022-01-01',
+      status: 'active',
+      notes: 'ASEAN Harmonized Tariff Nomenclature 2022 baseline',
+    },
+  ]
+
+  return new Promise((resolve) => {
+    let count = 0
+    const total = versions.length
+    if (total === 0) {
+      resolve()
+      return
+    }
+
+    versions.forEach((version) => {
+      database.run(
+        `
+          INSERT INTO hs_catalog_versions (version_code, effective_date, status, notes)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(version_code) DO UPDATE SET
+            effective_date = excluded.effective_date,
+            status = excluded.status,
+            notes = excluded.notes
+        `,
+        [version.versionCode, version.effectiveDate, version.status, version.notes],
+        (err: Error | null) => {
+          if (err) {
+            console.error(`Error inserting catalog version ${version.versionCode}:`, err)
           }
           count += 1
           if (count === total) {
@@ -803,6 +875,7 @@ export const seedInitialData = async (): Promise<void> => {
     const metadata = getHsCodeMetadata(row.code)
     return {
       ...row,
+      catalogVersion: 'AHTN-2022',
       chapterCode: metadata?.chapterCode,
       sectionCode: metadata?.sectionCode,
       sectionName: metadata?.sectionName,
@@ -810,6 +883,7 @@ export const seedInitialData = async (): Promise<void> => {
     }
   })
 
+  await insertCatalogVersions(database)
   await insertHSCodes(database, hsCodesData)
   await insertTariffSchedules(database)
   await insertTaxTypes(database)

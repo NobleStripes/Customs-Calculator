@@ -307,4 +307,40 @@ describe('TariffDataIngestionService', () => {
     expect(summary.batchResults[1]?.batchRows).toBe(1)
     expect(summary.batchResults[0]?.duplicateRows).toBeGreaterThanOrEqual(0)
   })
+
+  it('propagates catalog version into HS catalog imports', async () => {
+    const service = new TariffDataIngestionServiceClass()
+    const database = getDatabase()
+
+    const summary = await service.importHSCatalog({
+      sourceName: 'Catalog Version Import Test',
+      sourceType: 'hs-catalog',
+      catalogVersion: 'AHTN-2022',
+      rows: [
+        {
+          hsCode: '8806.21',
+          description: 'Unmanned aircraft, remotely piloted',
+          category: 'Aircraft',
+        },
+      ],
+    })
+
+    expect(summary.importedRows).toBe(1)
+
+    const row = await new Promise<{ catalog_version: string | null } | undefined>((resolve, reject) => {
+      database.get(
+        'SELECT catalog_version FROM hs_codes WHERE code = ? LIMIT 1',
+        ['8806.21'],
+        (error: Error | null, queryRow: { catalog_version: string | null } | undefined) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve(queryRow)
+        }
+      )
+    })
+
+    expect(row?.catalog_version).toBe('AHTN-2022')
+  })
 })

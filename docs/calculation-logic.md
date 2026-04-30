@@ -10,6 +10,36 @@ This document describes the current landed-cost and tax computation flow used by
 - Section 800 user-status exemptions, port handling estimates, and valuation-reference risk checks are part of the current model.
 - Outputs are estimates and must be validated against the latest BOC/BIR/PPA issuances before filing.
 
+## HS Catalog Strategy (PH 2026)
+
+For a professional Philippine calculator, the catalog should prioritize precision over a flat "show everything" list.
+
+- Base nomenclature: `AHTN 2022`.
+- Calculation-grade code requirement: use `8-digit` (or more granular) HS/AHTN codes for duty/tax computation.
+- 6-digit codes are useful for discovery and narrowing, but are not sufficient for final-rate certainty.
+
+Recommended product strategy:
+
+- `Core catalog` (top-heavy): maintain a curated high-usage set for consumer and e-commerce flows.
+- `Long-tail` lookup: route niche/industrial queries to official lookup (Tariff Commission Finder) on demand.
+- `Search noise control`: avoid over-prioritizing Chapter 99 and highly technical headings in default ranking.
+
+Required search behavior:
+
+- Synonym mapping (example: "drone" -> `8806.21.xx` candidates).
+- Common-name matching against legal tariff descriptions.
+- Clear escalation path when unresolved classification needs a formal ruling (BOC VCD reference).
+
+Compliance-first UX expectation:
+
+- Regulated headings should surface permit advisories early (example: NTC advisory for telecom/radio equipment headings) before checkout-style tax decisions.
+
+Versioning and migration guardrails:
+
+- Keep tariff catalogs versioned by nomenclature edition (current: `AHTN 2022`).
+- Prepare mapping tables/workflows for future migrations (AHTN 2028 consultations are underway).
+- Treat one-time full dumps as temporary; treat update pipelines and mapping quality as long-term system assets.
+
 ## Input Model
 
 Core shipment inputs:
