@@ -53,6 +53,18 @@ interface CalculationResultsData {
     vatBase?: number
   }
   breakdown?: {
+    tradeRemedies?: {
+      antiDumping?: number
+      countervailing?: number
+      safeguard?: number
+      total?: number
+    }
+    penalties?: {
+      undervaluationSurcharge?: number
+      misclassificationSurcharge?: number
+      latePaymentInterest?: number
+      total?: number
+    }
     globalFees?: {
       transitCharge?: number
       ipc?: number
@@ -112,6 +124,19 @@ interface CalculationResultsData {
     totalPortHandling?: number
     notes?: string[]
   }
+  tradeRemedies?: {
+    antiDumping?: number
+    countervailing?: number
+    safeguard?: number
+    total?: number
+  }
+  penalties?: {
+    undervaluationSurcharge?: number
+    misclassificationSurcharge?: number
+    latePaymentInterest?: number
+    totalPenalties?: number
+    notes?: string[]
+  }
   energyEmergencyNotice?: string
   deMinimisExempt?: boolean
   deMinimisReason?: string
@@ -126,6 +151,7 @@ interface CalculationResultsData {
   }
   calculationCurrency?: string
   totalLandedCost: number
+  totalPayable?: number
 }
 
 interface CalculationResultsProps {
@@ -175,6 +201,19 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
   const totalTaxAndFees = results.breakdown?.totalTaxAndFees || (itemTaxTotal + globalTaxTotal)
   const requiredDocuments = results.compliance?.requiredDocuments || results.compliance?.requirements || []
   const landedCostSubtotal = results.landedCostSubtotal ?? (results.totalLandedCost - vatAmount)
+  const tradeRemedies = {
+    antiDumping: results.tradeRemedies?.antiDumping ?? results.breakdown?.tradeRemedies?.antiDumping ?? 0,
+    countervailing: results.tradeRemedies?.countervailing ?? results.breakdown?.tradeRemedies?.countervailing ?? 0,
+    safeguard: results.tradeRemedies?.safeguard ?? results.breakdown?.tradeRemedies?.safeguard ?? 0,
+    total: results.tradeRemedies?.total ?? results.breakdown?.tradeRemedies?.total ?? 0,
+  }
+  const penalties = {
+    undervaluationSurcharge: results.penalties?.undervaluationSurcharge ?? results.breakdown?.penalties?.undervaluationSurcharge ?? 0,
+    misclassificationSurcharge: results.penalties?.misclassificationSurcharge ?? results.breakdown?.penalties?.misclassificationSurcharge ?? 0,
+    latePaymentInterest: results.penalties?.latePaymentInterest ?? results.breakdown?.penalties?.latePaymentInterest ?? 0,
+    totalPenalties: results.penalties?.totalPenalties ?? results.breakdown?.penalties?.total ?? 0,
+  }
+  const totalPayable = results.totalPayable ?? (results.totalLandedCost + penalties.totalPenalties)
 
   const handleExportDocument = async () => {
     setExportMessage(null)
@@ -357,6 +396,9 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <p className="detail">
             Total Landed Cost: <strong>{formatCurrency(results.totalLandedCost, calculationCurrency)}</strong>
           </p>
+          <p className="detail">
+            Total Payable: <strong>{formatCurrency(totalPayable, calculationCurrency)}</strong>
+          </p>
           {results.fx?.applied && (
             <p className="detail fx-note">
               FX applied: 1 {results.fx.inputCurrency} = {formatNumber(results.fx.rateToPhp ?? 0)} PHP
@@ -372,6 +414,9 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <h3>Total Landed Cost</h3>
           <p className="amount">
             {formatCurrency(results.totalLandedCost, calculationCurrency)}
+          </p>
+          <p className="detail">
+            Total Payable: <strong>{formatCurrency(totalPayable, calculationCurrency)}</strong>
           </p>
           <p className="detail">
             FOB Value: {formatCurrency(formData.value, formData.currency)}
@@ -424,6 +469,26 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
                 <strong>{formatCurrency(exciseAmount, calculationCurrency)}</strong>
               </div>
             )}
+            {tradeRemedies.total > 0 && (
+              <>
+                <div className="breakdown-row">
+                  <span>Anti-Dumping Duty</span>
+                  <strong>{formatCurrency(tradeRemedies.antiDumping, calculationCurrency)}</strong>
+                </div>
+                <div className="breakdown-row">
+                  <span>Countervailing Duty</span>
+                  <strong>{formatCurrency(tradeRemedies.countervailing, calculationCurrency)}</strong>
+                </div>
+                <div className="breakdown-row">
+                  <span>Safeguard Duty</span>
+                  <strong>{formatCurrency(tradeRemedies.safeguard, calculationCurrency)}</strong>
+                </div>
+                <div className="breakdown-row total-row">
+                  <span>Total Trade Remedies</span>
+                  <strong>{formatCurrency(tradeRemedies.total, calculationCurrency)}</strong>
+                </div>
+              </>
+            )}
             <div className="breakdown-row subtotal-row">
               <span>Landed Cost (VAT Base)</span>
               <strong>{formatCurrency(landedCostSubtotal, calculationCurrency)}</strong>
@@ -471,6 +536,31 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
               <span>Total Tax and Fees</span>
               <strong>{formatCurrency(totalTaxAndFees, calculationCurrency)}</strong>
             </div>
+            {penalties.totalPenalties > 0 && (
+              <>
+                <div className="breakdown-row spacer-row" aria-hidden="true" />
+                <div className="breakdown-row">
+                  <span>Undervaluation Surcharge</span>
+                  <strong>{formatCurrency(penalties.undervaluationSurcharge, calculationCurrency)}</strong>
+                </div>
+                <div className="breakdown-row">
+                  <span>Misclassification Surcharge</span>
+                  <strong>{formatCurrency(penalties.misclassificationSurcharge, calculationCurrency)}</strong>
+                </div>
+                <div className="breakdown-row">
+                  <span>Late Payment Interest</span>
+                  <strong>{formatCurrency(penalties.latePaymentInterest, calculationCurrency)}</strong>
+                </div>
+                <div className="breakdown-row total-row">
+                  <span>Total Penalties</span>
+                  <strong>{formatCurrency(penalties.totalPenalties, calculationCurrency)}</strong>
+                </div>
+                <div className="breakdown-row grand-total-row">
+                  <span>Total Payable</span>
+                  <strong>{formatCurrency(totalPayable, calculationCurrency)}</strong>
+                </div>
+              </>
+            )}
           </div>
           <p className="detail breakdown-note">
             Taxable Value (PHP) uses FOB + Freight + Insurance. VAT Base equals the full Landed Cost (DV + Duty + Excise + all fees) per BOC formula. CSF uses USD 5 for 20-foot and USD 10 for 40-foot containers. Estimates should be validated with BOC before filing.
@@ -520,6 +610,26 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
               )}
             </p>
             <p className="detail">Applied surcharges and fees</p>
+          </div>
+        )}
+
+        {tradeRemedies.total > 0 && (
+          <div className="result-card">
+            <h3>Trade Remedy Duties</h3>
+            <p className="amount">{formatCurrency(tradeRemedies.total, calculationCurrency)}</p>
+            <p className="detail">
+              AD: {formatCurrency(tradeRemedies.antiDumping, calculationCurrency)} • CVD: {formatCurrency(tradeRemedies.countervailing, calculationCurrency)} • SG: {formatCurrency(tradeRemedies.safeguard, calculationCurrency)}
+            </p>
+          </div>
+        )}
+
+        {penalties.totalPenalties > 0 && (
+          <div className="result-card">
+            <h3>Surcharges & Penalties</h3>
+            <p className="amount">{formatCurrency(penalties.totalPenalties, calculationCurrency)}</p>
+            {(results.penalties?.notes || []).map((note) => (
+              <p key={note} className="detail">{note}</p>
+            ))}
           </div>
         )}
       </div>
@@ -582,6 +692,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <li>Duty Amount: {formatCurrency(results.duty?.amount || 0, calculationCurrency)}</li>
           <li>Excise Tax: {formatCurrency(exciseAmount, calculationCurrency)}{results.exciseTax?.category && results.exciseTax.category !== 'none' ? ` (${results.exciseTax.category.replace(/_/g, ' ')})` : ''}</li>
           <li>Surcharge: {formatCurrency(results.duty?.surcharge || 0, calculationCurrency)}</li>
+          <li>Trade Remedies (Total): {formatCurrency(tradeRemedies.total, calculationCurrency)}</li>
           <li>Brokerage Fee: {formatCurrency(costBase.brokerageFee || 0, calculationCurrency)}</li>
           <li>Arrastre / Wharfage: {formatCurrency(costBase.arrastreWharfage || 0, calculationCurrency)}</li>
           <li>Dox Stamp & Others: {formatCurrency(costBase.doxStampOthers || 0, calculationCurrency)}</li>
@@ -594,10 +705,14 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <li>LRF: {formatCurrency(extraFees.lrf, calculationCurrency)}</li>
           <li>Total Global Tax: {formatCurrency(globalTaxTotal, calculationCurrency)}</li>
           <li>Total Tax and Fees: {formatCurrency(totalTaxAndFees, calculationCurrency)}</li>
+          <li>Total Penalties: {formatCurrency(penalties.totalPenalties, calculationCurrency)}</li>
           <li>VAT Rate: {formatNumber(results.vat?.rate || 0)}%</li>
           <li>VAT Amount: {formatCurrency(results.vat?.amount || 0, calculationCurrency)}</li>
           <li className="total">
             Total: {formatCurrency(results.totalLandedCost, calculationCurrency)}
+          </li>
+          <li className="total">
+            Total Payable: {formatCurrency(totalPayable, calculationCurrency)}
           </li>
         </ul>
       </div>

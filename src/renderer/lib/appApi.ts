@@ -101,6 +101,13 @@ type ShipmentRow = {
   isCommercialQuantity?: boolean
   ofwHomeApplianceClaim?: boolean
   ofwHomeApplianceAlreadyAvailedThisYear?: boolean
+  antiDumpingDutyRate?: number
+  countervailingDutyRate?: number
+  safeguardDutyRate?: number
+  assessedCustomsValue?: number
+  misclassificationDetected?: boolean
+  clericalError?: boolean
+  latePaymentDays?: number
   arrastreWharfage: number
   doxStampOthers: number
   /** Excise tax category (auto-detected from HS code if omitted) */
@@ -154,6 +161,12 @@ type BatchResultRow = ShipmentRow & {
   entryType: 'de_minimis' | 'informal' | 'formal'
   insuranceBenchmarkApplied: boolean
   importClassification: ImportClassificationResult
+  tradeRemedies?: {
+    antiDumping: number
+    countervailing: number
+    safeguard: number
+    total: number
+  }
   section800Exemption?: {
     eligible: boolean
     exemptionType: 'none' | 'balikbayan' | 'returning_resident' | 'ofw'
@@ -180,6 +193,13 @@ type BatchResultRow = ShipmentRow & {
     totalPortHandling: number
     notes: string[]
   }
+  penalties?: {
+    undervaluationSurcharge: number
+    misclassificationSurcharge: number
+    latePaymentInterest: number
+    totalPenalties: number
+    notes: string[]
+  }
   energyEmergencyNotice?: string
   duty: { amount: number; surcharge: number; rate: number; notes?: string }
   exciseTax: ExciseTaxBreakdown
@@ -189,11 +209,14 @@ type BatchResultRow = ShipmentRow & {
   }
   breakdown: {
     itemTaxes: { cud: number; excise: number; vat: number; totalItemTax: number }
+    tradeRemedies?: { antiDumping: number; countervailing: number; safeguard: number; total: number }
     globalFees: { transitCharge: number; ipc: number; csf: number; cds: number; irs: number; lrf: number; totalGlobalTax: number }
+    penalties?: { undervaluationSurcharge: number; misclassificationSurcharge: number; latePaymentInterest: number; total: number }
     totalTaxAndFees: number
   }
   landedCostSubtotal: number
   totalLandedCost: number
+  totalPayable?: number
   calculationCurrency: 'PHP'
   fx: { applied: boolean; rateToPhp: number; inputCurrency: string; baseCurrency: 'PHP'; source?: string; timestamp?: string }
 }
@@ -278,6 +301,12 @@ type CalculationDocumentResults = {
     basis?: string
     notes?: string
   }
+  tradeRemedies?: {
+    antiDumping?: number
+    countervailing?: number
+    safeguard?: number
+    total?: number
+  }
   section800Exemption?: {
     eligible?: boolean
     exemptionType?: string
@@ -303,12 +332,20 @@ type CalculationDocumentResults = {
     chargeableStorageDays?: number
     totalPortHandling?: number
   }
+  penalties?: {
+    undervaluationSurcharge?: number
+    misclassificationSurcharge?: number
+    latePaymentInterest?: number
+    totalPenalties?: number
+    notes?: string[]
+  }
   energyEmergencyNotice?: string
   landedCostSubtotal?: number
   deMinimisExempt?: boolean
   entryType?: 'de_minimis' | 'informal' | 'formal'
   insuranceBenchmarkApplied?: boolean
   totalLandedCost?: number
+  totalPayable?: number
   calculationCurrency?: string
 }
 
@@ -1453,6 +1490,13 @@ export const appApi = {
         const tariffRow = requireCurrentTariff(shipment.hsCode, scheduleCode)
   const dutyAmount = adjustedTaxableValuePhp * (tariffRow?.duty_rate || 0)
   const surchargeAmount = adjustedTaxableValuePhp * (tariffRow?.surcharge_rate || 0)
+  const antiDumpingDutyRate = Number.isFinite(Number(shipment.antiDumpingDutyRate)) ? Number(shipment.antiDumpingDutyRate) : 0
+  const countervailingDutyRate = Number.isFinite(Number(shipment.countervailingDutyRate)) ? Number(shipment.countervailingDutyRate) : 0
+  const safeguardDutyRate = Number.isFinite(Number(shipment.safeguardDutyRate)) ? Number(shipment.safeguardDutyRate) : 0
+  const antiDumpingDutyAmount = adjustedTaxableValuePhp * Math.max(0, antiDumpingDutyRate)
+  const countervailingDutyAmount = adjustedTaxableValuePhp * Math.max(0, countervailingDutyRate)
+  const safeguardDutyAmount = adjustedTaxableValuePhp * Math.max(0, safeguardDutyRate)
+  const totalTradeRemediesPhp = antiDumpingDutyAmount + countervailingDutyAmount + safeguardDutyAmount
   const brokerageFeePhp = getBrokerageFeePhp(adjustedTaxableValuePhp)
         const csfUsd = getContainerSecurityFeeUsd(shipment.containerSize)
         let csfPhp = 0
@@ -1479,8 +1523,37 @@ export const appApi = {
           dutiableValuePhp: adjustedTaxableValuePhp,
         })
         const arrastreWharfagePhp = shipment.arrastreWharfage > 0 ? shipment.arrastreWharfage : portHandlingFees.totalPortHandling
-        const vatBasePhp = adjustedTaxableValuePhp + dutyAmount + surchargeAmount + brokerageFeePhp + arrastreWharfagePhp + shipment.doxStampOthers + totalGlobalFeesPhp
+        const vatBasePhp = adjustedTaxableValuePhp + dutyAmount + surchargeAmount + totalTradeRemediesPhp + brokerageFeePhp + arrastreWharfagePhp + shipment.doxStampOthers + totalGlobalFeesPhp
         const vatAmount = vatBasePhp * (tariffRow?.vat_rate || 0.12)
+        const assessedCustomsValueInput = Number.isFinite(Number(shipment.assessedCustomsValue))
+          ? Number(shipment.assessedCustomsValue)
+          : 0
+        const assessedCustomsValuePhp = assessedCustomsValueInput > 0
+          ? (shipmentCurrency === 'PHP' ? assessedCustomsValueInput : assessedCustomsValueInput * converted.rate)
+          : 0
+        const undervaluationDetected = assessedCustomsValuePhp > adjustedTaxableValuePhp * 1.1
+        const deficiencyValuePhp = Math.max(0, assessedCustomsValuePhp - adjustedTaxableValuePhp)
+        const dutyRate = (tariffRow?.duty_rate || 0)
+        const surchargeRate = (tariffRow?.surcharge_rate || 0)
+        const tradeRemedyRate = antiDumpingDutyRate + countervailingDutyRate + safeguardDutyRate
+        const vatRate = (tariffRow?.vat_rate || 0.12)
+        const deficiencyDutyTaxPhp = deficiencyValuePhp * (dutyRate + surchargeRate + tradeRemedyRate + vatRate)
+        const undervaluationSurchargePhp = undervaluationDetected ? deficiencyDutyTaxPhp * 2.5 : 0
+        const baseDutyTaxPhp = dutyAmount + surchargeAmount + totalTradeRemediesPhp + vatAmount
+        const misclassificationDetected = Boolean(shipment.misclassificationDetected)
+        const clericalError = Boolean(shipment.clericalError)
+        const misclassificationSurchargePhp = misclassificationDetected && !clericalError ? baseDutyTaxPhp * 2.5 : 0
+        const latePaymentDays = Number.isFinite(Number(shipment.latePaymentDays)) ? Math.max(0, Number(shipment.latePaymentDays)) : 0
+        const latePaymentInterestPhp = baseDutyTaxPhp * 0.20 * (latePaymentDays / 365)
+        const totalPenaltiesPhp = undervaluationSurchargePhp + misclassificationSurchargePhp + latePaymentInterestPhp
+        const totalLandedCost = vatBasePhp + vatAmount
+        const totalPayable = totalLandedCost + totalPenaltiesPhp
+        const penaltyNotes = [
+          undervaluationDetected ? 'Undervaluation threshold exceeded (>10% discrepancy); 250% surcharge estimate applied.' : '',
+          misclassificationDetected && !clericalError ? 'Misclassification surcharge estimate applied at 250% of duty/tax.' : '',
+          misclassificationDetected && clericalError ? 'Misclassification marked clerical; 250% surcharge not applied.' : '',
+          latePaymentDays > 0 ? `Late payment interest estimated at 20% p.a. for ${latePaymentDays} days.` : '',
+        ].filter(Boolean)
         results.push({
           ...shipment,
           scheduleCode,
@@ -1491,6 +1564,12 @@ export const appApi = {
           section800Exemption,
           valuationReferenceRisk,
           portHandlingFees,
+          tradeRemedies: {
+            antiDumping: antiDumpingDutyAmount,
+            countervailing: countervailingDutyAmount,
+            safeguard: safeguardDutyAmount,
+            total: totalTradeRemediesPhp,
+          },
           importClassification: {
             importType: 'free' as const,
             agencies: [],
@@ -1510,6 +1589,13 @@ export const appApi = {
             amount: vatAmount,
             rate: (tariffRow?.vat_rate || 0.12) * 100,
           },
+          penalties: {
+            undervaluationSurcharge: undervaluationSurchargePhp,
+            misclassificationSurcharge: misclassificationSurchargePhp,
+            latePaymentInterest: latePaymentInterestPhp,
+            totalPenalties: totalPenaltiesPhp,
+            notes: penaltyNotes,
+          },
           costBase: {
             taxableValue: adjustedTaxableValuePhp,
             brokerageFee: brokerageFeePhp,
@@ -1524,6 +1610,12 @@ export const appApi = {
               vat: vatAmount,
               totalItemTax: dutyAmount + vatAmount,
             },
+            tradeRemedies: {
+              antiDumping: antiDumpingDutyAmount,
+              countervailing: countervailingDutyAmount,
+              safeguard: safeguardDutyAmount,
+              total: totalTradeRemediesPhp,
+            },
             globalFees: {
               transitCharge: transitChargePhp,
               ipc: ipcPhp,
@@ -1537,7 +1629,8 @@ export const appApi = {
           },
           exciseTax: { amount: 0, adValorem: 0, specific: 0, category: 'none', basis: 'N/A', notes: 'Not calculated in offline mode' },
           landedCostSubtotal: vatBasePhp,
-          totalLandedCost: vatBasePhp + vatAmount,
+          totalLandedCost,
+          totalPayable,
           energyEmergencyNotice:
             shipment.petroleumProductType && shipment.arrivalDate && shipment.arrivalDate >= '2026-03-01'
               ? 'EO No. 114 temporary petroleum excise adjustments may apply. Confirm current issuance before filing.'

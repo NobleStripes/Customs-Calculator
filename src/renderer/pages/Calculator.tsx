@@ -24,6 +24,13 @@ interface CalculationPayload {
   isCommercialQuantity?: boolean
   ofwHomeApplianceClaim?: boolean
   ofwHomeApplianceAlreadyAvailedThisYear?: boolean
+  antiDumpingDutyRate?: number
+  countervailingDutyRate?: number
+  safeguardDutyRate?: number
+  assessedCustomsValue?: number
+  misclassificationDetected?: boolean
+  clericalError?: boolean
+  latePaymentDays?: number
   arrastreWharfage: number
   doxStampOthers: number
   declarationType: 'consumption' | 'warehousing' | 'transit'
@@ -96,6 +103,20 @@ interface CalculationResultsData {
   deMinimisReason?: string
   entryType: 'de_minimis' | 'informal' | 'formal'
   insuranceBenchmarkApplied: boolean
+  tradeRemedies?: {
+    antiDumping: number
+    countervailing: number
+    safeguard: number
+    total: number
+  }
+  penalties?: {
+    undervaluationSurcharge: number
+    misclassificationSurcharge: number
+    latePaymentInterest: number
+    totalPenalties: number
+    notes: string[]
+  }
+  totalPayable?: number
   section800Exemption?: {
     eligible: boolean
     exemptionType: 'none' | 'balikbayan' | 'returning_resident' | 'ofw'
@@ -233,6 +254,13 @@ export const Calculator: React.FC = () => {
     isCommercialQuantity: false,
     ofwHomeApplianceClaim: false,
     ofwHomeApplianceAlreadyAvailedThisYear: false,
+    antiDumpingDutyRate: 0,
+    countervailingDutyRate: 0,
+    safeguardDutyRate: 0,
+    assessedCustomsValue: undefined,
+    misclassificationDetected: false,
+    clericalError: false,
+    latePaymentDays: 0,
     arrastreWharfage: 0,
     doxStampOthers: 0,
     declarationType: 'consumption',
@@ -450,6 +478,13 @@ export const Calculator: React.FC = () => {
         isCommercialQuantity: formData.isCommercialQuantity,
         ofwHomeApplianceClaim: formData.ofwHomeApplianceClaim,
         ofwHomeApplianceAlreadyAvailedThisYear: formData.ofwHomeApplianceAlreadyAvailedThisYear,
+        antiDumpingDutyRate: formData.antiDumpingDutyRate,
+        countervailingDutyRate: formData.countervailingDutyRate,
+        safeguardDutyRate: formData.safeguardDutyRate,
+        assessedCustomsValue: formData.assessedCustomsValue,
+        misclassificationDetected: formData.misclassificationDetected,
+        clericalError: formData.clericalError,
+        latePaymentDays: formData.latePaymentDays,
         arrastreWharfage: formData.arrastreWharfage,
         doxStampOthers: formData.doxStampOthers,
         exciseCategory: formData.exciseCategory,
@@ -489,6 +524,9 @@ export const Calculator: React.FC = () => {
         deMinimisReason: r.deMinimisReason,
         entryType: r.entryType ?? 'informal',
         insuranceBenchmarkApplied: r.insuranceBenchmarkApplied ?? false,
+        tradeRemedies: r.tradeRemedies,
+        penalties: r.penalties,
+        totalPayable: r.totalPayable,
         section800Exemption: r.section800Exemption,
         valuationReferenceRisk: r.valuationReferenceRisk,
         portHandlingFees: r.portHandlingFees,
@@ -966,6 +1004,133 @@ export const Calculator: React.FC = () => {
                   }
                   placeholder="Given amount for shipment"
                 />
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3>Trade Remedy Duties</h3>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="anti-dumping-rate">Anti-Dumping Duty Rate (%)</label>
+                  <input
+                    id="anti-dumping-rate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={(formData.antiDumpingDutyRate || 0) * 100}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        antiDumpingDutyRate: Math.max(0, (Number(e.target.value) || 0) / 100),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="countervailing-rate">Countervailing Duty Rate (%)</label>
+                  <input
+                    id="countervailing-rate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={(formData.countervailingDutyRate || 0) * 100}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        countervailingDutyRate: Math.max(0, (Number(e.target.value) || 0) / 100),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="safeguard-rate">Safeguard Duty Rate (%)</label>
+                  <input
+                    id="safeguard-rate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={(formData.safeguardDutyRate || 0) * 100}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        safeguardDutyRate: Math.max(0, (Number(e.target.value) || 0) / 100),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3>Surcharges and Penalties</h3>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="assessed-customs-value">Assessed Customs Value ({formData.currency})</label>
+                  <input
+                    id="assessed-customs-value"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.assessedCustomsValue ?? ''}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        assessedCustomsValue: e.target.value ? Number(e.target.value) : undefined,
+                      }))
+                    }
+                    placeholder="Optional: assessed value for deficiency check"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="late-payment-days">Late Payment Days</label>
+                  <input
+                    id="late-payment-days"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.latePaymentDays ?? 0}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        latePaymentDays: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.misclassificationDetected)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          misclassificationDetected: e.target.checked,
+                        }))
+                      }
+                    />
+                    Misclassification Detected
+                  </label>
+                </div>
+                <div className="form-group checkbox-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.clericalError)}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          clericalError: e.target.checked,
+                        }))
+                      }
+                    />
+                    Clerical Error (waive misclassification surcharge)
+                  </label>
+                </div>
               </div>
             </div>
 
