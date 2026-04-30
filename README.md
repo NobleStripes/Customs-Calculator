@@ -6,7 +6,7 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
 - Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, taxes, and landed-cost outputs shown in PHP. All fee logic (brokerage, IPC, CSF, transit charge) runs server-side so single-item and batch calculations are always consistent, and missing tariff rows now fail explicitly instead of silently defaulting to zero.
-- New in 0.4.1: Admin tariff import supports CSV/XLS/XLSX upload paths, preview/source CSV exports, stronger Tariff Commission HTML parsing coverage, and batch-import alias/header fixes.
+- New in 0.5.0: Full PHL 2026 compliance fee engine (CMTA administrative fees, excise tax for 5 categories, corrected VAT base, BOC weekly FX rate, all entry tiers), goods classification engine (import type per CMTA, agency clearances, strategic trade/STMO flag, VAT-exempt flag, FTA Certificate of Origin identification), and Import Classification panel in the calculator results UI.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
 - Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions and local fallback results.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
@@ -31,17 +31,18 @@ The project is in an active build-out phase: core calculation and operator workf
 
 ## Release Notes
 
-### Current Release: v0.4.1
+### Current Release: v0.5.0
 
-- Added CSV/XLS/XLSX upload support to the Admin tariff import workspace.
-- Added export/download actions for tariff import preview results and tariff source governance tables.
-- Added stronger Tariff Commission matrix parser coverage and BOC negative fixtures for HTML fallback extraction.
-- Fixed Batch Import CSV parsing so reordered headers and common alias names are mapped correctly.
+- Added full PHL 2026 customs compliance fee and tax engine: CMTA administrative fees (IPF, CDS, DST, LRF, brokerage), excise tax for 5 RA 10963/11467 categories (spirits, beer/wines, tobacco, automobiles, sweetened beverages, petroleum), corrected VAT base per NIRC Sec. 107, BOC weekly FX rate with 7-day TTL, and all three entry tiers (de minimis / informal / formal).
+- Added goods classification engine: CMTA import type (Free / Regulated / Restricted / Prohibited) for all 99 HS chapters + 30+ heading overrides, agency clearance requirements with full names, strategic trade / STMO flag (RA 10697), VAT-exempt goods flag (NIRC Sec. 109), and FTA Certificate of Origin form identification for 9 PHL FTA schedules.
+- Import Classification panel added to calculation results: import-type badge, agency clearance list, CoO alert, strategic trade warning, and VAT-exempt note.
+- CoO hint shown under schedule selector when a non-MFN FTA schedule is chosen.
+- 50 new tests; total suite now 180/180 passing.
 
 Full release details:
 
+- [docs/changelog/v0.5.0.md](docs/changelog/v0.5.0.md)
 - [docs/changelog/v0.4.1.md](docs/changelog/v0.4.1.md)
-- [docs/changelog/v0.4.0.md](docs/changelog/v0.4.0.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## Features
@@ -67,6 +68,9 @@ Full release details:
 - [x] HS catalog import pipeline for CSV/XLS sources into `hs_codes`
 - [x] Tariff data ingestion workflow with Admin preview/import workspace, including CSV/XLS/XLSX upload support
 - [x] Runtime settings operations panel (health state, latest source visibility, manual runtime refresh, and robust save/reset persistence)
+- [x] PHL 2026 customs compliance fee engine: CMTA administrative fees (IPF/CDS/DST/LRF/brokerage), excise tax categories (spirits, beer/wines, tobacco, automobiles, sweetened beverages, petroleum), corrected VAT base, BOC weekly FX rate, de minimis / informal / formal entry tiers
+- [x] Goods classification engine: CMTA import type (Free/Regulated/Restricted/Prohibited), agency clearance requirements, strategic trade / STMO flag (RA 10697), VAT-exempt goods flag (NIRC Sec. 109), FTA Certificate of Origin identification for 9 PHL FTA schedules
+- [x] Import Classification panel in calculator results and CoO schedule hint in the calculator form
 
 ### In Progress
 - [x] Data management/admin UI for tariff source imports and review queue (single-row and bulk review actions, confidence filtering, and governance summaries)
@@ -196,6 +200,8 @@ For issues, feature requests, or contributions:
 The full changelog has moved out of this README into dedicated release-note files:
 
 - Changelog index: [CHANGELOG.md](CHANGELOG.md)
+- 0.5.0 release notes: [docs/changelog/v0.5.0.md](docs/changelog/v0.5.0.md)
+- 0.4.1 release notes: [docs/changelog/v0.4.1.md](docs/changelog/v0.4.1.md)
 - 0.4.0 release notes: [docs/changelog/v0.4.0.md](docs/changelog/v0.4.0.md)
 - 0.3.0 release notes: [docs/changelog/v0.3.0.md](docs/changelog/v0.3.0.md)
 - 0.2.0 release notes: [docs/changelog/v0.2.0.md](docs/changelog/v0.2.0.md)

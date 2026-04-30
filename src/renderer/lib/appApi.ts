@@ -117,12 +117,34 @@ type ExciseTaxBreakdown = {
   notes: string
 }
 
+/** CMTA import classification category */
+export type ImportType = 'free' | 'regulated' | 'restricted' | 'prohibited'
+
+export type ImportClassificationResult = {
+  importType: ImportType
+  /** Regulatory agency acronyms whose prior permit is required before BOC release */
+  agencies: string[]
+  /** Full names parallel to `agencies` */
+  agencyFullNames: string[]
+  /** Human-readable explanation */
+  notes: string
+  isStrategicTradeGood: boolean
+  strategicTradeNotes?: string
+  isVatExempt: boolean
+  vatExemptBasis?: string
+  /** True when a non-MFN FTA schedule is selected — CoO required to claim preference */
+  requiresCertificateOfOrigin: boolean
+  certificateOfOriginForm?: string
+  warnings: string[]
+}
+
 type BatchResultRow = ShipmentRow & {
   scheduleCode: string
   deMinimisExempt: boolean
   deMinimisReason?: string
   entryType: 'de_minimis' | 'informal' | 'formal'
   insuranceBenchmarkApplied: boolean
+  importClassification: ImportClassificationResult
   duty: { amount: number; surcharge: number; rate: number; notes?: string }
   exciseTax: ExciseTaxBreakdown
   vat: { rate: number; amount: number }
@@ -1244,6 +1266,19 @@ export const appApi = {
           ...shipment,
           scheduleCode,
           destinationPort,
+          deMinimisExempt: false,
+          entryType: 'informal' as const,
+          insuranceBenchmarkApplied: false,
+          importClassification: {
+            importType: 'free' as const,
+            agencies: [],
+            agencyFullNames: [],
+            notes: 'Classification unavailable in offline mode',
+            isStrategicTradeGood: false,
+            isVatExempt: false,
+            requiresCertificateOfOrigin: false,
+            warnings: [],
+          },
           duty: {
             amount: dutyAmount,
             surcharge: surchargeAmount,
@@ -1263,6 +1298,7 @@ export const appApi = {
           breakdown: {
             itemTaxes: {
               cud: dutyAmount,
+              excise: 0,
               vat: vatAmount,
               totalItemTax: dutyAmount + vatAmount,
             },
@@ -1272,10 +1308,13 @@ export const appApi = {
               csf: csfPhp,
               cds: cdsPhp,
               irs: irsPhp,
+              lrf: 0,
               totalGlobalTax: totalGlobalFeesPhp,
             },
             totalTaxAndFees: dutyAmount + vatAmount + totalGlobalFeesPhp,
           },
+          exciseTax: { amount: 0, adValorem: 0, specific: 0, category: 'none', basis: 'N/A', notes: 'Not calculated in offline mode' },
+          landedCostSubtotal: vatBasePhp,
           totalLandedCost: vatBasePhp + vatAmount,
           calculationCurrency: 'PHP',
           fx: {
@@ -1476,6 +1515,7 @@ export const appApi = {
       defaultOriginCountry: '',
       autoFetcherEnabled: true,
       fxCacheTtlHours: 24,
+      fxPreferBocRate: true,
       calculatorMode: 'estimate',
       catalogMode: 'seed-fallback',
       stagedCutoverEnabled: false,
@@ -1503,6 +1543,7 @@ export const appApi = {
         defaultOriginCountry: '',
         autoFetcherEnabled: true,
         fxCacheTtlHours: 24,
+        fxPreferBocRate: true,
         calculatorMode: 'estimate',
         catalogMode: 'seed-fallback',
         stagedCutoverEnabled: false,

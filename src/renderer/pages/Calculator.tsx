@@ -87,6 +87,19 @@ interface CalculationResultsData {
   deMinimisReason?: string
   entryType: 'de_minimis' | 'informal' | 'formal'
   insuranceBenchmarkApplied: boolean
+  importClassification?: {
+    importType: 'free' | 'regulated' | 'restricted' | 'prohibited'
+    agencies: string[]
+    agencyFullNames: string[]
+    notes: string
+    isStrategicTradeGood: boolean
+    strategicTradeNotes?: string
+    isVatExempt: boolean
+    vatExemptBasis?: string
+    requiresCertificateOfOrigin: boolean
+    certificateOfOriginForm?: string
+    warnings: string[]
+  }
   totalLandedCost: number
   calculationCurrency: 'PHP'
   fx: {
@@ -422,6 +435,7 @@ export const Calculator: React.FC = () => {
         deMinimisReason: r.deMinimisReason,
         entryType: r.entryType ?? 'informal',
         insuranceBenchmarkApplied: r.insuranceBenchmarkApplied ?? false,
+        importClassification: r.importClassification,
         totalLandedCost: r.totalLandedCost,
         calculationCurrency: 'PHP',
         fx: r.fx,
@@ -611,6 +625,11 @@ export const Calculator: React.FC = () => {
                   ))}
                 </select>
                 <div className="field-help-text">Schedule options now include the seeded FTA agreements, while imported tariff data still controls which rates are available under each code.</div>
+                {formData.scheduleCode && formData.scheduleCode !== 'MFN' && (
+                  <div className="coo-hint">
+                    <strong>Certificate of Origin required</strong> — The <em>{formData.scheduleCode}</em> preferential rate requires a valid CoO issued by the exporting country. Goods without a CoO will be assessed at MFN rate.
+                  </div>
+                )}
               </div>
 
               <div className="form-group">

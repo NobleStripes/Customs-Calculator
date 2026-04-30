@@ -309,3 +309,15 @@
   margin-bottom: 4px;
   color: #92400e;
 }
+
+/* Certificate of Origin hint shown under the schedule selector */
+.coo-hint {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: #fff3cd;
+  border-left: 3px solid #ffc107;
+  border-radius: 4px;
+  font-size: 0.84rem;
+  color: #664d03;
+  line-height: 1.5;
+}

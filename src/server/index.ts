@@ -40,6 +40,7 @@ import {
   type SweetenedBeverageSugarType,
 } from '../backend/services/exciseTax'
 import { getRuntimeSettings, updateRuntimeSettings } from '../backend/services/runtimeSettings'
+import { classifyImport } from '../backend/services/importClassification'
 
 const app = express()
 const websiteFetcher = new WebsiteFetcherService()
@@ -307,6 +308,7 @@ app.post('/api/calculate/batch', async (request, response) => {
           duty: { amount: 0, surcharge: 0, rate: 0, notes: 'De minimis exempt' },
           exciseTax: { amount: 0, adValorem: 0, specific: 0, category: 'none', basis: 'N/A', notes: 'De minimis exempt' },
           vat: { amount: 0, rate: 12 },
+          importClassification: classifyImport(resolvedCode.code, scheduleCode),
           compliance: await complianceChecker.getRequirements(resolvedCode.code, fobPhp, destinationPort),
           costBase: {
             taxableValue: fobPhp,
@@ -420,6 +422,7 @@ app.post('/api/calculate/batch', async (request, response) => {
       const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp + lrfPhp
 
       const complianceResult = await complianceChecker.getRequirements(resolvedCode.code, dutiableValuePhp, destinationPort)
+      const importClassification = classifyImport(resolvedCode.code, scheduleCode)
 
       results.push({
         ...shipment,
@@ -429,6 +432,7 @@ app.post('/api/calculate/batch', async (request, response) => {
         deMinimisExempt: false,
         entryType,
         insuranceBenchmarkApplied,
+        importClassification,
         duty: {
           amount: dutyResult.amount,
           surcharge: dutyResult.surcharge,

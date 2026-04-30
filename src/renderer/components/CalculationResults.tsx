@@ -64,6 +64,19 @@ interface CalculationResultsData {
     notes?: string
   }
   landedCostSubtotal?: number
+  importClassification?: {
+    importType: 'free' | 'regulated' | 'restricted' | 'prohibited'
+    agencies: string[]
+    agencyFullNames: string[]
+    notes: string
+    isStrategicTradeGood: boolean
+    strategicTradeNotes?: string
+    isVatExempt: boolean
+    vatExemptBasis?: string
+    requiresCertificateOfOrigin: boolean
+    certificateOfOriginForm?: string
+    warnings: string[]
+  }
   deMinimisExempt?: boolean
   deMinimisReason?: string
   entryType?: 'de_minimis' | 'informal' | 'formal'
@@ -160,6 +173,69 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           {results.entryType === 'de_minimis' ? 'De Minimis Entry' : results.entryType === 'formal' ? 'Formal Entry' : 'Informal Entry'}
         </div>
       )}
+
+      {/* Import Classification panel */}
+      {results.importClassification && (() => {
+        const ic = results.importClassification
+        const importTypeBadgeClass =
+          ic.importType === 'free'       ? 'badge-success'  :
+          ic.importType === 'regulated'  ? 'badge-info'     :
+          ic.importType === 'restricted' ? 'badge-warning'  : 'badge-danger'
+        const importTypeLabel =
+          ic.importType === 'free'       ? 'Free Importation' :
+          ic.importType === 'regulated'  ? 'Regulated'        :
+          ic.importType === 'restricted' ? 'Restricted'       : 'Prohibited'
+        return (
+          <div className="import-class-panel">
+            <div className="import-class-header">
+              <h3>Import Classification</h3>
+              <span className={`badge ${importTypeBadgeClass}`}>{importTypeLabel}</span>
+            </div>
+            <p className="import-class-notes">{ic.notes}</p>
+
+            {ic.agencies.length > 0 && (
+              <div className="agency-list">
+                <strong>Required Agency Clearances:</strong>
+                <ul>
+                  {ic.agencies.map((agency, i) => (
+                    <li key={agency}>
+                      <span className="agency-acronym">{agency}</span>
+                      {ic.agencyFullNames[i] ? ` — ${ic.agencyFullNames[i]}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {ic.requiresCertificateOfOrigin && (
+              <div className="coo-alert">
+                <strong>Certificate of Origin Required</strong>
+                <p>
+                  The selected FTA schedule requires a valid{' '}
+                  <strong>{ic.certificateOfOriginForm ?? 'Certificate of Origin'}</strong>{' '}
+                  to claim preferential duty rates. Goods without a valid CoO will be assessed at MFN rate.
+                </p>
+              </div>
+            )}
+
+            {ic.isStrategicTradeGood && (
+              <div className="strategic-trade-warning">
+                <strong>⚠ Strategic Trade Good (STMO)</strong>
+                <p>
+                  {ic.strategicTradeNotes ?? 'Requires Strategic Trade Authorization (STA) from the Strategic Trade Management Office (STMO) under RA 10697 before shipment.'}
+                </p>
+              </div>
+            )}
+
+            {ic.isVatExempt && (
+              <div className="vat-exempt-note">
+                <strong>VAT-Exempt Import</strong>
+                <p>{ic.vatExemptBasis}</p>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* De minimis exempt — short-circuit the full breakdown */}
       {results.deMinimisExempt && (
