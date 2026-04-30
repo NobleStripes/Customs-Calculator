@@ -50,10 +50,24 @@ interface CalculationResultsData {
       csf?: number
       cds?: number
       irs?: number
+      lrf?: number
       totalGlobalTax?: number
     }
     totalTaxAndFees?: number
   }
+  exciseTax?: {
+    amount?: number
+    adValorem?: number
+    specific?: number
+    category?: string
+    basis?: string
+    notes?: string
+  }
+  landedCostSubtotal?: number
+  deMinimisExempt?: boolean
+  deMinimisReason?: string
+  entryType?: 'de_minimis' | 'informal' | 'formal'
+  insuranceBenchmarkApplied?: boolean
   fx?: {
     applied?: boolean
     rateToPhp?: number
@@ -97,7 +111,8 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
 
   const dutyAmount = results.duty?.amount || 0
   const vatAmount = results.vat?.amount || 0
-  const itemTaxTotal = dutyAmount + vatAmount
+  const exciseAmount = results.exciseTax?.amount || 0
+  const itemTaxTotal = dutyAmount + exciseAmount + vatAmount
   const costBase = results.costBase || {}
   const extraFees = {
     transitCharge: results.breakdown?.globalFees?.transitCharge || 0,
@@ -105,10 +120,12 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
     csf: results.breakdown?.globalFees?.csf || 0,
     cds: results.breakdown?.globalFees?.cds || 0,
     irs: results.breakdown?.globalFees?.irs || 0,
+    lrf: results.breakdown?.globalFees?.lrf || 0,
   }
-  const globalTaxTotal = extraFees.transitCharge + extraFees.ipc + extraFees.csf + extraFees.cds + extraFees.irs
+  const globalTaxTotal = extraFees.transitCharge + extraFees.ipc + extraFees.csf + extraFees.cds + extraFees.irs + extraFees.lrf
   const totalTaxAndFees = results.breakdown?.totalTaxAndFees || (itemTaxTotal + globalTaxTotal)
   const requiredDocuments = results.compliance?.requiredDocuments || results.compliance?.requirements || []
+  const landedCostSubtotal = results.landedCostSubtotal ?? (results.totalLandedCost - vatAmount)
 
   const handleExportDocument = async () => {
     setExportMessage(null)
@@ -137,6 +154,33 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
     <div className="calculation-results">
       <h2>Calculation Results</h2>
 
+      {/* Entry type badge */}
+      {results.entryType && (
+        <div className={`badge ${results.entryType === 'formal' ? 'badge-warning' : results.entryType === 'de_minimis' ? 'badge-success' : 'badge-info'}`}>
+          {results.entryType === 'de_minimis' ? 'De Minimis Entry' : results.entryType === 'formal' ? 'Formal Entry' : 'Informal Entry'}
+        </div>
+      )}
+
+      {/* De minimis exempt — short-circuit the full breakdown */}
+      {results.deMinimisExempt && (
+        <div className="result-card de-minimis-card">
+          <h3>De Minimis Exempt</h3>
+          <p className="de-minimis-msg">
+            {results.deMinimisReason || 'FOB ≤ ₱10,000 — De Minimis exempt. No duties or taxes assessed.'}
+          </p>
+          <p className="detail">
+            Total Landed Cost: <strong>{formatCurrency(results.totalLandedCost, calculationCurrency)}</strong>
+          </p>
+          {results.fx?.applied && (
+            <p className="detail fx-note">
+              FX applied: 1 {results.fx.inputCurrency} = {formatNumber(results.fx.rateToPhp ?? 0)} PHP
+              {results.fx.source ? ` (${results.fx.source})` : ''}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!results.deMinimisExempt && (
       <div className="results-section">
         <div className="result-card summary">
           <h3>Total Landed Cost</h3>
@@ -165,6 +209,9 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           </p>
           <p className="detail">
             FOB + Freight + Insurance converted using the applied forex rate
+            {results.insuranceBenchmarkApplied && (
+              <span className="benchmark-note"> — 2% insurance benchmark applied</span>
+            )}
           </p>
         </div>
 
@@ -185,6 +232,16 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
               <span>CUD</span>
               <strong>{formatCurrency(dutyAmount, calculationCurrency)}</strong>
             </div>
+            {exciseAmount > 0 && (
+              <div className="breakdown-row">
+                <span>Excise{results.exciseTax?.category ? ` (${results.exciseTax.category.replace(/_/g, ' ')})` : ''}</span>
+                <strong>{formatCurrency(exciseAmount, calculationCurrency)}</strong>
+              </div>
+            )}
+            <div className="breakdown-row subtotal-row">
+              <span>Landed Cost (VAT Base)</span>
+              <strong>{formatCurrency(landedCostSubtotal, calculationCurrency)}</strong>
+            </div>
             <div className="breakdown-row">
               <span>VAT</span>
               <strong>{formatCurrency(vatAmount, calculationCurrency)}</strong>
@@ -201,7 +258,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
               </div>
             )}
             <div className="breakdown-row">
-              <span>IPC</span>
+              <span>IPF</span>
               <strong>{formatCurrency(extraFees.ipc, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
@@ -216,6 +273,10 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
               <span>IRS</span>
               <strong>{formatCurrency(extraFees.irs, calculationCurrency)}</strong>
             </div>
+            <div className="breakdown-row">
+              <span>LRF</span>
+              <strong>{formatCurrency(extraFees.lrf, calculationCurrency)}</strong>
+            </div>
             <div className="breakdown-row total-row">
               <span>Total Global Tax</span>
               <strong>{formatCurrency(globalTaxTotal, calculationCurrency)}</strong>
@@ -226,7 +287,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
             </div>
           </div>
           <p className="detail breakdown-note">
-            Taxable Value (PHP) uses FOB + Freight + Insurance. VAT Base equals the landed-cost base before VAT. CSF uses USD 5 for 20-foot containers and USD 10 for 40-foot containers. IPC, CSF, CDS, and IRS are treated as global taxes. Estimates should still be validated with BOC before filing.
+            Taxable Value (PHP) uses FOB + Freight + Insurance. VAT Base equals the full Landed Cost (DV + Duty + Excise + all fees) per BOC formula. CSF uses USD 5 for 20-foot and USD 10 for 40-foot containers. Estimates should be validated with BOC before filing.
           </p>
         </div>
 
@@ -239,6 +300,19 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
             Rate: {formatNumber(results.duty?.rate || 0)}%
           </p>
         </div>
+
+        {exciseAmount > 0 && (
+          <div className="result-card">
+            <h3>Excise Tax</h3>
+            <p className="amount">{formatCurrency(exciseAmount, calculationCurrency)}</p>
+            <p className="detail">
+              {results.exciseTax?.category?.replace(/_/g, ' ')}
+              {results.exciseTax?.adValorem ? ` — Ad valorem: ${formatCurrency(results.exciseTax.adValorem, calculationCurrency)}` : ''}
+              {results.exciseTax?.specific ? ` — Specific: ${formatCurrency(results.exciseTax.specific, calculationCurrency)}` : ''}
+            </p>
+            {results.exciseTax?.notes && <p className="detail">{results.exciseTax.notes}</p>}
+          </div>
+        )}
 
         <div className="result-card">
           <h3>Value Added Tax (VAT)</h3>
@@ -263,6 +337,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {results.compliance?.warnings && results.compliance.warnings.length > 0 && (
         <div className="compliance-section warning">
@@ -319,12 +394,18 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           <li>Taxable Value PH: {formatCurrency(costBase.taxableValue || 0, calculationCurrency)}</li>
           <li>Duty Rate: {formatNumber(results.duty?.rate || 0)}%</li>
           <li>Duty Amount: {formatCurrency(results.duty?.amount || 0, calculationCurrency)}</li>
+          <li>Excise Tax: {formatCurrency(exciseAmount, calculationCurrency)}{results.exciseTax?.category && results.exciseTax.category !== 'none' ? ` (${results.exciseTax.category.replace(/_/g, ' ')})` : ''}</li>
           <li>Surcharge: {formatCurrency(results.duty?.surcharge || 0, calculationCurrency)}</li>
           <li>Brokerage Fee: {formatCurrency(costBase.brokerageFee || 0, calculationCurrency)}</li>
           <li>Arrastre / Wharfage: {formatCurrency(costBase.arrastreWharfage || 0, calculationCurrency)}</li>
           <li>Dox Stamp & Others: {formatCurrency(costBase.doxStampOthers || 0, calculationCurrency)}</li>
-          <li>VAT Base / TLC: {formatCurrency(costBase.vatBase || 0, calculationCurrency)}</li>
+          <li>Landed Cost (VAT Base): {formatCurrency(landedCostSubtotal, calculationCurrency)}</li>
           <li>Total Item Tax: {formatCurrency(itemTaxTotal, calculationCurrency)}</li>
+          <li>IPF: {formatCurrency(extraFees.ipc, calculationCurrency)}</li>
+          <li>CSF: {formatCurrency(extraFees.csf, calculationCurrency)}</li>
+          <li>CDS: {formatCurrency(extraFees.cds, calculationCurrency)}</li>
+          <li>IRS: {formatCurrency(extraFees.irs, calculationCurrency)}</li>
+          <li>LRF: {formatCurrency(extraFees.lrf, calculationCurrency)}</li>
           <li>Total Global Tax: {formatCurrency(globalTaxTotal, calculationCurrency)}</li>
           <li>Total Tax and Fees: {formatCurrency(totalTaxAndFees, calculationCurrency)}</li>
           <li>VAT Rate: {formatNumber(results.vat?.rate || 0)}%</li>

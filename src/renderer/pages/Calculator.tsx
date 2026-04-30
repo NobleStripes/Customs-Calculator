@@ -18,6 +18,12 @@ interface CalculationPayload {
   arrastreWharfage: number
   doxStampOthers: number
   declarationType: 'consumption' | 'warehousing' | 'transit'
+  exciseCategory?: string
+  exciseQuantity?: number
+  exciseUnit?: string
+  exciseNrp?: number
+  sweetenedBeverageSugarType?: string
+  petroleumProductType?: string
 }
 
 interface CalculationResultsData {
@@ -53,6 +59,7 @@ interface CalculationResultsData {
   breakdown: {
     itemTaxes: {
       cud: number
+      excise: number
       vat: number
       totalItemTax: number
     }
@@ -62,10 +69,24 @@ interface CalculationResultsData {
       csf: number
       cds: number
       irs: number
+      lrf: number
       totalGlobalTax: number
     }
     totalTaxAndFees: number
   }
+  exciseTax: {
+    amount: number
+    adValorem: number
+    specific: number
+    category: string
+    basis: string
+    notes: string
+  }
+  landedCostSubtotal: number
+  deMinimisExempt: boolean
+  deMinimisReason?: string
+  entryType: 'de_minimis' | 'informal' | 'formal'
+  insuranceBenchmarkApplied: boolean
   totalLandedCost: number
   calculationCurrency: 'PHP'
   fx: {
@@ -73,7 +94,7 @@ interface CalculationResultsData {
     rateToPhp: number
     inputCurrency: string
     baseCurrency: 'PHP'
-    source?: 'cache' | 'live' | 'fallback' | 'identity'
+    source?: 'cache' | 'live' | 'fallback' | 'identity' | 'boc'
     timestamp?: string
   }
 }
@@ -104,6 +125,44 @@ const formatCurrency = (amount: number, currency = 'PHP') =>
     maximumFractionDigits: 2,
   }).format(amount)
 
+/** Detect excise category client-side for showing the excise input section. Mirrors server-side logic. */
+function detectExciseCategory(hsCode: string): string | null {
+  const compact = hsCode.replace(/\./g, '').replace(/\s/g, '')
+  if (compact.length < 4) return null
+  const chapter = parseInt(compact.slice(0, 2), 10)
+  if (chapter === 22) {
+    const heading = parseInt(compact.slice(0, 4), 10)
+    if (heading === 2208) return 'distilled_spirits'
+    if (heading === 2203) return 'fermented_liquors'
+    if (heading >= 2204 && heading <= 2206) return 'wines'
+    if (heading === 2202) return 'sweetened_beverages'
+    return null
+  }
+  if (chapter === 24) {
+    const heading = parseInt(compact.slice(0, 4), 10)
+    return heading === 2402 ? 'cigars' : 'cigarettes'
+  }
+  if (chapter === 27) return 'petroleum'
+  if (chapter === 87) {
+    const heading = parseInt(compact.slice(0, 4), 10)
+    if (heading >= 8703 && heading <= 8704) return 'automobiles'
+  }
+  return null
+}
+
+const EXCISE_UNIT_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  distilled_spirits: [{ value: 'proof_liter', label: 'Proof Liter' }, { value: 'liter', label: 'Liter' }],
+  fermented_liquors: [{ value: 'liter', label: 'Liter' }],
+  wines: [{ value: 'liter', label: 'Liter' }],
+  cigarettes: [{ value: 'pack_20s', label: 'Pack of 20' }],
+  cigars: [{ value: 'unit', label: 'Unit (stick)' }],
+  automobiles: [{ value: 'unit', label: 'Unit (vehicle)' }],
+  sweetened_beverages: [{ value: 'liter', label: 'Liter' }],
+  petroleum: [{ value: 'liter', label: 'Liter' }],
+}
+
+const EXCISE_NEEDS_NRP = new Set(['distilled_spirits', 'wines', 'cigars', 'automobiles'])
+
 export const Calculator: React.FC = () => {
   const settings = useSettingsStore((state) => state.settings)
   const [formData, setFormData] = useState<CalculationPayload>(() => ({
@@ -119,7 +178,15 @@ export const Calculator: React.FC = () => {
     arrastreWharfage: 0,
     doxStampOthers: 0,
     declarationType: 'consumption',
+    exciseCategory: undefined,
+    exciseQuantity: undefined,
+    exciseUnit: undefined,
+    exciseNrp: undefined,
+    sweetenedBeverageSugarType: undefined,
+    petroleumProductType: undefined,
   }))
+
+  const [detectedExciseCategory, setDetectedExciseCategory] = useState<string | null>(null)
 
   const [results, setResults] = useState<CalculationResultsData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -265,7 +332,14 @@ export const Calculator: React.FC = () => {
   const handleHSCodeSelect = (code: string, selection?: AppHsCodeRow) => {
     setHsCodeValidationMessage(null)
     setSelectedLookupRow(selection || null)
-    setFormData((prev) => ({ ...prev, hsCode: code }))
+    const detectedCat = detectExciseCategory(code)
+    setDetectedExciseCategory(detectedCat)
+    setFormData((prev) => ({
+      ...prev,
+      hsCode: code,
+      exciseCategory: detectedCat ?? undefined,
+      exciseUnit: detectedCat ? (EXCISE_UNIT_OPTIONS[detectedCat]?.[0]?.value ?? undefined) : undefined,
+    }))
   }
 
   const handleCalculate = async () => {
@@ -311,6 +385,12 @@ export const Calculator: React.FC = () => {
         containerSize: formData.containerSize,
         arrastreWharfage: formData.arrastreWharfage,
         doxStampOthers: formData.doxStampOthers,
+        exciseCategory: formData.exciseCategory,
+        exciseQuantity: formData.exciseQuantity,
+        exciseUnit: formData.exciseUnit,
+        exciseNrp: formData.exciseNrp,
+        sweetenedBeverageSugarType: formData.sweetenedBeverageSugarType,
+        petroleumProductType: formData.petroleumProductType,
       }])
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -336,6 +416,12 @@ export const Calculator: React.FC = () => {
           vatBase: r.costBase.vatBase,
         },
         breakdown: r.breakdown,
+        exciseTax: r.exciseTax ?? { amount: 0, adValorem: 0, specific: 0, category: 'none', basis: '', notes: '' },
+        landedCostSubtotal: r.landedCostSubtotal ?? r.totalLandedCost,
+        deMinimisExempt: r.deMinimisExempt ?? false,
+        deMinimisReason: r.deMinimisReason,
+        entryType: r.entryType ?? 'informal',
+        insuranceBenchmarkApplied: r.insuranceBenchmarkApplied ?? false,
         totalLandedCost: r.totalLandedCost,
         calculationCurrency: 'PHP',
         fx: r.fx,
@@ -474,8 +560,36 @@ export const Calculator: React.FC = () => {
                   }
                   placeholder="0.00"
                 />
+                {formData.insurance === 0 && (
+                  <div className="field-help-text">Auto 2% benchmark will be applied if left at 0.</div>
+                )}
               </div>
             </div>
+
+            {/* De minimis & entry type badges */}
+            {(() => {
+              const fxRate = fxPreview?.rateToPhp ?? (formData.currency.toUpperCase() === 'PHP' ? 1 : 56)
+              const fobPhp = formData.value * fxRate
+              const isDeMinimis = fobPhp > 0 && fobPhp <= 10000
+              const freightPhp = formData.freight * fxRate
+              const insurancePhp = formData.insurance > 0 ? formData.insurance * fxRate : formData.value * fxRate * 0.02
+              const dutiableValuePhp = fobPhp + freightPhp + insurancePhp
+              const isFormal = dutiableValuePhp > 50000
+              return (
+                <>
+                  {isDeMinimis && (
+                    <div className="badge badge-success">
+                      De Minimis — FOB ≤ ₱10,000. No duties or taxes assessed (unless alcohol/tobacco).
+                    </div>
+                  )}
+                  {!isDeMinimis && fobPhp > 0 && (
+                    <div className={`badge ${isFormal ? 'badge-warning' : 'badge-info'}`}>
+                      {isFormal ? 'Formal Entry' : 'Informal Entry'} — Dutiable Value ≈ {formatCurrency(dutiableValuePhp)}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
 
             <div className="form-row">
               <div className="form-group">
@@ -612,6 +726,118 @@ export const Calculator: React.FC = () => {
                 />
               </div>
             </div>
+
+            {/* Excise tax section — shown when HS code maps to an excise category */}
+            {detectedExciseCategory && detectedExciseCategory !== 'none' && (
+              <div className="form-section excise-section">
+                <h3>Excise Tax Details</h3>
+                <p className="field-help-text">
+                  HS code maps to excise category: <strong>{detectedExciseCategory.replace(/_/g, ' ')}</strong>. Enter quantity to include excise in calculation.
+                </p>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="excise-quantity">Quantity</label>
+                    <input
+                      id="excise-quantity"
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={formData.exciseQuantity ?? ''}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          exciseQuantity: parseFloat(e.target.value) || undefined,
+                        }))
+                      }
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="excise-unit">Unit</label>
+                    <select
+                      id="excise-unit"
+                      value={formData.exciseUnit ?? ''}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, exciseUnit: e.target.value }))
+                      }
+                    >
+                      {(EXCISE_UNIT_OPTIONS[detectedExciseCategory] ?? []).map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {EXCISE_NEEDS_NRP.has(detectedExciseCategory) && (
+                  <div className="form-group">
+                    <label htmlFor="excise-nrp">
+                      {detectedExciseCategory === 'automobiles'
+                        ? 'Net Manufacturer Price (NMP) in input currency'
+                        : 'Net Retail Price (NRP) in input currency'}
+                    </label>
+                    <input
+                      id="excise-nrp"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={formData.exciseNrp ?? ''}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          exciseNrp: parseFloat(e.target.value) || undefined,
+                        }))
+                      }
+                      placeholder="0.00"
+                    />
+                  </div>
+                )}
+
+                {detectedExciseCategory === 'sweetened_beverages' && (
+                  <div className="form-group">
+                    <label htmlFor="sugar-type">Sugar Type</label>
+                    <select
+                      id="sugar-type"
+                      value={formData.sweetenedBeverageSugarType ?? 'sucrose_glucose'}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, sweetenedBeverageSugarType: e.target.value }))
+                      }
+                    >
+                      <option value="sucrose_glucose">Sucrose / Glucose / Other caloric sweeteners (₱6/L)</option>
+                      <option value="hfcs">High-Fructose Corn Syrup — HFCS (₱12/L)</option>
+                    </select>
+                  </div>
+                )}
+
+                {detectedExciseCategory === 'petroleum' && (
+                  <div className="form-group">
+                    <label htmlFor="petroleum-type">Petroleum Product</label>
+                    <select
+                      id="petroleum-type"
+                      value={formData.petroleumProductType ?? 'other'}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, petroleumProductType: e.target.value }))
+                      }
+                    >
+                      <option value="lubricating_oils">Lubricating Oils</option>
+                      <option value="processed_gas">Processed Gas</option>
+                      <option value="waxes_petrolatum">Waxes &amp; Petrolatum</option>
+                      <option value="denatured_alcohol">Denatured Alcohol</option>
+                      <option value="naphtha_gasoline">Naphtha / Unleaded Gasoline (₱10/L)</option>
+                      <option value="aviation_turbo">Aviation Turbo Jet Fuel (₱4/L)</option>
+                      <option value="kerosene">Kerosene (₱3/L)</option>
+                      <option value="diesel">Diesel Fuel (₱6/L)</option>
+                      <option value="liquefied_petroleum_gas">Liquefied Petroleum Gas (₱3/kg)</option>
+                      <option value="asphalts">Asphalts</option>
+                      <option value="bunker_fuel">Bunker Fuel Oil (₱2.50/L)</option>
+                      <option value="petroleum_coke">Petroleum Coke (₱2.50/kg)</option>
+                      <option value="other">Other Petroleum Products</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
 
             {error && <div className="error-message">{error}</div>}
 

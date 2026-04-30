@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   CUSTOMS_DOCUMENTARY_STAMP_PHP,
   BIR_DOCUMENTARY_STAMP_TAX_PHP,
+  LEGAL_RESEARCH_FUND_PHP,
+  DE_MINIMIS_THRESHOLD_PHP,
   BROKERAGE_FEE_SCHEDULE,
   TRANSIT_CHARGE_PHP,
   VAT_RATE,
@@ -10,6 +12,9 @@ import {
   getContainerSecurityFeeUsd,
   getImportProcessingChargePhp,
   normalizeDestinationPort,
+  checkDeMinimis,
+  applyInsuranceBenchmark,
+  getEntryType,
 } from './customsRules'
 
 describe('customsRules', () => {
@@ -17,6 +22,8 @@ describe('customsRules', () => {
     expect(TRANSIT_CHARGE_PHP).toBe(1000)
     expect(CUSTOMS_DOCUMENTARY_STAMP_PHP).toBe(100)
     expect(BIR_DOCUMENTARY_STAMP_TAX_PHP).toBe(30)
+    expect(LEGAL_RESEARCH_FUND_PHP).toBe(10)
+    expect(DE_MINIMIS_THRESHOLD_PHP).toBe(10000)
     expect(VAT_RATE).toBe(0.12)
   })
 
@@ -28,6 +35,13 @@ describe('customsRules', () => {
     expect(getImportProcessingChargePhp(250001)).toBe(1000)
     expect(getImportProcessingChargePhp(500001)).toBe(1500)
     expect(getImportProcessingChargePhp(750001)).toBe(2000)
+    // Formal entry extended tiers
+    expect(getImportProcessingChargePhp(1_000_000)).toBe(2000)
+    expect(getImportProcessingChargePhp(1_000_001)).toBe(2500)
+    expect(getImportProcessingChargePhp(2_000_000)).toBe(2500)
+    expect(getImportProcessingChargePhp(2_000_001)).toBe(3000)
+    expect(getImportProcessingChargePhp(5_000_000)).toBe(3000)
+    expect(getImportProcessingChargePhp(5_000_001)).toBe(4000)
   })
 
   it('returns container security fees only for supported container sizes', () => {
@@ -50,5 +64,65 @@ describe('customsRules', () => {
     expect(normalizeDestinationPort('Puerto Princesa')).toBe('PPS')
     expect(normalizeDestinationPort(' naia ')).toBe('NAIA')
     expect(normalizeDestinationPort('xyz')).toBe('XYZ')
+  })
+
+  describe('checkDeMinimis', () => {
+    it('exempts non-excise goods with FOB ≤ ₱10,000', () => {
+      const result = checkDeMinimis(9000, '8471.30.00')
+      expect(result.exempt).toBe(true)
+    })
+
+    it('does NOT exempt alcohol/tobacco regardless of FOB value', () => {
+      // HS chapter 22 — fermented liquors
+      expect(checkDeMinimis(500, '2203.00.00').exempt).toBe(false)
+      // HS chapter 24 — tobacco
+      expect(checkDeMinimis(500, '2402.20.10').exempt).toBe(false)
+    })
+
+    it('does NOT exempt when FOB > ₱10,000', () => {
+      expect(checkDeMinimis(15000, '8471.30.00').exempt).toBe(false)
+    })
+
+    it('exempts at exactly the threshold', () => {
+      expect(checkDeMinimis(10000, '8471.30.00').exempt).toBe(true)
+    })
+  })
+
+  describe('applyInsuranceBenchmark', () => {
+    it('applies 2% benchmark when insurance is 0', () => {
+      const result = applyInsuranceBenchmark(100000, 0, '8471.30.00')
+      expect(result.insurance).toBe(2000)
+      expect(result.benchmarkApplied).toBe(true)
+    })
+
+    it('preserves provided insurance when > 0', () => {
+      const result = applyInsuranceBenchmark(100000, 500, '8471.30.00')
+      expect(result.insurance).toBe(500)
+      expect(result.benchmarkApplied).toBe(false)
+    })
+
+    it('applies 4% benchmark for dangerous goods (chapters 28, 36, 38)', () => {
+      // chapter 28 = inorganic chemicals
+      const result = applyInsuranceBenchmark(100000, 0, '2801.10.00')
+      expect(result.insurance).toBe(4000)
+      expect(result.benchmarkApplied).toBe(true)
+    })
+  })
+
+  describe('getEntryType', () => {
+    it('classifies de minimis for DV ≤ ₱10,000', () => {
+      expect(getEntryType(9999)).toBe('de_minimis')
+      expect(getEntryType(10000)).toBe('de_minimis')
+    })
+
+    it('classifies informal entry for ₱10,001–₱50,000', () => {
+      expect(getEntryType(10001)).toBe('informal')
+      expect(getEntryType(50000)).toBe('informal')
+    })
+
+    it('classifies formal entry for DV > ₱50,000', () => {
+      expect(getEntryType(50001)).toBe('formal')
+      expect(getEntryType(1_000_000)).toBe('formal')
+    })
   })
 })

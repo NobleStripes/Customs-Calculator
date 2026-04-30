@@ -97,6 +97,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.breakdown-row.subtotal-row {
+  font-weight: 600;
+  border-top: 1px dashed #a0aec0;
+  color: #2d3748;
+  font-style: italic;
+}
+
 .breakdown-row.total-row {
   font-weight: 700;
   border-top: 1px solid #95a5a6;
@@ -290,4 +297,39 @@
   .result-card .amount {
     font-size: 1.5rem;
   }
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.badge-success { background: #d4edda; color: #155724; border-left: 3px solid #28a745; }
+.badge-info    { background: #d1ecf1; color: #0c5460; border-left: 3px solid #17a2b8; }
+.badge-warning { background: #fff3cd; color: #856404; border-left: 3px solid #ffc107; }
+
+/* De minimis exempt card */
+.result-card.de-minimis-card {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #d4edda 0%, #b2dfdb 100%);
+  border-left: 4px solid #28a745;
+  color: #155724;
+}
+
+.de-minimis-msg {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* Insurance benchmark note */
+.benchmark-note {
+  color: #856404;
+  font-style: italic;
+  margin-left: 4px;
 }

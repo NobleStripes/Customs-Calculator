@@ -94,20 +94,47 @@ type ShipmentRow = {
   containerSize: 'none' | '20ft' | '40ft'
   arrastreWharfage: number
   doxStampOthers: number
+  /** Excise tax category (auto-detected from HS code if omitted) */
+  exciseCategory?: string
+  /** Quantity in exciseUnit for excise tax calculation */
+  exciseQuantity?: number
+  /** Unit of measure for excise quantity */
+  exciseUnit?: string
+  /** Net Retail Price or manufacturer's wholesale price in input currency (for ad valorem excise) */
+  exciseNrp?: number
+  /** Sugar type for sweetened beverages ('sucrose_glucose' | 'hfcs' | 'other') */
+  sweetenedBeverageSugarType?: string
+  /** Product type for petroleum excise */
+  petroleumProductType?: string
+}
+
+type ExciseTaxBreakdown = {
+  amount: number
+  adValorem: number
+  specific: number
+  category: string
+  basis: string
+  notes: string
 }
 
 type BatchResultRow = ShipmentRow & {
   scheduleCode: string
+  deMinimisExempt: boolean
+  deMinimisReason?: string
+  entryType: 'de_minimis' | 'informal' | 'formal'
+  insuranceBenchmarkApplied: boolean
   duty: { amount: number; surcharge: number; rate: number; notes?: string }
+  exciseTax: ExciseTaxBreakdown
   vat: { rate: number; amount: number }
   costBase: {
     taxableValue: number; brokerageFee: number; arrastreWharfage: number; doxStampOthers: number; vatBase: number
   }
   breakdown: {
-    itemTaxes: { cud: number; vat: number; totalItemTax: number }
-    globalFees: { transitCharge: number; ipc: number; csf: number; cds: number; irs: number; totalGlobalTax: number }
+    itemTaxes: { cud: number; excise: number; vat: number; totalItemTax: number }
+    globalFees: { transitCharge: number; ipc: number; csf: number; cds: number; irs: number; lrf: number; totalGlobalTax: number }
     totalTaxAndFees: number
   }
+  landedCostSubtotal: number
   totalLandedCost: number
   calculationCurrency: 'PHP'
   fx: { applied: boolean; rateToPhp: number; inputCurrency: string; baseCurrency: 'PHP'; source?: string; timestamp?: string }
@@ -171,10 +198,23 @@ type CalculationDocumentResults = {
       csf?: number
       cds?: number
       irs?: number
+      lrf?: number
       totalGlobalTax?: number
     }
     totalTaxAndFees?: number
   }
+  exciseTax?: {
+    amount?: number
+    adValorem?: number
+    specific?: number
+    category?: string
+    basis?: string
+    notes?: string
+  }
+  landedCostSubtotal?: number
+  deMinimisExempt?: boolean
+  entryType?: 'de_minimis' | 'informal' | 'formal'
+  insuranceBenchmarkApplied?: boolean
   totalLandedCost?: number
   calculationCurrency?: string
 }
@@ -202,6 +242,7 @@ type RuntimeSettings = {
   stagedCutoverEnabled: boolean
   cutoverCoverageThreshold: number
   fullSyncIdempotencyGuardEnabled: boolean
+  fxPreferBocRate: boolean
 }
 
 type RuntimeStatus = {
