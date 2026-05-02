@@ -3,6 +3,7 @@ import os from 'os'
 import path from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { getHsCodeMetadata } from '../../shared/hsLookupQuery'
+import { getCoreCatalogWithMetadata } from './hsCatalogSeed'
 
 let db: sqlite3.Database | null = null
 
@@ -268,7 +269,9 @@ const schema = [
 
 const backfillHsMetadata = async (database: sqlite3.Database): Promise<void> => {
   const rows = await new Promise<Array<{ code: string }>>((resolve, reject) => {
-    database.all('SELECT code FROM hs_codes', (err: Error | null, queryRows: Array<{ code: string }>) => {
+    database.all(
+      'SELECT code FROM hs_codes WHERE chapter_code IS NULL OR section_code IS NULL OR section_name IS NULL',
+      (err: Error | null, queryRows: Array<{ code: string }>) => {
       if (err) {
         reject(err)
         return
@@ -855,33 +858,7 @@ const insertComplianceRules = (database: sqlite3.Database): Promise<void> => {
 export const seedInitialData = async (): Promise<void> => {
   const database = getDatabase()
 
-  const hsCodesData = [
-    { code: '8471.30', description: 'Automatic data processing machines, portable', category: 'Electronics' },
-    { code: '8517.62', description: 'Cellular telephones for mobile networks', category: 'Electronics' },
-    { code: '6204.62', description: "Women's suits of synthetic fibers", category: 'Textiles' },
-    { code: '6203.42', description: "Men's suits of synthetic fibers", category: 'Textiles' },
-    { code: '8704.21', description: 'Trucks, gross vehicle weight not exceeding 5 tonnes', category: 'Vehicles' },
-    { code: '8421.23', description: 'Oil or petrol-filters for internal combustion engines', category: 'Vehicles' },
-    { code: '8511.10', description: 'Spark plugs for spark-ignition or compression-ignition engines', category: 'Vehicles' },
-    { code: '8708.30', description: 'Brakes and servo-brakes; parts thereof, for motor vehicles', category: 'Vehicles' },
-    { code: '8708.80', description: 'Suspension shock absorbers for motor vehicles', category: 'Vehicles' },
-    { code: '8708.99', description: 'Other parts and accessories of motor vehicles', category: 'Vehicles' },
-    { code: '0207.14', description: 'Chicken meat, frozen', category: 'Food' },
-    { code: '0406.10', description: 'Fresh cheese (unripened)', category: 'Food' },
-    { code: '8544.30', description: 'Insulated electric conductors', category: 'Electronics' },
-    { code: '7326.90', description: 'Steel articles, miscellaneous', category: 'Steel' },
-    { code: '4418.90', description: 'Wood articles, miscellaneous', category: 'Wood' },
-  ].map((row) => {
-    const metadata = getHsCodeMetadata(row.code)
-    return {
-      ...row,
-      catalogVersion: 'AHTN-2022',
-      chapterCode: metadata?.chapterCode,
-      sectionCode: metadata?.sectionCode,
-      sectionName: metadata?.sectionName,
-      metadataSource: 'seed',
-    }
-  })
+  const hsCodesData = getCoreCatalogWithMetadata()
 
   await insertCatalogVersions(database)
   await insertHSCodes(database, hsCodesData)

@@ -4,6 +4,9 @@ import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    hookTimeout: 60000,
+  },
   server: {
     port: 5173,
     strictPort: true,

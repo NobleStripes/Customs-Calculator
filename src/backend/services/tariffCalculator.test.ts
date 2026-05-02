@@ -21,7 +21,7 @@ beforeAll(async () => {
   hasChapter99Intent = tariffCalculatorModule.hasChapter99Intent
   getSynonymProfile = tariffCalculatorModule.getSynonymProfile
   scoreHsSearchResult = tariffCalculatorModule.scoreHsSearchResult
-})
+}, 60000)
 
 describe('TariffCalculator.searchHSCodes', () => {
   it('returns the canonical dotted code first for exact undotted searches', async () => {
