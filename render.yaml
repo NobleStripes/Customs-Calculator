@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: customs-calculator
+    env: node
+    plan: starter
+    buildCommand: npm ci ; npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data
+    disks:
+      - name: customs-data
+        mountPath: /data
+        sizeGB: 1
