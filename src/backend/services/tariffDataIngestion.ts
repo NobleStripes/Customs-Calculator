@@ -3,6 +3,7 @@
 
 import sqlite3 from 'sqlite3'
 import { readSheet } from 'read-excel-file/node'
+import pdfParse from 'pdf-parse'
 import { getDatabase } from '../db/database'
 import { getHsCodeMetadata, normalizeExactHsCode } from '../../shared/hsLookupQuery'
 import { getRuntimeSettings } from './runtimeSettings'
@@ -24,6 +25,8 @@ export interface HSCatalogImportRow {
   sectionCode?: string
   sectionName?: string
   metadataSource?: string
+  unit?: string
+  isRestricted?: boolean
 }
 
 export interface HSCatalogImportPreviewRow {
@@ -152,6 +155,79 @@ export interface BatchedHSCatalogImportSummary extends TariffImportSummary {
       batchRows: number
     }
   >
+}
+
+// HS code pattern: 4–10 digits optionally separated by dots (e.g. 8517.13.00)
+const HS_CODE_PATTERN = /\b(\d{4}(?:\.\d{2}){0,3})\b/
+// Duty rate pattern: a percentage following or near an HS code line
+const DUTY_RATE_PATTERN = /(\d{1,3}(?:\.\d{1,4})?)\s*%/
+
+/**
+ * Parse a Tariff Commission PDF schedule (as a raw Buffer) into importable rows.
+ *
+ * The extractor scans each line of the PDF text for an 8-digit AHTN code and a
+ * duty-rate percentage.  Lines that carry only a rate (continuation rows) are
+ * attributed to the most-recently-seen HS code.  All extracted rows are returned
+ * as `TariffImportRow` objects ready to pass to `TariffDataIngestionService`.
+ *
+ * @param pdfBuffer - Raw PDF file content
+ * @param scheduleCode - Tariff schedule to tag the rows with (default 'MFN')
+ * @returns Parsed rows; an empty array when no recognisable data is found
+ */
+export async function parseTariffPdfToRows(
+  pdfBuffer: Buffer,
+  scheduleCode: string = 'MFN'
+): Promise<TariffImportRow[]> {
+  const data = await pdfParse(pdfBuffer)
+  const lines = data.text.split(/\r?\n/)
+
+  const rows: TariffImportRow[] = []
+  const seen = new Set<string>()
+  let currentCode: string | null = null
+  let currentDescription: string[] = []
+
+  const flush = (dutyRate: string, line: string): void => {
+    if (!currentCode) return
+    const key = `${currentCode}:${scheduleCode.toUpperCase()}`
+    if (seen.has(key)) return
+    seen.add(key)
+    rows.push({
+      hsCode: currentCode,
+      scheduleCode: scheduleCode.toUpperCase(),
+      description: currentDescription.join(' ').trim() || undefined,
+      dutyRate,
+      notes: `Extracted from PDF — line: ${line.trim()}`,
+      confidenceScore: 70,
+    })
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) continue
+
+    const codeMatch = line.match(HS_CODE_PATTERN)
+    const rateMatch = line.match(DUTY_RATE_PATTERN)
+
+    if (codeMatch) {
+      // Start of a new HS code entry
+      currentCode = codeMatch[1]
+      currentDescription = [line.replace(HS_CODE_PATTERN, '').replace(DUTY_RATE_PATTERN, '').trim()]
+      if (rateMatch) {
+        flush(rateMatch[1], line)
+        currentDescription = []
+      }
+    } else if (rateMatch && currentCode) {
+      // Rate-only continuation line
+      flush(rateMatch[1], line)
+      currentDescription = []
+    } else if (currentCode) {
+      // Description continuation
+      const text = line.replace(DUTY_RATE_PATTERN, '').trim()
+      if (text) currentDescription.push(text)
+    }
+  }
+
+  return rows
 }
 
 const DEFAULT_THRESHOLD = 85

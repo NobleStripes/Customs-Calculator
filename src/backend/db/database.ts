@@ -20,6 +20,8 @@ type HSCodeSeedRow = {
   sectionCode?: string
   sectionName?: string
   metadataSource?: string
+  unit?: string
+  isRestricted?: boolean
 }
 
 export const getDbPath = (): string => {
@@ -84,6 +86,8 @@ const schema = [
     section_code TEXT,
     section_name TEXT,
     metadata_source TEXT NOT NULL DEFAULT 'seed',
+    unit TEXT,
+    is_restricted INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS hs_catalog_versions (
@@ -327,6 +331,12 @@ const ensureHsCodesSchemaCompatibility = (database: sqlite3.Database): Promise<v
       if (!existingColumns.has('metadata_source')) {
         migrationStatements.push("ALTER TABLE hs_codes ADD COLUMN metadata_source TEXT NOT NULL DEFAULT 'seed'")
       }
+      if (!existingColumns.has('unit')) {
+        migrationStatements.push('ALTER TABLE hs_codes ADD COLUMN unit TEXT')
+      }
+      if (!existingColumns.has('is_restricted')) {
+        migrationStatements.push('ALTER TABLE hs_codes ADD COLUMN is_restricted INTEGER NOT NULL DEFAULT 0')
+      }
 
       const applyBackfillAndIndexes = () => {
         backfillHsMetadata(database)
@@ -568,8 +578,8 @@ const insertHSCodes = (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[])
       database.run(
         `
           INSERT OR IGNORE INTO hs_codes
-          (code, description, category, catalog_version, chapter_code, section_code, section_name, metadata_source)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          (code, description, category, catalog_version, chapter_code, section_code, section_name, metadata_source, unit, is_restricted)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           item.code,
@@ -580,6 +590,8 @@ const insertHSCodes = (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[])
           item.sectionCode || null,
           item.sectionName || null,
           item.metadataSource || 'seed',
+          item.unit || null,
+          item.isRestricted ? 1 : 0,
         ],
         (err: Error | null) => {
           if (err) {

@@ -53,7 +53,8 @@ export async function calculateAllTaxes(
   return results
 }
 import { getDatabase } from '../db/database'
-import { normalizeExactHsCode } from '../../shared/hsLookupQuery'
+import { normalizeExactHsCode, isCodeLikeQuery } from '../../shared/hsLookupQuery'
+import Fuse from 'fuse.js'
 
 export interface DutyResult {
   rate: number
@@ -95,6 +96,23 @@ export interface TariffHistoryRow {
 export interface TariffScheduleOption {
   code: string
   displayName: string
+}
+
+/**
+ * Unified tariff entry combining HS code metadata with schedule rates.
+ * Mirrors the AHTN data model described in the tariff schedule design.
+ */
+export interface TariffEntry {
+  hsCode: string
+  description: string
+  /** Most-Favoured-Nation duty rate as a decimal (e.g. 0.05 = 5%) */
+  mfnRate: number
+  /** ASEAN Trade in Goods Agreement rate as a decimal; null if not seeded */
+  atigaRate: number | null
+  /** Unit of quantity (kg, pcs, L, etc.) — null when not specified */
+  unit: string | null
+  /** True when the HS code has a compliance restriction on record */
+  isRestricted: boolean
 }
 
 type CanonicalHsCodeRow = {
@@ -473,6 +491,28 @@ export class TariffCalculator {
           )
           .slice(0, limit)
 
+        // For description-style queries, apply Fuse.js fuzzy re-ranking over the SQL
+        // candidates so misspellings and partial word overlaps still surface good results.
+        const isDescriptionQuery = !isCodeLikeQuery(normalizedQuery)
+        if (isDescriptionQuery && rankedRows.length > 0) {
+          const fuse = new Fuse(rankedRows, {
+            keys: ['description'],
+            threshold: 0.45,
+            includeScore: true,
+            minMatchCharLength: 3,
+          })
+          const fuseResults = fuse.search(query.trim())
+          if (fuseResults.length > 0) {
+            // Merge: boost rows that Fuse also matched to the top
+            const fuseCodeSet = new Set(fuseResults.map((r) => r.item.code))
+            const fuseOrdered = fuseResults.map((r) => r.item)
+            const rest = rankedRows.filter((r) => !fuseCodeSet.has(r.code))
+            const merged = [...fuseOrdered, ...rest].slice(0, limit)
+            resolve(merged.map((row) => ({ code: row.code, description: row.description, category: row.category })))
+            return
+          }
+        }
+
         resolve(
           rankedRows.map((row) => ({
             code: row.code,
@@ -521,8 +561,77 @@ export class TariffCalculator {
   }
 
   /**
-   * Get tariff catalog rows for browser view
+   * Resolve a full TariffEntry for an HS code, combining MFN rate, ATIGA rate,
+   * unit of quantity, and restriction flag in a single call.
    */
+  getTariffEntry(hsCode: string): Promise<TariffEntry | null> {
+    return new Promise((resolve, reject) => {
+      this.resolveCanonicalHSCode(hsCode)
+        .then((canonicalCode) => {
+          const sql = `
+            SELECT
+              hc.code,
+              hc.description,
+              hc.unit,
+              hc.is_restricted,
+              mfn.duty_rate AS mfn_rate,
+              atiga.duty_rate AS atiga_rate
+            FROM hs_codes hc
+            LEFT JOIN tariff_rates mfn ON mfn.id = (
+              SELECT id FROM tariff_rates
+              WHERE hs_code = hc.code
+                AND COALESCE(schedule_code, 'MFN') = 'MFN'
+                AND effective_date <= date('now')
+                AND (end_date IS NULL OR end_date > date('now'))
+                AND (import_status = 'approved' OR import_status IS NULL)
+              ORDER BY effective_date DESC LIMIT 1
+            )
+            LEFT JOIN tariff_rates atiga ON atiga.id = (
+              SELECT id FROM tariff_rates
+              WHERE hs_code = hc.code
+                AND COALESCE(schedule_code, 'MFN') = 'ATIGA'
+                AND effective_date <= date('now')
+                AND (end_date IS NULL OR end_date > date('now'))
+                AND (import_status = 'approved' OR import_status IS NULL)
+              ORDER BY effective_date DESC LIMIT 1
+            )
+            WHERE hc.code = ?
+            LIMIT 1
+          `
+
+          type TariffEntryRow = {
+            code: string
+            description: string
+            unit: string | null
+            is_restricted: number
+            mfn_rate: number | null
+            atiga_rate: number | null
+          }
+
+          this.db.get(sql, [canonicalCode], (err, row: TariffEntryRow | undefined) => {
+            if (err) {
+              reject(new Error(`Failed to get tariff entry: ${err.message}`))
+              return
+            }
+            if (!row) {
+              resolve(null)
+              return
+            }
+            resolve({
+              hsCode: row.code,
+              description: row.description,
+              mfnRate: row.mfn_rate ?? 0,
+              atigaRate: row.atiga_rate ?? null,
+              unit: row.unit,
+              isRestricted: row.is_restricted === 1,
+            })
+          })
+        })
+        .catch(reject)
+    })
+  }
+
+
   getTariffCatalog(
     query: string = '',
     category: string = 'All',
