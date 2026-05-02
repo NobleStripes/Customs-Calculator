@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "NPM_CONFIG_PRODUCTION=false npm ci --include=dev && npm run build"
+buildCommand = "NPM_CONFIG_PRODUCTION=false npm install --include=dev && npm run build"
 
 [deploy]
 startCommand = "npm start"
