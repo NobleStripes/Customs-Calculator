@@ -6,11 +6,15 @@ Customs-Calculator is a browser-based tool for Philippine import costing and com
 
 - Production-ready operator workflows: single calculation, batch calculation, tariff browsing, compliance checks, and PDF export.
 - Accurate cost logic: surcharge-aware VAT base and PHP-based tariff math for non-PHP inputs, with computed duties, excise, taxes, and landed-cost outputs shown in PHP. Server-side fee logic includes brokerage, IPF/IPC, CSF, transit charge, CDS, DST/IRS, and LRF; Section 800 exemptions, valuation-reference risk flags, and port/handling estimates are integrated in the same pipeline so single-item and batch calculations stay consistent.
+- Advanced assessments: trade remedy duties (anti-dumping/countervailing/safeguard), surcharge and penalty estimates (undervaluation, misclassification, late payment interest), and a final `totalPayable` output on top of landed cost.
 - New in 0.5.0: Full PHL 2026 compliance fee engine (CMTA administrative fees, excise tax for 5 categories, corrected VAT base, BOC weekly FX rate, all entry tiers), goods classification engine (import type per CMTA, agency clearances, strategic trade/STMO flag, VAT-exempt flag, FTA Certificate of Origin identification), and Import Classification panel in the calculator results UI.
 - Search quality upgrades: ranked HS results, code normalization, and keyboard navigation.
-- Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions and local fallback results.
+- Official lookup assist: calculator HS search can query the Tariff Commission Finder (`finder.tariffcommission.gov.ph/search-by-code`) through the server, with cached live suggestions, in-flight request deduplication, and stale-cache fallback if the official site is temporarily unavailable.
 - Data platform foundation in place: source import jobs, review queue, audit tables, and HS catalog CSV/XLS import endpoints are implemented.
 - Automated regulatory fetcher: cron-scheduled job discovers and ingests data files from BOC, BIR, and Tariff Commission pages; all auto-fetched rows go to the human review queue before being applied.
+- Robust ingestion fallback: when tabular links are unavailable or HTML structures drift, extraction now falls back to text-pattern recovery for HS/rate candidates.
+- Calculator UX upgrades: chapter drill-down chips in HS lookup, fee-composition visualization in results, and improved mobile responsiveness for app shell/sidebar/results.
+- Admin governance upgrades: audit views now include "updated by" attribution using source metadata (including AutoFetcher/system updates).
 - Batch shipment import now supports reordered CSV headers and common alias mapping, not just the template column order.
 - Current focus: admin data-management UI and automated Customs/BIR source adapters.
 
@@ -33,11 +37,12 @@ The project is in an active build-out phase: core calculation and operator workf
 
 ### Current Release: v0.5.0
 
-- Added full PHL 2026 customs compliance fee and tax engine: CMTA administrative fees (IPF, CDS, DST, LRF, brokerage), excise tax for 5 RA 10963/11467 categories (spirits, beer/wines, tobacco, automobiles, sweetened beverages, petroleum), corrected VAT base per NIRC Sec. 107, BOC weekly FX rate with 7-day TTL, and all three entry tiers (de minimis / informal / formal).
+- Added full PHL 2026 customs compliance fee and tax engine: CMTA administrative fees (IPF, CDS, DST, LRF, brokerage), excise tax for 5 RA 10963/11467 categories (spirits, beer/wines, tobacco, automobiles, sweetened beverages, petroleum), corrected VAT base per NIRC Sec. 107, official-rate FX precedence (BSP -> BOC -> live -> cache -> fallback), and all three entry tiers (de minimis / informal / formal).
 - Added goods classification engine: CMTA import type (Free / Regulated / Restricted / Prohibited) for all 99 HS chapters + 30+ heading overrides, agency clearance requirements with full names, strategic trade / STMO flag (RA 10697), VAT-exempt goods flag (NIRC Sec. 109), and FTA Certificate of Origin form identification for 9 PHL FTA schedules.
 - Import Classification panel added to calculation results: import-type badge, agency clearance list, CoO alert, strategic trade warning, and VAT-exempt note.
 - CoO hint shown under schedule selector when a non-MFN FTA schedule is chosen.
-- 50 new tests; total suite now 180/180 passing.
+- Additional hardening updates in this pass: official HS lookup in-flight dedup + stale-cache fallback, HTML ingestion text-pattern fallback, compliance rule refinements for de minimis/FDA/NTC messaging, chapter drill-down search UI, fee composition chart, mobile layout upgrades, and admin audit actor attribution.
+- Total suite now 197/197 passing.
 
 Full release details:
 
@@ -54,8 +59,10 @@ The calculator currently follows this server-side sequence:
 3. Apply Section 800 exemption rules (when eligible) and adjust FOB.
 4. Run de minimis check and entry-type classification.
 5. Compute dutiable value, duty/surcharge, and excise.
-6. Apply global/admin fees plus logistics costs.
-7. Build landed-cost subtotal (VAT base), then compute VAT and final landed cost.
+6. Apply trade remedy duties (anti-dumping, countervailing, safeguard) when provided.
+7. Apply global/admin fees plus logistics costs.
+8. Build landed-cost subtotal (VAT base), then compute VAT and final landed cost.
+9. Compute surcharge/penalty estimates (undervaluation, misclassification, late interest) and final total payable.
 
 Core formulas used in the current engine:
 
@@ -65,13 +72,14 @@ Dutiable Value PHP = Adjusted FOB PHP + Insurance PHP + Freight PHP
 
 Landed Cost Subtotal PHP (VAT Base) =
    Dutiable Value
-   + Duty + Surcharge + Excise
+   + Duty + Surcharge + Trade Remedies + Excise
    + Brokerage + IPF/IPC + CSF + Transit Charge
    + CDS + DST/IRS + LRF
    + Arrastre/Wharfage + Dox Stamp & Others
 
 VAT PHP = Landed Cost Subtotal PHP x VAT Rate
 Total Landed Cost PHP = Landed Cost Subtotal PHP + VAT PHP
+Total Payable PHP = Total Landed Cost PHP + Total Penalties PHP
 ```
 
 Port and handling behavior in v0.5.0:
@@ -100,7 +108,9 @@ Additional output layers:
 - [x] HS code catalog auto-search by code and description (adaptive code/text query thresholds)
 - [x] HS code search ranking and normalization (supports code searches with/without dots)
 - [x] HS code keyboard navigation (Arrow Up/Down, Enter, Escape)
+- [x] HS code chapter drill-down chips for guided lookup by Chapter -> Heading -> Sub-heading
 - [x] Remote-first official HS lookup suggestions via Tariff Commission Finder, with cached server responses and local fallback
+- [x] Official lookup request deduplication and stale-cache fallback during temporary upstream outages
 - [x] Compliance requirement checks by HS code/category/value
 - [x] Calculator page with real-time results and FX context display
 - [x] Batch Import page with CSV parse, preview, calculate, and export
@@ -113,6 +123,10 @@ Additional output layers:
 - [x] PHL 2026 customs compliance fee engine: CMTA administrative fees (IPF/CDS/DST/LRF/brokerage), excise tax categories (spirits, beer/wines, tobacco, automobiles, sweetened beverages, petroleum), corrected VAT base, BOC weekly FX rate, de minimis / informal / formal entry tiers
 - [x] Goods classification engine: CMTA import type (Free/Regulated/Restricted/Prohibited), agency clearance requirements, strategic trade / STMO flag (RA 10697), VAT-exempt goods flag (NIRC Sec. 109), FTA Certificate of Origin identification for 9 PHL FTA schedules
 - [x] Import Classification panel in calculator results and CoO schedule hint in the calculator form
+- [x] Fee-composition visual breakdown (chart + legend) in calculation results
+- [x] Trade remedy duties, surcharge/penalty estimates, and total payable computation in batch and calculator outputs
+- [x] Admin audit "updated by" attribution surfaced in UI and exports
+- [x] Responsive layout refinements for app shell/sidebar/results on mobile
 
 ### In Progress
 - [x] Data management/admin UI for tariff source imports and review queue (single-row and bulk review actions, confidence filtering, and governance summaries)
@@ -214,7 +228,7 @@ Contributor workflows, extension patterns, testing commands, and maintenance not
 
 ## Known Issues & Limitations
 
-1. **Exchange Rates:** The calculator prioritizes BOC weekly customs rates (when enabled), then live market API rates, then cached market rates, then hardcoded fallback rates. BOC page/source format changes can affect automated weekly-rate parsing until adapters are updated.
+1. **Exchange Rates:** For PHP valuation pairs, the calculator prioritizes BSP reference rates, then BOC weekly rates, then live market API rates, then cached market rates, then hardcoded fallback rates. Official source page format changes can affect automated parsing until adapters are updated.
 2. **Structured Extraction:** The regulatory fetcher discovers and downloads linked tabular files (`.csv`/`.xls`/`.xlsx`) from approved government sources, extracts structured HTML tariff tables, and includes a PDF extraction path. Deeply formatted/scanned PDF memo parsing may still need source-specific refinements.
 3. **Seeded Data Scope:** The built-in dataset is intentionally small and suitable for demo/operator workflow validation, not full production tariff coverage. Import your own tariff schedules via the CSV/XLS import pipeline.
 4. **Admin Tooling:** Import/review workflow UI and broader source governance are still in progress, though tariff source visibility is now surfaced in the admin page.
@@ -251,4 +265,4 @@ The full changelog has moved out of this README into dedicated release-note file
 
 ---
 
-**Last Updated:** April 30, 2026
+**Last Updated:** May 2, 2026

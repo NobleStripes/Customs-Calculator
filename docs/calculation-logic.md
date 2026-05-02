@@ -8,6 +8,7 @@ This document describes the current landed-cost and tax computation flow used by
 - HS code and schedule resolution are always performed before any tariff math.
 - The server-side `/api/calculate/batch` path is the authoritative implementation.
 - Section 800 user-status exemptions, port handling estimates, and valuation-reference risk checks are part of the current model.
+- Trade remedy duties and surcharge/penalty estimates are part of the current model.
 - Outputs are estimates and must be validated against the latest BOC/BIR/PPA issuances before filing.
 
 ## HS Catalog Strategy (PH 2026)
@@ -89,21 +90,24 @@ For each shipment:
 7. If de minimis-exempt, return zero tax amounts with logistics/context outputs.
 8. Otherwise convert freight/insurance to PHP, apply insurance benchmark when insurance is zero.
 9. Build dutiable value, entry type, duty/surcharge, and excise.
-10. Compute brokerage and global fees (IPF, CSF, transit, CDS, DST/IRS, LRF).
-11. Estimate port handling (arrastre, wharfage, storage) by arrival date tranche; use as fallback when manual arrastre/wharfage is zero.
-12. Build landed-cost subtotal (VAT base), compute VAT, and total landed cost.
-13. Attach import-classification data, compliance data, FX trace data, and notices (including EO 114 advisory for petroleum scenarios).
+10. Apply trade remedy duties (anti-dumping, countervailing, safeguard) when provided.
+11. Compute brokerage and global fees (IPF, CSF, transit, CDS, DST/IRS, LRF).
+12. Estimate port handling (arrastre, wharfage, storage) by arrival date tranche; use as fallback when manual arrastre/wharfage is zero.
+13. Build landed-cost subtotal (VAT base), compute VAT, and total landed cost.
+14. Estimate surcharge/penalty components (undervaluation, misclassification, late payment interest) and total payable.
+15. Attach import-classification data, compliance data, FX trace data, and notices (including EO 114 advisory for petroleum scenarios).
 
 ## FX Rules
 
 The converter follows this precedence for PHP conversions:
 
-1. BOC weekly customs exchange rate (when runtime setting `fxPreferBocRate = true`)
-2. Live market API rate
-3. Cached market rate
-4. Hardcoded fallback rates
+1. BSP reference rate
+2. BOC weekly customs exchange rate
+3. Live market API rate
+4. Cached market rate
+5. Hardcoded fallback rates
 
-BOC rates are cached with a 7-day TTL.
+Official-rate lookups are cached (BSP: daily TTL; BOC: weekly TTL).
 
 ## Section 800 Exemption Logic
 
@@ -165,6 +169,7 @@ Insurance benchmark rule:
 Duty Amount PHP = Dutiable Value PHP x Duty Rate
 Surcharge PHP = Dutiable Value PHP x Surcharge Rate
 Excise PHP = category-specific (ad valorem + specific components)
+Trade Remedy PHP = Anti-Dumping + Countervailing + Safeguard
 ```
 
 ### Brokerage Fee
@@ -253,6 +258,7 @@ Landed Cost Subtotal PHP (VAT Base) =
   Dutiable Value
   + Duty Amount
   + Surcharge
+  + Trade Remedy Duties
   + Excise
   + Brokerage
   + IPC
@@ -275,6 +281,26 @@ For most rows VAT rate is `12%`; exemptions are represented through classificati
 Total Item Tax PHP = Duty + Surcharge + Excise + VAT
 Total Tax and Fees PHP = Total Item Tax + Total Global Fees
 Total Landed Cost PHP = Landed Cost Subtotal + VAT
+```
+
+## Surcharges and Penalties (Estimate Mode)
+
+Penalty computation is additive and applied after landed-cost computation.
+
+```text
+Undervaluation Deficiency Value = max(0, Assessed Customs Value - Declared Dutiable Value)
+Undervaluation Surcharge = (Deficiency Duty/Tax Estimate) x 250%
+  where Deficiency Duty/Tax Estimate uses duty + surcharge + trade remedy + VAT rate components
+  and applies only when Assessed Customs Value > 110% of Declared Dutiable Value
+
+Misclassification Surcharge = Base Duty/Tax Estimate x 250%
+  where Base Duty/Tax Estimate = Duty + Surcharge + Trade Remedies + Excise + VAT
+  and applies only when misclassificationDetected is true and clericalError is false
+
+Late Payment Interest = Base Duty/Tax Estimate x 20% x (latePaymentDays / 365)
+
+Total Penalties PHP = Undervaluation Surcharge + Misclassification Surcharge + Late Payment Interest
+Total Payable PHP = Total Landed Cost PHP + Total Penalties PHP
 ```
 
 ## Valuation Reference Risk Indicator
@@ -307,6 +333,9 @@ Each result row returns:
 - Valuation-reference risk result
 - Optional EO 114 advisory notice
 - FX metadata (`applied`, `rateToPhp`, source, timestamp)
+- Trade remedy breakdown (anti-dumping, countervailing, safeguard, total)
+- Penalty breakdown (undervaluation, misclassification, late interest, total)
+- Total payable (`totalPayable`) in addition to landed cost
 
 ## Validation and Error Rules
 

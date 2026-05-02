@@ -4,7 +4,7 @@ All notable changes to this project are tracked in versioned release-note files.
 
 ## Unreleased
 
-- No unreleased entries currently.
+- Docs and release-note synchronization updates completed for post-v0.5.0 hardening changes.
 
 ## Releases
 
@@ -19,3 +19,4 @@ All notable changes to this project are tracked in versioned release-note files.
 
 - Project package version is currently `0.5.0`.
 - For architecture and formula details, see [docs/architecture.md](docs/architecture.md) and [docs/calculation-logic.md](docs/calculation-logic.md).
+- Latest runtime hardening captured in v0.5.0 notes includes: official HS lookup stale-cache fallback and in-flight deduplication, HTML ingestion text-pattern fallback, surcharge/penalty and total payable model outputs, chapter drill-down HS UI, fee composition visualization, mobile layout refinements, and admin audit actor attribution.

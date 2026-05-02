@@ -312,6 +312,8 @@ CREATE TABLE rate_change_audit (
 - Uses `ahtn` for code-like searches and `keyword` for text searches.
 - Parses live Tariff Commission Finder HTML into the app HS lookup shape with source metadata and optional official duty/VAT values when present in the page.
 - Caches repeated keystroke lookups server-side for 5 minutes to reduce load on the official website.
+- Deduplicates in-flight requests per normalized query to prevent duplicate upstream fetches during rapid typing.
+- Falls back to stale cached results if the live upstream fetch fails after cache expiration.
 - Search-only in the current rollout: it does not silently persist or apply official-site tariff data to approved tariff tables.
 
 ### `ComplianceChecker`
@@ -319,11 +321,12 @@ CREATE TABLE rate_change_audit (
 - `getRequirements(hsCode, value, destination)` returns required documents, restrictions, and warnings.
 - `validateShipment(...)` validates shipment-level compliance conditions.
 - `getDocumentationSummary(...)` summarizes required document handling.
+- Includes de minimis advisory context and regulated-goods guidance (for example FDA/NTC documentary reminders) in warning/restriction outputs.
 
 ### `CurrencyConverter`
 
 - `convert(amount, fromCurrency, toCurrency)` converts currencies and tracks whether the source was identity, cache, live, or fallback.
-- Prefers BOC weekly customs rates for PHP conversion paths when `fxPreferBocRate` is enabled.
+- For PHP valuation pairs, prefers BSP reference rates first, then BOC weekly customs rates.
 - Falls back to live market API, then cached market rates, then hardcoded fallback rates.
 - Cached rates are persisted in SQLite when available.
 
@@ -341,12 +344,13 @@ CREATE TABLE rate_change_audit (
 - `getRateChangeAudit(hsCode?, limit, offset)` returns paginated rate change audit entries.
 - `getTariffSources(limit)` returns recent tariff source records.
 - `getCalculationHistory(limit)` returns recent calculation history entries.
-- `parseHtmlTables(htmlContent, sourceUrl)` attempts to extract HS code/rate tables from raw HTML (used by the auto-fetcher as a fallback when no data file links are found) via the shared `tariffHtmlParser`.
+- `parseHtmlTables(htmlContent, sourceUrl)` extracts HS code/rate tables from raw HTML using the shared `tariffHtmlParser`; if no structured tables are found, it applies a lower-confidence text-pattern fallback to recover candidate rows.
 
 ### `DocumentGenerator`
 
 - Generates PDF reports for single calculations.
 - Uses the same PHP-denominated breakdown values shown in the UI.
+- Mirrors informal-entry style sections including trade remedy duty lines, penalties section, and final total payable summary.
 
 ### `WebsiteFetcherService`
 
@@ -364,7 +368,11 @@ CREATE TABLE rate_change_audit (
 
 ### `TariffHtmlParser`
 
-Stub module (`tariffHtmlParser.ts`) for extracting `TariffImportRow` arrays from raw BOC and Tariff Commission HTML. Currently returns an empty array; intended for future production implementation.
+Parses `TariffImportRow` arrays from raw BOC and Tariff Commission HTML, including:
+
+- generic table extraction with header alias detection for HS/duty/VAT/surcharge/schedule/date fields,
+- Tariff Commission matrix-table parsing (agreement/rate/remarks/psr rows), and
+- row deduplication by normalized tariff identity fields.
 
 ## Settings Store
 
@@ -376,7 +384,7 @@ Stub module (`tariffHtmlParser.ts`) for extracting `TariffImportRow` arrays from
 | `defaultOriginCountry` | `string` | `''` | Pre-populated origin country in the calculator |
 | `autoFetcherEnabled` | `boolean` | `true` | Whether the server-side auto-fetcher cron is active |
 | `fxCacheTtlHours` | `number` | `24` | How long cached exchange rates are considered fresh |
-| `fxPreferBocRate` | `boolean` | `true` | Prefer BOC weekly customs exchange rate when available |
+| `fxPreferBocRate` | `boolean` | `true` | Legacy compatibility flag; PHP valuation pairs now follow official-rate precedence (BSP -> BOC) before market/fallback rates |
 
 ## Browser App API
 
