@@ -1009,14 +1009,42 @@ const buildDocumentMarkup = (payload: { formData: CalculationDocumentFormData; r
 const makeSuccess = <T>(data: T) => Promise.resolve({ success: true, data })
 const makeError = (error: unknown) => Promise.resolve({ success: false, error: String(error) })
 const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const ADMIN_API_KEY_STORAGE_KEY = 'customs-admin-api-key'
+
+const isProtectedAdminPath = (path: string): boolean => {
+  return path.startsWith('/api/import/')
+    || path.startsWith('/api/import-jobs/')
+    || path.startsWith('/api/review-rows/')
+    || path === '/api/import-jobs'
+    || path === '/api/runtime-settings'
+}
+
+const getClientAdminApiKey = (): string => {
+  const envKey = String(import.meta.env.VITE_ADMIN_API_KEY || '').trim()
+  if (envKey) {
+    return envKey
+  }
+
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  return String(window.localStorage.getItem(ADMIN_API_KEY_STORAGE_KEY) || '').trim()
+}
 
 const callApi = async <T>(path: string, init?: RequestInit): ApiResponse<T> => {
   try {
+    const adminApiKey = getClientAdminApiKey()
+    const adminHeaders = isProtectedAdminPath(path) && adminApiKey
+      ? { 'x-admin-api-key': adminApiKey }
+      : {}
+
     const response = await fetch(`${apiBase}${path}`, {
       method: init?.method || 'GET',
       headers: {
         Accept: 'application/json',
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...adminHeaders,
         ...(init?.headers || {}),
       },
       body: init?.body,

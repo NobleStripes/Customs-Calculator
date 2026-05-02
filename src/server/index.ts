@@ -138,6 +138,44 @@ const sendError = (response: express.Response, statusCode: number, error: unknow
   })
 }
 
+const ADMIN_API_KEY_HEADER = 'x-admin-api-key'
+
+const getAdminApiKeyFromRequest = (request: express.Request): string | null => {
+  const headerValue = request.header(ADMIN_API_KEY_HEADER)
+  if (typeof headerValue === 'string' && headerValue.trim()) {
+    return headerValue.trim()
+  }
+
+  const authHeader = request.header('authorization')
+  if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+    const token = authHeader.slice(7).trim()
+    return token || null
+  }
+
+  return null
+}
+
+const requireAdminApiKey: express.RequestHandler = (request, response, next) => {
+  const configuredKey = process.env.ADMIN_API_KEY?.trim()
+
+  // If ADMIN_API_KEY is not configured, keep legacy behavior for local/dev setups.
+  if (!configuredKey) {
+    next()
+    return
+  }
+
+  const providedKey = getAdminApiKeyFromRequest(request)
+  if (providedKey === configuredKey) {
+    next()
+    return
+  }
+
+  response.status(401).json({
+    success: false,
+    error: `Admin API key is required via ${ADMIN_API_KEY_HEADER} header or Authorization: Bearer <token>`,
+  })
+}
+
 app.use(express.json({ limit: '12mb' }))
 
 app.get('/api/health', (_request, response) => {
@@ -157,7 +195,7 @@ app.get('/api/runtime-settings', (_request, response) => {
   })
 })
 
-app.put('/api/runtime-settings', (request, response) => {
+app.put('/api/runtime-settings', requireAdminApiKey, (request, response) => {
   try {
     const nextSettings = updateRuntimeSettings(request.body || {})
     currencyConverter.clearOldCache()
@@ -663,7 +701,7 @@ app.post('/api/calculate/batch', async (request, response) => {
   }
 })
 
-app.post('/api/import/hs-codes/preview', async (request, response) => {
+app.post('/api/import/hs-codes/preview', requireAdminApiKey, async (request, response) => {
   try {
     const payload = request.body || {}
     const rows = await tariffDataIngestion.parseHSCatalogRows(payload)
@@ -676,7 +714,7 @@ app.post('/api/import/hs-codes/preview', async (request, response) => {
   }
 })
 
-app.post('/api/import/hs-codes', async (request, response) => {
+app.post('/api/import/hs-codes', requireAdminApiKey, async (request, response) => {
   const payload = request.body || {}
 
   if (typeof payload.sourceName !== 'string' || !payload.sourceName.trim()) {
@@ -712,7 +750,7 @@ app.post('/api/import/hs-codes', async (request, response) => {
   }
 })
 
-app.post('/api/import/tariff-rates/preview', async (request, response) => {
+app.post('/api/import/tariff-rates/preview', requireAdminApiKey, async (request, response) => {
   try {
     const payload = request.body || {}
     const rows = Array.isArray(payload.rows)
@@ -731,7 +769,7 @@ app.post('/api/import/tariff-rates/preview', async (request, response) => {
   }
 })
 
-app.post('/api/import/tariff-rates', async (request, response) => {
+app.post('/api/import/tariff-rates', requireAdminApiKey, async (request, response) => {
   const payload = request.body || {}
 
   if (typeof payload.sourceName !== 'string' || !payload.sourceName.trim()) {
@@ -763,7 +801,7 @@ app.post('/api/import/tariff-rates', async (request, response) => {
   }
 })
 
-app.get('/api/import-jobs', async (request, response) => {
+app.get('/api/import-jobs', requireAdminApiKey, async (request, response) => {
   const parsedLimit = typeof request.query.limit === 'string' ? Number(request.query.limit) : 20
 
   try {
@@ -774,7 +812,7 @@ app.get('/api/import-jobs', async (request, response) => {
   }
 })
 
-app.get('/api/import-jobs/:importJobId/pending-review', async (request, response) => {
+app.get('/api/import-jobs/:importJobId/pending-review', requireAdminApiKey, async (request, response) => {
   const importJobId = Number(request.params.importJobId)
 
   if (!Number.isFinite(importJobId)) {
@@ -1185,7 +1223,7 @@ app.get('/api/rate-change-audit', async (request, response) => {
   }
 })
 
-app.patch('/api/import-jobs/:importJobId/review-rows/:rowId', async (request, response) => {
+app.patch('/api/import-jobs/:importJobId/review-rows/:rowId', requireAdminApiKey, async (request, response) => {
   const importJobId = Number(request.params.importJobId)
   const rowId = Number(request.params.rowId)
 
@@ -1215,7 +1253,7 @@ app.patch('/api/import-jobs/:importJobId/review-rows/:rowId', async (request, re
   }
 })
 
-app.get('/api/review-rows/:rowId/provenance', async (request, response) => {
+app.get('/api/review-rows/:rowId/provenance', requireAdminApiKey, async (request, response) => {
   const rowId = Number(request.params.rowId)
   if (!Number.isFinite(rowId)) {
     return sendError(response, 400, 'Route parameter "rowId" must be a valid number')
@@ -1229,7 +1267,7 @@ app.get('/api/review-rows/:rowId/provenance', async (request, response) => {
   }
 })
 
-app.post('/api/import-jobs/:importJobId/review-rows/bulk', async (request, response) => {
+app.post('/api/import-jobs/:importJobId/review-rows/bulk', requireAdminApiKey, async (request, response) => {
   const importJobId = Number(request.params.importJobId)
   if (!Number.isFinite(importJobId)) {
     return sendError(response, 400, 'Route parameter "importJobId" must be a valid number')

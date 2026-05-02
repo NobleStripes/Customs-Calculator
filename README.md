@@ -145,7 +145,7 @@ Additional output layers:
 Use this quick-start when running locally for website development.
 
 ### Prerequisites
-- Node.js 18+ (https://nodejs.org/)
+- Node.js 20.19+ (https://nodejs.org/)
 - npm or yarn
 
 ### Installation
@@ -182,6 +182,29 @@ Use this quick-start when running locally for website development.
    - Open `http://127.0.0.1:8787` in your browser for the production-style app.
    - The API is served from the same origin, for example `http://127.0.0.1:8787/api/health`.
    - Currency conversion is served from the same origin, for example `http://127.0.0.1:8787/api/currency/convert?amount=1&from=USD&to=PHP`.
+
+### Admin API Key (Recommended for Deployed Environments)
+
+Set `ADMIN_API_KEY` in your environment to protect admin/runtime/import/review routes.
+
+- Protected routes include:
+   - `PUT /api/runtime-settings`
+   - `/api/import/*`
+   - `/api/import-jobs/*`
+   - `/api/review-rows/*`
+
+Provide the key using either header:
+
+- `x-admin-api-key: <your-secret>`
+- `Authorization: Bearer <your-secret>`
+
+Browser admin UI note:
+
+- The frontend automatically sends `x-admin-api-key` for protected routes when either is set:
+   - `VITE_ADMIN_API_KEY` (build-time env), or
+   - `localStorage['customs-admin-api-key']`
+
+When `ADMIN_API_KEY` is unset, these routes keep legacy open behavior for local development.
 
 ### Full HS Catalog Import (Batch Mode)
 
