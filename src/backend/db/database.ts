@@ -23,8 +23,11 @@ type HSCodeSeedRow = {
 }
 
 export const getDbPath = (): string => {
-  const baseDataDir = process.env.APPDATA || path.join(os.homedir(), '.customs-calculator')
-  const dbDir = path.join(baseDataDir, 'customs-calculator')
+  // DATA_DIR lets containers (Railway, Render, Fly.io) point SQLite at a persistent volume.
+  // Falls back to the existing Windows APPDATA path or ~/.customs-calculator on other OSes.
+  const dbDir = process.env.DATA_DIR
+    ? process.env.DATA_DIR
+    : path.join(process.env.APPDATA || path.join(os.homedir(), '.customs-calculator'), 'customs-calculator')
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true })
   }
