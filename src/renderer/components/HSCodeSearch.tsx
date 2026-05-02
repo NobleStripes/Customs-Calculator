@@ -34,6 +34,7 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
   const [activeIndex, setActiveIndex] = useState(-1)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [lookupMessage, setLookupMessage] = useState<string | null>(null)
+  const [selectedChapter, setSelectedChapter] = useState<string>('')
   const latestRequestIdRef = useRef(0)
 
   useEffect(() => {
@@ -112,29 +113,38 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
     onSelect(selection.code, selection)
     setActiveIndex(-1)
     setIsOpen(false)
+    setSelectedChapter(getChapterPrefix(selection.code))
   }
 
+  const chapterOptions = Array.from(
+    new Set(suggestions.map((item) => getChapterPrefix(item.code)))
+  ).filter(Boolean)
+
+  const visibleSuggestions = selectedChapter
+    ? suggestions.filter((item) => getChapterPrefix(item.code) === selectedChapter)
+    : suggestions
+
   const handleKeyDown: React.KeyboardEventHandler<HTMLInputElement> = (event) => {
-    if (!isOpen || suggestions.length === 0) {
+    if (!isOpen || visibleSuggestions.length === 0) {
       return
     }
 
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setActiveIndex((prev) => (prev + 1) % suggestions.length)
+      setActiveIndex((prev) => (prev + 1) % visibleSuggestions.length)
       return
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      setActiveIndex((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1))
+      setActiveIndex((prev) => (prev <= 0 ? visibleSuggestions.length - 1 : prev - 1))
       return
     }
 
     if (event.key === 'Enter') {
-      if (activeIndex >= 0 && activeIndex < suggestions.length) {
+      if (activeIndex >= 0 && activeIndex < visibleSuggestions.length) {
         event.preventDefault()
-        handleSelect(suggestions[activeIndex])
+        handleSelect(visibleSuggestions[activeIndex])
         return
       }
 
@@ -152,6 +162,12 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
       setActiveIndex(-1)
     }
   }
+
+  useEffect(() => {
+    if (selectedChapter && !chapterOptions.includes(selectedChapter)) {
+      setSelectedChapter('')
+    }
+  }, [chapterOptions, selectedChapter])
 
   return (
     <div className="hs-code-search">
@@ -195,9 +211,34 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
               {lookupMessage}
             </div>
           )}
-          {suggestions.map((item, index) => {
+
+          <div className="hs-drilldown" role="group" aria-label="HS chapter drill-down">
+            <button
+              className={`chapter-chip ${selectedChapter === '' ? 'active' : ''}`}
+              onClick={() => {
+                setSelectedChapter('')
+                setActiveIndex(-1)
+              }}
+            >
+              All Chapters
+            </button>
+            {chapterOptions.map((chapter) => (
+              <button
+                key={chapter}
+                className={`chapter-chip ${selectedChapter === chapter ? 'active' : ''}`}
+                onClick={() => {
+                  setSelectedChapter(chapter)
+                  setActiveIndex(-1)
+                }}
+              >
+                Ch. {chapter}
+              </button>
+            ))}
+          </div>
+
+          {visibleSuggestions.map((item, index) => {
             const chapter = getChapterPrefix(item.code)
-            const prevChapter = index > 0 ? getChapterPrefix(suggestions[index - 1].code) : null
+            const prevChapter = index > 0 ? getChapterPrefix(visibleSuggestions[index - 1].code) : null
             const showGroupHeader = chapter !== prevChapter
 
             return (

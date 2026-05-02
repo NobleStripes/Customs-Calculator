@@ -46,8 +46,21 @@ interface CalculationResultsData {
   breakdown?: {
     itemTaxes?: {
       cud?: number
+      excise?: number
       vat?: number
       totalItemTax?: number
+    }
+    tradeRemedies?: {
+      antiDumping?: number
+      countervailing?: number
+      safeguard?: number
+      total?: number
+    }
+    penalties?: {
+      undervaluationSurcharge?: number
+      misclassificationSurcharge?: number
+      latePaymentInterest?: number
+      total?: number
     }
     globalFees?: {
       transitCharge?: number
@@ -59,6 +72,11 @@ interface CalculationResultsData {
     }
     totalTaxAndFees?: number
   }
+  penalties?: {
+    totalPenalties?: number
+    notes?: string[]
+  }
+  totalPayable?: number
   totalLandedCost: number
 }
 
@@ -78,6 +96,7 @@ export class DocumentGenerator {
     const surcharge = payload.results.duty?.surcharge || 0
     const vatRate = payload.results.vat?.rate || 0
     const vatAmount = payload.results.vat?.amount || 0
+    const exciseAmount = payload.results.breakdown?.itemTaxes?.excise || 0
     const taxableValue = payload.results.costBase?.taxableValue || 0
     const brokerageFee = payload.results.costBase?.brokerageFee || 0
     const arrastreWharfage = payload.results.costBase?.arrastreWharfage || 0
@@ -95,7 +114,9 @@ export class DocumentGenerator {
     const freight = payload.formData.freight || 0
     const insurance = payload.formData.insurance || 0
     const cif = fob + freight + insurance
-    const totalPayable = totalTaxAndFees + surcharge
+    const tradeRemediesTotal = payload.results.breakdown?.tradeRemedies?.total || 0
+    const penaltiesTotal = payload.results.penalties?.totalPenalties || payload.results.breakdown?.penalties?.total || 0
+    const totalPayable = payload.results.totalPayable || (payload.results.totalLandedCost + penaltiesTotal)
 
     const php = (n: number) => `PHP ${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     const lbl = (label: string, value: string) => {
@@ -148,6 +169,12 @@ export class DocumentGenerator {
     if (surcharge > 0) {
       lbl('Surcharge:', php(surcharge))
     }
+    if (exciseAmount > 0) {
+      lbl('Excise Tax:', php(exciseAmount))
+    }
+    if (tradeRemediesTotal > 0) {
+      lbl('Trade Remedy Duties:', php(tradeRemediesTotal))
+    }
     lbl(`VAT @ ${vatRate.toFixed(2)}%:`, php(vatAmount))
     lbl('Total Item Tax (CUD + VAT):', php(itemTaxTotal))
     doc.moveDown(0.2)
@@ -168,12 +195,28 @@ export class DocumentGenerator {
     doc.fontSize(11).font('Helvetica-Bold')
     lbl('TOTAL TAX AND FEES:', php(totalTaxAndFees))
     lbl('TOTAL LANDED COST:', php(payload.results.totalLandedCost))
+    if (penaltiesTotal > 0) {
+      lbl('TOTAL PENALTIES:', php(penaltiesTotal))
+    }
     lbl('TOTAL PAYABLE TO BOC:', php(totalPayable))
     doc.font('Helvetica').fontSize(10)
 
+    if (penaltiesTotal > 0) {
+      sectionHeader('E. SURCHARGES & PENALTIES')
+      const p = payload.results.breakdown?.penalties
+      lbl('Undervaluation Surcharge:', php(p?.undervaluationSurcharge || 0))
+      lbl('Misclassification Surcharge:', php(p?.misclassificationSurcharge || 0))
+      lbl('Late Payment Interest:', php(p?.latePaymentInterest || 0))
+      lbl('Total Penalties:', php(penaltiesTotal))
+      for (const note of payload.results.penalties?.notes || []) {
+        doc.font('Helvetica').fontSize(9).fillColor('#444').text(`- ${note}`)
+      }
+      doc.fillColor('#000')
+    }
+
     const compliance = payload.results.compliance
     if (compliance) {
-      sectionHeader('E. COMPLIANCE REQUIREMENTS')
+      sectionHeader('F. COMPLIANCE REQUIREMENTS')
       doc.fontSize(10)
 
       const writeList = (title: string, entries: string[] = []) => {

@@ -41,6 +41,22 @@ describe('ComplianceChecker.getRequirements', () => {
     expect(result.warnings.some((w) => w.toLowerCase().includes('high value'))).toBe(false)
   })
 
+  it('adds de minimis warning for shipments at or below 10000', async () => {
+    const checker = new ComplianceCheckerClass()
+
+    const result = await checker.getRequirements('8471.30', 9500, 'MNL')
+
+    expect(result.warnings.some((w) => w.toLowerCase().includes('de minimis'))).toBe(true)
+  })
+
+  it('requires NTC clearance for chapter 84/85 electronics', async () => {
+    const checker = new ComplianceCheckerClass()
+
+    const result = await checker.getRequirements('8471.30', 5000, 'MNL')
+
+    expect(result.requiredDocuments).toContain('NTC Type Acceptance Certificate')
+  })
+
   it('recognises all expanded Philippine port codes without warning', async () => {
     const checker = new ComplianceCheckerClass()
 

@@ -328,6 +328,7 @@ export const extractOfficialHsLookupRows = (
 export class OfficialHsLookupService {
   private readonly fetcher: TariffLookupFetcher
   private readonly cache = new Map<string, CachedLookup>()
+  private readonly inflight = new Map<string, Promise<OfficialHsLookupResponse>>()
 
   constructor(fetcher: TariffLookupFetcher = new WebsiteFetcherService()) {
     this.fetcher = fetcher
@@ -344,9 +345,10 @@ export class OfficialHsLookupService {
     }
 
     if (cached.expiresAt <= Date.now()) {
-      this.cache.delete(query)
       return null
     }
+
+    this.touchLru(query)
 
     return {
       ...cached.payload,
@@ -356,6 +358,33 @@ export class OfficialHsLookupService {
         sourceType: 'official-site-cache',
       })),
     }
+  }
+
+  private getStaleCached(query: string): OfficialHsLookupResponse | null {
+    const cached = this.cache.get(query)
+    if (!cached) {
+      return null
+    }
+
+    return {
+      ...cached.payload,
+      status: 'cache',
+      fetchedAt: new Date().toISOString(),
+      results: cached.payload.results.map((row) => ({
+        ...row,
+        sourceType: 'official-site-cache',
+      })),
+    }
+  }
+
+  private touchLru(query: string): void {
+    const cached = this.cache.get(query)
+    if (!cached) {
+      return
+    }
+
+    this.cache.delete(query)
+    this.cache.set(query, cached)
   }
 
   private setCached(query: string, response: OfficialHsLookupResponse): OfficialHsLookupResponse {
@@ -401,26 +430,48 @@ export class OfficialHsLookupService {
       return cached
     }
 
-    const sourceUrl = buildLookupUrl(normalizedQuery)
-    const fetchedPage = await this.fetcher.fetchWebsite({
-      url: sourceUrl,
-      query: normalizedQuery,
-      maxTextLength: 20000,
-    })
+    const inflightRequest = this.inflight.get(cacheKey)
+    if (inflightRequest) {
+      return inflightRequest
+    }
 
-    const results = extractOfficialHsLookupRows(
-      fetchedPage.rawHtml || fetchedPage.textContent || '',
-      normalizedQuery,
-      sourceUrl
-    )
+    const request = (async (): Promise<OfficialHsLookupResponse> => {
+      const sourceUrl = buildLookupUrl(normalizedQuery)
 
-    return this.setCached(cacheKey, {
-      query: normalizedQuery,
-      sourceUrl,
-      status: 'live',
-      fetchedAt: fetchedPage.fetchedAt || new Date().toISOString(),
-      cacheExpiresAt: new Date(Date.now() + OFFICIAL_TARIFF_LOOKUP_CONFIG.cacheTtlMs).toISOString(),
-      results,
-    })
+      try {
+        const fetchedPage = await this.fetcher.fetchWebsite({
+          url: sourceUrl,
+          query: normalizedQuery,
+          maxTextLength: 20000,
+        })
+
+        const results = extractOfficialHsLookupRows(
+          fetchedPage.rawHtml || fetchedPage.textContent || '',
+          normalizedQuery,
+          sourceUrl
+        )
+
+        return this.setCached(cacheKey, {
+          query: normalizedQuery,
+          sourceUrl,
+          status: 'live',
+          fetchedAt: fetchedPage.fetchedAt || new Date().toISOString(),
+          cacheExpiresAt: new Date(Date.now() + OFFICIAL_TARIFF_LOOKUP_CONFIG.cacheTtlMs).toISOString(),
+          results,
+        })
+      } catch (error) {
+        const stale = this.getStaleCached(cacheKey)
+        if (stale) {
+          return stale
+        }
+
+        throw error
+      } finally {
+        this.inflight.delete(cacheKey)
+      }
+    })()
+
+    this.inflight.set(cacheKey, request)
+    return request
   }
 }

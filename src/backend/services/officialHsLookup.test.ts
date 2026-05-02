@@ -83,4 +83,49 @@ describe('OfficialHsLookupService', () => {
     expect(request?.url).toContain(`https://${OFFICIAL_TARIFF_LOOKUP_CONFIG.host}${OFFICIAL_TARIFF_LOOKUP_CONFIG.path}`)
     expect(request?.url).toContain('keyword=portable+computers')
   })
+
+  it('returns stale cache when live fetch fails', async () => {
+    const fetchWebsite = vi.fn()
+      .mockResolvedValueOnce({
+        rawHtml: '<div>8471.30 - Portable automatic data processing machines - 5%</div>',
+        textContent: '',
+        fetchedAt: '2026-04-27T00:00:00.000Z',
+      })
+      .mockRejectedValueOnce(new Error('upstream unavailable'))
+
+    const service = new OfficialHsLookupService({ fetchWebsite })
+    await service.search('847130')
+
+    const cache = (service as unknown as { cache: Map<string, { expiresAt: number; payload: unknown }> }).cache
+    const key = '847130'
+    const entry = cache.get(key)
+    if (!entry) {
+      throw new Error('expected cache entry to exist')
+    }
+    cache.set(key, { ...entry, expiresAt: Date.now() - 1000 })
+
+    const staleResult = await service.search('847130')
+    expect(staleResult.status).toBe('cache')
+    expect(staleResult.results[0]?.sourceType).toBe('official-site-cache')
+  })
+
+  it('deduplicates concurrent live lookups for the same query', async () => {
+    const fetchWebsite = vi.fn().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      return {
+        rawHtml: '<div>8471.30 - Portable automatic data processing machines - 5%</div>',
+        textContent: '',
+        fetchedAt: '2026-04-27T00:00:00.000Z',
+      }
+    })
+
+    const service = new OfficialHsLookupService({ fetchWebsite })
+    const [first, second] = await Promise.all([
+      service.search('847130'),
+      service.search('847130'),
+    ])
+
+    expect(fetchWebsite).toHaveBeenCalledTimes(1)
+    expect(first.results[0]?.code).toBe(second.results[0]?.code)
+  })
 })

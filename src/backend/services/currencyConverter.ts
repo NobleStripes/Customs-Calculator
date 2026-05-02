@@ -201,12 +201,13 @@ export class CurrencyConverter {
       const pair = `${fromCurrency}_${toCurrency}`
       const bocPair = `BOC_${fromCurrency}_${toCurrency}`
       const bspPair = `${BSP_CACHE_KEY_PREFIX}${fromCurrency}_${toCurrency}`
-      const settings = getRuntimeSettings()
 
-      // Try to get from cache first — check BSP cache when official rates are preferred
+      const isPhpValuationPair = toCurrency === 'PHP' || fromCurrency === 'PHP'
+
+      // Try to get from cache first — use BSP cache for PHP valuation pairs.
       this.db.get(
         'SELECT rate, last_updated FROM exchange_rates WHERE currency_pair = ?',
-        [settings.fxPreferBocRate ? bspPair : pair],
+        [isPhpValuationPair ? bspPair : pair],
         async (err, row: ExchangeRateCacheRow | undefined) => {
           if (err) {
             reject(err)
@@ -215,9 +216,9 @@ export class CurrencyConverter {
 
           if (row) {
             const cacheAge = Date.now() - new Date(row.last_updated).getTime()
-            const ttl = settings.fxPreferBocRate ? BSP_CACHE_TTL_MS : this.getCacheDurationMs()
+            const ttl = isPhpValuationPair ? BSP_CACHE_TTL_MS : this.getCacheDurationMs()
             if (cacheAge < ttl) {
-              resolve({ rate: row.rate, source: settings.fxPreferBocRate ? 'bsp' : 'cache' })
+              resolve({ rate: row.rate, source: isPhpValuationPair ? 'bsp' : 'cache' })
               return
             }
           }
@@ -226,7 +227,7 @@ export class CurrencyConverter {
           //   1. BSP PDSF daily reference rate  (RA 8183 — legally mandated for customs)
           //   2. BOC weekly rate                (matches BOC's own published table)
           //   3. Market API / fallback
-          if (settings.fxPreferBocRate && (toCurrency === 'PHP' || fromCurrency === 'PHP')) {
+          if (isPhpValuationPair) {
             try {
               const foreignCurrency = toCurrency === 'PHP' ? fromCurrency : toCurrency
 
@@ -246,8 +247,8 @@ export class CurrencyConverter {
                 resolve({ rate, source: 'bsp' })
                 return
               }
-            } catch (bocError) {
-              console.warn('BSP rate fetch error, trying BOC rate:', bocError)
+            } catch (bspError) {
+              console.warn('BSP rate fetch error, trying BOC rate:', bspError)
             }
 
             // Step 2 — BOC weekly rate

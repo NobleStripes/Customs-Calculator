@@ -50,6 +50,19 @@ type AuditEntry = {
   changed_at: string
 }
 
+const getAuditActor = (entry: AuditEntry, sources: TariffSource[]): string => {
+  const source = sources.find((s) => s.id === entry.source_id)
+  if (!source) {
+    return entry.source_id != null ? `Source #${entry.source_id}` : 'Unknown'
+  }
+
+  if (source.source_type.includes('auto-fetch')) {
+    return `System AutoFetcher (${source.source_name})`
+  }
+
+  return source.source_name || 'Admin'
+}
+
 type TariffSource = {
   id: number
   source_name: string
@@ -580,6 +593,7 @@ export const Admin: React.FC = () => {
         'reason',
         'source_id',
         'import_job_id',
+        'updated_by',
         'changed_at',
       ],
       ...auditRows.map((row) => [
@@ -594,6 +608,7 @@ export const Admin: React.FC = () => {
         row.reason,
         row.source_id,
         row.import_job_id,
+        getAuditActor(row, sources),
         row.changed_at,
       ]),
     ])
@@ -1083,12 +1098,13 @@ export const Admin: React.FC = () => {
               ? sources.find((s) => s.imported_at === lastImport)?.source_name ?? '—'
               : '—'
             const mostRecent = auditRows[0]?.changed_at
+            const mostRecentActor = auditRows[0] ? getAuditActor(auditRows[0], sources) : '—'
             return (
               <div className="audit-summary-cards">
                 <div className="audit-summary-card">
                   <span className="audit-summary-label">Last Tariff Update</span>
                   <span className="audit-summary-value">{lastImport ? formatDate(lastImport) : 'No data'}</span>
-                  <span className="audit-summary-meta">{lastImportSource}</span>
+                  <span className="audit-summary-meta">{lastImportSource} • {mostRecentActor}</span>
                 </div>
                 <div className="audit-summary-card">
                   <span className="audit-summary-label">Total Rate Changes</span>
@@ -1140,6 +1156,7 @@ export const Admin: React.FC = () => {
                     <th>Old Surcharge</th>
                     <th>New Surcharge</th>
                     <th>Reason</th>
+                    <th>Updated By</th>
                     <th>Changed At</th>
                     <th>Source</th>
                   </tr>
@@ -1155,6 +1172,7 @@ export const Admin: React.FC = () => {
                       <td>{formatPct(entry.old_surcharge_rate)}</td>
                       <td>{formatPct(entry.new_surcharge_rate)}</td>
                       <td>{entry.reason || '-'}</td>
+                      <td>{getAuditActor(entry, sources)}</td>
                       <td>{formatDate(entry.changed_at)}</td>
                       <td>{sources.find((s) => s.id === entry.source_id)?.source_name ?? (entry.source_id != null ? `Source #${entry.source_id}` : '—')}</td>
                     </tr>

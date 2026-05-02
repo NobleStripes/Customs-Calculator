@@ -214,6 +214,27 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
     totalPenalties: results.penalties?.totalPenalties ?? results.breakdown?.penalties?.total ?? 0,
   }
   const totalPayable = results.totalPayable ?? (results.totalLandedCost + penalties.totalPenalties)
+  const feeComposition = [
+    { key: 'duty', label: 'Customs Duty', value: dutyAmount },
+    { key: 'vat', label: 'VAT', value: vatAmount },
+    { key: 'excise', label: 'Excise Tax', value: exciseAmount },
+    { key: 'brokerage', label: 'Brokerage Fee', value: costBase.brokerageFee || 0 },
+    { key: 'ipf', label: 'Import Processing Fee', value: extraFees.ipc },
+    { key: 'other', label: 'Other Charges', value: Math.max(0, totalTaxAndFees - (dutyAmount + vatAmount + exciseAmount + (costBase.brokerageFee || 0) + extraFees.ipc)) },
+  ].filter((entry) => entry.value > 0)
+  const compositionTotal = feeComposition.reduce((sum, entry) => sum + entry.value, 0)
+  const chartSegments = ['#2563eb', '#f59e0b', '#ef4444', '#14b8a6', '#8b5cf6', '#64748b']
+  const chartGradient = compositionTotal <= 0
+    ? '#e5e7eb'
+    : (() => {
+        let current = 0
+        return feeComposition.map((entry, index) => {
+          const start = (current / compositionTotal) * 100
+          current += entry.value
+          const end = (current / compositionTotal) * 100
+          return `${chartSegments[index % chartSegments.length]} ${start.toFixed(2)}% ${end.toFixed(2)}%`
+        }).join(', ')
+      })()
 
   const handleExportDocument = async () => {
     setExportMessage(null)
@@ -458,6 +479,21 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
 
         <div className="result-card breakdown-card">
           <h3>Tax Breakdown</h3>
+          <div className="fee-visual-wrap">
+            <div className="fee-pie" style={{ background: `conic-gradient(${chartGradient})` }} aria-label="Fee composition chart" />
+            <div className="fee-legend" aria-label="Fee composition legend">
+              {feeComposition.map((entry, index) => {
+                const share = compositionTotal > 0 ? (entry.value / compositionTotal) * 100 : 0
+                return (
+                  <div className="fee-legend-row" key={entry.key}>
+                    <span className="fee-dot" style={{ backgroundColor: chartSegments[index % chartSegments.length] }} />
+                    <span>{entry.label}</span>
+                    <strong>{share.toFixed(1)}%</strong>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
           <div className="breakdown-table">
             <div className="breakdown-row">
               <span>CUD</span>

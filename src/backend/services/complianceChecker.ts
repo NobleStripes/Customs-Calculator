@@ -77,6 +77,10 @@ export class ComplianceChecker {
               'from customs duties and taxes under Section 423 of the CMTA (RA 10863). ' +
               'Present proof of value to the BOC releasing officer.'
             )
+            warnings.push(
+              'De minimis treatment does not waive documentary clearances for regulated goods ' +
+              '(for example, FDA- or NTC-regulated products).'
+            )
           }
 
           if (value > 10000) {
@@ -87,6 +91,7 @@ export class ComplianceChecker {
           // Get category for additional rules
           this.db.get('SELECT category FROM hs_codes WHERE code = ? LIMIT 1', [hsCode], (_categoryErr: Error | null, hsRow: CategoryRow | undefined) => {
             const hsCategory = hsRow?.category || 'General'
+            const normalizedCategory = hsCategory.toLowerCase()
 
             if (hsCategory === 'Electronics') {
               requiredDocuments.push("Manufacturer's Specification Sheet")
@@ -119,6 +124,17 @@ export class ComplianceChecker {
                 'Pharmaceutical products, medical devices, and cosmetics require FDA clearance (Certificate of Product ' +
                 'Registration and Import Permit) issued by the Food and Drug Administration per RA 9711 (FDA Act of 2009).'
               )
+            }
+
+            const hsDescriptionBlob = `${hsCode} ${normalizedCategory}`
+            if (/(telecom|radio|wireless|transmitter|receiver|electronics)/i.test(hsDescriptionBlob)) {
+              requiredDocuments.push('NTC Type Acceptance Certificate')
+              restrictions.push('NTC clearance is required for telecommunications/radio equipment before release.')
+            }
+
+            if (/(pharma|drug|medical|cosmetic|food|supplement)/i.test(hsDescriptionBlob)) {
+              requiredDocuments.push('FDA Import Clearance / Product Registration')
+              restrictions.push('FDA clearance is required before customs release for health-regulated goods.')
             }
 
             if (hsCategory === 'Textiles') {

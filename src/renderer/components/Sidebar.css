@@ -77,28 +77,32 @@
 @media (max-width: 768px) {
   .sidebar {
     width: 100%;
-    flex-direction: row;
+    flex-direction: column;
     height: auto;
     border-right: none;
     border-bottom: 1px solid #1a252f;
   }
 
   .sidebar-header {
-    flex: 1;
+    flex: initial;
+    padding: 12px 14px;
     border-bottom: none;
-    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    border-right: none;
   }
 
   .sidebar-nav {
     flex-direction: row;
+    flex-wrap: wrap;
     padding: 0;
   }
 
   .nav-item {
     margin: 0;
     border-radius: 0;
-    flex: 1;
+    flex: 1 1 50%;
     justify-content: center;
+    padding: 10px 8px;
+    font-size: 0.85rem;
   }
 
   .sidebar-footer {

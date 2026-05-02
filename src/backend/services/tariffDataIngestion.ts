@@ -1868,9 +1868,57 @@ export class TariffDataIngestionService {
       notes: [row.notes, `Source URL: ${sourceUrl}`].filter(Boolean).join(' | '),
     }))
 
+    if (extractedRows.length > 0) {
+      return {
+        rows: extractedRows,
+        confidence: 60,
+      }
+    }
+
+    const plainText = String(htmlContent || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    const fallbackRows: TariffImportRow[] = []
+    const dedupe = new Set<string>()
+    const pattern = /(\d{4}(?:[.\s]?\d{2}){0,3}|\d{6,10})[^\n\r]{0,220}?(\d{1,3}(?:\.\d{1,4})?)\s*%/gi
+    let match: RegExpExecArray | null
+
+    while ((match = pattern.exec(plainText)) !== null) {
+      const hsRaw = String(match[1] || '').replace(/\s+/g, '')
+      const dutyRaw = Number(match[2])
+      if (!hsRaw || !Number.isFinite(dutyRaw)) {
+        continue
+      }
+
+      const hsCode = normalizeExactHsCode(hsRaw) || hsRaw
+      const contextStart = Math.max(0, match.index - 80)
+      const contextEnd = Math.min(plainText.length, match.index + match[0].length + 80)
+      const context = plainText.slice(contextStart, contextEnd)
+      const normalizedContext = context.replace(new RegExp(hsRaw, 'g'), ' ').replace(/\d{1,3}(?:\.\d{1,4})?\s*%/g, ' ').replace(/\s+/g, ' ').trim()
+      const dedupeKey = `${hsCode}:${dutyRaw}`
+
+      if (dedupe.has(dedupeKey)) {
+        continue
+      }
+      dedupe.add(dedupeKey)
+
+      fallbackRows.push({
+        hsCode,
+        dutyRate: dutyRaw,
+        scheduleCode: 'MFN',
+        description: normalizedContext || undefined,
+        notes: `Fallback text-pattern extraction from ${sourceUrl}`,
+        confidenceScore: 45,
+      })
+    }
+
     return {
-      rows: extractedRows,
-      confidence: extractedRows.length > 0 ? 60 : 0,
+      rows: fallbackRows,
+      confidence: fallbackRows.length > 0 ? 45 : 0,
     }
   }
 }

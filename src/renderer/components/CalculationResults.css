@@ -128,6 +128,43 @@
   color: #52606d;
 }
 
+.fee-visual-wrap {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 16px;
+  margin: 10px 0 8px;
+  align-items: center;
+}
+
+.fee-pie {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  box-shadow: inset 0 0 0 6px #ffffff;
+}
+
+.fee-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fee-legend-row {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.82rem;
+  color: #334155;
+}
+
+.fee-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
 .compliance-section {
   background-color: #e8f5e9;
   border-left: 4px solid #4caf50;
@@ -286,6 +323,15 @@
     grid-template-columns: 1fr;
   }
 
+  .breakdown-row {
+    gap: 10px;
+  }
+
+  .breakdown-row span {
+    max-width: 62%;
+    line-height: 1.2;
+  }
+
   .export-controls {
     grid-template-columns: 1fr;
   }
@@ -296,6 +342,15 @@
 
   .result-card .amount {
     font-size: 1.5rem;
+  }
+
+  .fee-visual-wrap {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .fee-legend {
+    width: 100%;
   }
 }
 
