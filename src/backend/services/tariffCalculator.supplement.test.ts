@@ -154,7 +154,7 @@ describe('TariffCalculator.calculateTotalLandedCost', () => {
 
     await expect(
       calculator.calculateTotalLandedCost(10000, '8471.30', 'US', 'NO-SUCH-SCHEDULE')
-    ).rejects.toThrow()
+    ).rejects.toThrow('Failed to calculate total landed cost')
   })
 })
 
