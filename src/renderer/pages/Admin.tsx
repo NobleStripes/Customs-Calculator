@@ -225,6 +225,7 @@ export const Admin: React.FC = () => {
   const [bulkNotes, setBulkNotes] = useState('')
   const [reviewSearch, setReviewSearch] = useState('')
   const [reviewConfidenceMax, setReviewConfidenceMax] = useState(DEFAULT_CONFIDENCE_FILTER)
+  const [reviewPage, setReviewPage] = useState(0)
   const [provenanceByRowId, setProvenanceByRowId] = useState<Record<number, ReviewRowProvenance>>({})
   const [provenanceLoadingRowId, setProvenanceLoadingRowId] = useState<number | null>(null)
 
@@ -462,8 +463,15 @@ export const Admin: React.FC = () => {
     }
   }, [filteredReviewRows])
 
+  const reviewPageCount = Math.max(1, Math.ceil(filteredReviewRows.length / PAGE_SIZE))
+  const pagedReviewRows = useMemo(() => {
+    const start = reviewPage * PAGE_SIZE
+    return filteredReviewRows.slice(start, start + PAGE_SIZE)
+  }, [filteredReviewRows, reviewPage])
+
   const handleSelectJob = (jobId: number) => {
     setSelectedJobId(jobId)
+    setReviewPage(0)
     void loadReviewRows(jobId)
   }
 
@@ -904,11 +912,17 @@ export const Admin: React.FC = () => {
                 </div>
               )}
 
-              {filteredReviewRows.map((row) => {
+              {pagedReviewRows.map((row) => {
                 const normalized = parseNormalizedRow(row)
                 const conflictPayload = parseConflictPayload(row)
                 const isSelected = selectedReviewRowIds.includes(row.id)
                 const provenance = provenanceByRowId[row.id]
+                const confidenceClass =
+                  row.confidence_score >= 90
+                    ? 'confidence-high'
+                    : row.confidence_score >= LOW_CONFIDENCE_THRESHOLD
+                      ? 'confidence-mid'
+                      : 'confidence-low'
 
                 return (
                   <div key={row.id} className={`review-row-card ${isSelected ? 'selected' : ''}`}>
@@ -923,7 +937,7 @@ export const Admin: React.FC = () => {
                         <span>Select</span>
                       </label>
                       <span>Row #{row.row_number}</span>
-                      <span>Confidence: {row.confidence_score}%</span>
+                      <span className={`confidence-chip ${confidenceClass}`}>Confidence: {row.confidence_score}%</span>
                       <span>Source: {row.source_name}</span>
                       <span>Type: {row.source_type}</span>
                       <span>{formatDate(row.created_at)}</span>
@@ -1020,6 +1034,26 @@ export const Admin: React.FC = () => {
                   </div>
                 )
               })}
+
+              {filteredReviewRows.length > PAGE_SIZE && (
+                <div className="review-pagination">
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={() => setReviewPage((p) => Math.max(0, p - 1))}
+                    disabled={reviewPage === 0}
+                  >
+                    ← Prev
+                  </button>
+                  <span>Page {reviewPage + 1} of {reviewPageCount} ({filteredReviewRows.length} rows)</span>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={() => setReviewPage((p) => Math.min(reviewPageCount - 1, p + 1))}
+                    disabled={reviewPage >= reviewPageCount - 1}
+                  >
+                    Next →
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

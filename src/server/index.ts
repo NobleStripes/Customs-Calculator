@@ -2,7 +2,7 @@ import express from 'express'
 import rateLimit from 'express-rate-limit'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { initializeDatabase } from '../backend/db/database'
+import { initializeDatabase, getRegulatorySources, createRegulatorySource, updateRegulatorySource, deleteRegulatorySource } from '../backend/db/database'
 import { ComplianceChecker } from '../backend/services/complianceChecker'
 import { TariffDataIngestionService } from '../backend/services/tariffDataIngestion'
 import { TariffCalculator, hasChapter99Intent, getSynonymProfile, scoreHsSearchResult } from '../backend/services/tariffCalculator'
@@ -16,7 +16,7 @@ import {
   isValidExactHsCode,
   normalizeExactHsCode,
 } from '../shared/hsLookupQuery'
-import { WebsiteFetcherService, type RegulatorySource } from '../backend/services/websiteFetcher'
+import { WebsiteFetcherService, type RegulatorySource, invalidateRegulatorySourcesCache } from '../backend/services/websiteFetcher'
 import * as autoFetcher from '../backend/services/autoFetcher'
 import {
   BIR_DOCUMENTARY_STAMP_TAX_PHP,
@@ -1310,6 +1310,83 @@ app.post('/api/import-jobs/:importJobId/review-rows/bulk', requireAdminApiKey, a
         rejected,
       },
     })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/admin/source-health', requireAdminApiKey, async (_request, response) => {
+  try {
+    const sources = await tariffDataIngestion.getTariffSources(50)
+    const health = await tariffDataIngestion.getCatalogHealthMetrics()
+    const sourceHealth = sources.map((source) => ({
+      id: source.id,
+      source_name: source.source_name,
+      source_type: source.source_type,
+      fetched_at: source.fetched_at,
+      imported_at: source.imported_at,
+    }))
+    return response.json({ success: true, data: { sources: sourceHealth, health } })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.get('/api/admin/regulatory-sources', requireAdminApiKey, async (_request, response) => {
+  try {
+    const rows = await getRegulatorySources()
+    return response.json({ success: true, data: rows })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.post('/api/admin/regulatory-sources', requireAdminApiKey, async (request, response) => {
+  const { source_key, url, label, notes } = request.body as Record<string, string>
+  if (!source_key || !url) {
+    return response.status(400).json({ success: false, error: 'source_key and url are required' })
+  }
+  try {
+    const row = await createRegulatorySource(source_key, url, label, notes)
+    invalidateRegulatorySourcesCache()
+    return response.status(201).json({ success: true, data: row })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.put('/api/admin/regulatory-sources/:id', requireAdminApiKey, async (request, response) => {
+  const id = Number(request.params.id)
+  if (!Number.isFinite(id)) {
+    return response.status(400).json({ success: false, error: 'Invalid id' })
+  }
+  const { url, label, is_active, notes } = request.body as Record<string, unknown>
+  try {
+    const updated = await updateRegulatorySource(id, {
+      ...(url !== undefined ? { url: String(url) } : {}),
+      ...(label !== undefined ? { label: String(label) } : {}),
+      ...(is_active !== undefined ? { is_active: Number(is_active) } : {}),
+      ...(notes !== undefined ? { notes: String(notes) } : {}),
+    })
+    if (!updated) {
+      return response.status(404).json({ success: false, error: 'Regulatory source not found' })
+    }
+    invalidateRegulatorySourcesCache()
+    return response.json({ success: true, data: updated })
+  } catch (error) {
+    return sendError(response, 502, error)
+  }
+})
+
+app.delete('/api/admin/regulatory-sources/:id', requireAdminApiKey, async (request, response) => {
+  const id = Number(request.params.id)
+  if (!Number.isFinite(id)) {
+    return response.status(400).json({ success: false, error: 'Invalid id' })
+  }
+  try {
+    await deleteRegulatorySource(id)
+    invalidateRegulatorySourcesCache()
+    return response.json({ success: true })
   } catch (error) {
     return sendError(response, 502, error)
   }

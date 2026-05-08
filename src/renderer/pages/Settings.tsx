@@ -46,6 +46,8 @@ export const Settings: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  const hasUnsavedChanges = JSON.stringify(localSettings) !== JSON.stringify(settings)
+
   const loadRuntimeState = async () => {
     setIsRefreshingRuntime(true)
     setRuntimeError(null)
@@ -108,6 +110,9 @@ export const Settings: React.FC = () => {
   }
 
   const handleReset = async () => {
+    if (!window.confirm('Reset all settings to defaults? This will overwrite your current configuration.')) {
+      return
+    }
     setIsSaving(true)
     setSaveError(null)
 
@@ -146,7 +151,12 @@ export const Settings: React.FC = () => {
   return (
     <div className="settings-container">
       <header className="settings-header">
-        <h1>Settings</h1>
+        <h1>
+          Settings
+          {hasUnsavedChanges && !saved && (
+            <span className="unsaved-badge" title="You have unsaved changes">Unsaved</span>
+          )}
+        </h1>
         <p>Configure default calculation and system preferences.</p>
       </header>
 
@@ -340,8 +350,8 @@ export const Settings: React.FC = () => {
         </section>
 
         <div className="settings-actions">
-          <button className="btn btn-primary" onClick={() => void handleSave()} disabled={isSaving}>
-            {isSaving ? 'Saving...' : saved ? 'Saved' : 'Save Settings'}
+          <button className="btn btn-primary" onClick={() => void handleSave()} disabled={isSaving || !hasUnsavedChanges}>
+            {isSaving ? 'Saving...' : saved ? 'Saved ✓' : 'Save Settings'}
           </button>
           <button className="btn btn-outline" onClick={() => void handleReset()} disabled={isSaving}>
             Reset to Defaults

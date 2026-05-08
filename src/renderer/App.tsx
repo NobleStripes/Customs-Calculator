@@ -35,6 +35,28 @@ function App() {
       <div className="error-container">
         <h1>Error</h1>
         <p>{error}</p>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            setError(null)
+            setInitialized(false)
+            const initApp = async () => {
+              try {
+                const result = await appApi.initDB()
+                if (result.success) {
+                  setInitialized(true)
+                } else {
+                  setError(result.error || 'Database initialization failed')
+                }
+              } catch (err) {
+                setError(String(err))
+              }
+            }
+            void initApp()
+          }}
+        >
+          Retry
+        </button>
       </div>
     )
   }

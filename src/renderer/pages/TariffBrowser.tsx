@@ -20,6 +20,9 @@ type TariffScheduleOption = {
   displayName: string
 }
 
+type SortKey = 'hsCode' | 'dutyRate' | 'vatRate' | 'surchargeRate' | 'effectiveDate'
+type SortDir = 'asc' | 'desc'
+
 const RATE_FORMAT = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -37,6 +40,17 @@ export const TariffBrowser: React.FC = () => {
   const [rows, setRows] = useState<TariffRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sortKey, setSortKey] = useState<SortKey>('hsCode')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -120,6 +134,20 @@ export const TariffBrowser: React.FC = () => {
     }
   }, [rows])
 
+  const sortedRows = useMemo(() => {
+    const sorted = [...rows].sort((a, b) => {
+      const av = a[sortKey]
+      const bv = b[sortKey]
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sortDir === 'asc' ? av - bv : bv - av
+      }
+      return sortDir === 'asc'
+        ? String(av ?? '').localeCompare(String(bv ?? ''))
+        : String(bv ?? '').localeCompare(String(av ?? ''))
+    })
+    return sorted
+  }, [rows, sortKey, sortDir])
+
   return (
     <div className="tariff-browser-container">
       <header className="tariff-browser-header">
@@ -200,24 +228,50 @@ export const TariffBrowser: React.FC = () => {
       {error && <div className="error-message">{error}</div>}
 
       <section className="tariff-table-panel">
+        <p className="tariff-row-count">
+          {loading ? 'Loading…' : `${stats.totalRows} row${stats.totalRows !== 1 ? 's' : ''}`}
+        </p>
         <div className="table-wrap">
           <table>
+            <caption className="sr-only">
+              {browseMode === 'history' ? 'Tariff rate history' : 'Latest effective tariff rates'}
+            </caption>
             <thead>
               <tr>
-                <th>HS Code</th>
-                <th>Schedule</th>
-                <th>Description</th>
-                <th>Category</th>
-                <th>Duty Rate</th>
-                <th>VAT Rate</th>
-                <th>Surcharge</th>
-                <th>Effective Date</th>
-                {browseMode === 'history' && <th>End Date</th>}
-                {browseMode === 'history' && <th>Import Status</th>}
+                <th scope="col">
+                  <button className="sort-btn" onClick={() => handleSort('hsCode')}>
+                    HS Code{sortKey === 'hsCode' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                  </button>
+                </th>
+                <th scope="col">Schedule</th>
+                <th scope="col">Description</th>
+                <th scope="col">Category</th>
+                <th scope="col">
+                  <button className="sort-btn" onClick={() => handleSort('dutyRate')}>
+                    Duty Rate{sortKey === 'dutyRate' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                  </button>
+                </th>
+                <th scope="col">
+                  <button className="sort-btn" onClick={() => handleSort('vatRate')}>
+                    VAT Rate{sortKey === 'vatRate' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                  </button>
+                </th>
+                <th scope="col">
+                  <button className="sort-btn" onClick={() => handleSort('surchargeRate')}>
+                    Surcharge{sortKey === 'surchargeRate' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                  </button>
+                </th>
+                <th scope="col">
+                  <button className="sort-btn" onClick={() => handleSort('effectiveDate')}>
+                    Effective Date{sortKey === 'effectiveDate' ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                  </button>
+                </th>
+                {browseMode === 'history' && <th scope="col">End Date</th>}
+                {browseMode === 'history' && <th scope="col">Import Status</th>}
               </tr>
             </thead>
             <tbody>
-              {!loading && rows.length === 0 && (
+              {!loading && sortedRows.length === 0 && (
                 <tr>
                   <td className="empty-cell" colSpan={browseMode === 'history' ? 10 : 8}>
                     No tariff rows found for the selected filters.
@@ -234,7 +288,7 @@ export const TariffBrowser: React.FC = () => {
               )}
 
               {!loading &&
-                rows.map((row) => (
+                sortedRows.map((row) => (
                   <tr key={`${row.hsCode}-${row.scheduleCode}-${row.effectiveDate}`}>
                     <td>{row.hsCode}</td>
                     <td>{row.scheduleCode}</td>

@@ -35,6 +35,7 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
   const [searchError, setSearchError] = useState<string | null>(null)
   const [lookupMessage, setLookupMessage] = useState<string | null>(null)
   const [selectedChapter, setSelectedChapter] = useState<string>('')
+  const [searchSlow, setSearchSlow] = useState(false)
   const latestRequestIdRef = useRef(0)
 
   useEffect(() => {
@@ -53,15 +54,25 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
       const requestId = latestRequestIdRef.current + 1
       latestRequestIdRef.current = requestId
       setLoading(true)
+      setSearchSlow(false)
       setSearchError(null)
       setLookupMessage(null)
 
+      const slowTimer = setTimeout(() => {
+        if (latestRequestIdRef.current === requestId) {
+          setSearchSlow(true)
+        }
+      }, 2000)
+
       try {
         const result = await appApi.searchLiveHSCodes(normalizedQuery, { limit: 50 })
+        clearTimeout(slowTimer)
 
         if (latestRequestIdRef.current !== requestId) {
           return
         }
+
+        setSearchSlow(false)
 
         if (result.success && result.data) {
           setSuggestions(result.data.results || [])
@@ -76,10 +87,12 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
         setIsOpen(true)
         setSearchError(result.error || 'Unable to load HS code suggestions. Try again.')
       } catch (error) {
+        clearTimeout(slowTimer)
         if (latestRequestIdRef.current !== requestId) {
           return
         }
 
+        setSearchSlow(false)
         setSuggestions([])
         setActiveIndex(-1)
         setIsOpen(true)
@@ -88,6 +101,7 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
       } finally {
         if (latestRequestIdRef.current === requestId) {
           setLoading(false)
+          setSearchSlow(false)
         }
       }
     }
@@ -201,7 +215,10 @@ export const HSCodeSearch: React.FC<HSCodeSearchProps> = ({
           placeholder="Search by code (e.g., 8471, 6204) or description"
           className="search-input"
         />
-        {loading && <span className="search-loader">🔍</span>}
+        {loading && <span className="search-loader" aria-label="Searching">🔍</span>}
+        {searchSlow && loading && (
+          <span className="search-slow" role="status" aria-live="polite">Fetching official data…</span>
+        )}
       </div>
 
       {isOpen && suggestions.length > 0 && (

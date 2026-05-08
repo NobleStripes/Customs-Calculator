@@ -14,6 +14,20 @@
 .settings-header h1 {
   margin: 0;
   font-size: 1.6rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.unsaved-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: #e9a432;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
 }
 
 .settings-header p {

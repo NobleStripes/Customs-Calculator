@@ -225,13 +225,19 @@ const fetchAndIngest = async (source: RegulatorySource, mode: SyncMode = 'increm
       }
 
       try {
+        const PARSE_TIMEOUT_MS = 10_000
         const imported = await runWithRetry(
-          () => runAdapterImport(ingestion, source, mode, link.href, fileName, contentBase64),
+          () => Promise.race([
+            runAdapterImport(ingestion, source, mode, link.href, fileName, contentBase64),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Parse timeout after ${PARSE_TIMEOUT_MS}ms for ${fileName}`)), PARSE_TIMEOUT_MS)
+            ),
+          ]),
           `adapter import ${link.href}`
         )
 
         if (!imported) {
-          console.log(`[AutoFetcher] No adapter produced rows for ${fileName}`)
+          console.warn(`[AutoFetcher] No adapter produced rows for ${fileName}`)
         }
       } catch (err) {
         console.error(`[AutoFetcher] Import failed for ${fileName}:`, err)

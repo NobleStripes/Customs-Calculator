@@ -349,6 +349,19 @@ export class TariffCalculator {
     }
 
     const normalizedScheduleCode = scheduleCode.trim().toUpperCase() || 'MFN'
+
+    // If the requested schedule has no data, fall back to MFN before failing.
+    if (normalizedScheduleCode !== 'MFN') {
+      const mfnRow = await this.getCurrentTariffRateRow(hsCode, fields, 'MFN')
+      if (mfnRow) {
+        console.warn(
+          `[TariffCalculator] No tariff row found for HS ${hsCode} under schedule ${normalizedScheduleCode}; ` +
+          `falling back to MFN rate.`
+        )
+        return mfnRow
+      }
+    }
+
     throw new Error(`No approved tariff rate found for HS code ${hsCode} under schedule ${normalizedScheduleCode}`)
   }
 

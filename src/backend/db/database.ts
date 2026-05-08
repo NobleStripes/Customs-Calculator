@@ -257,6 +257,17 @@ const schema = [
     rate REAL NOT NULL,
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS regulatory_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_key TEXT NOT NULL,
+    url TEXT NOT NULL,
+    label TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_key, url)
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_hs_codes_category ON hs_codes(category)`,
   `CREATE INDEX IF NOT EXISTS idx_tariff_rates_hs_code ON tariff_rates(hs_code)`,
   `CREATE INDEX IF NOT EXISTS idx_tariff_rates_effective_date ON tariff_rates(effective_date)`,
@@ -870,6 +881,125 @@ const insertComplianceRules = (database: sqlite3.Database): Promise<void> => {
   })
 }
 
+export type RegulatorySourceRow = {
+  id: number
+  source_key: string
+  url: string
+  label: string | null
+  is_active: number
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+const REGULATORY_SEED: Array<{ source_key: string; url: string; label: string }> = [
+  { source_key: 'bir', url: 'https://www.bir.gov.ph/', label: 'BIR Homepage' },
+  { source_key: 'bir', url: 'https://www.bir.gov.ph/revenue-issuances-details', label: 'BIR Revenue Issuances' },
+  { source_key: 'boc', url: 'https://customs.gov.ph/', label: 'BOC Homepage' },
+  { source_key: 'boc', url: 'https://customs.gov.ph/memoranda-2026/', label: 'BOC Memoranda 2026' },
+  { source_key: 'boc', url: 'https://customs.gov.ph/customs-administrative-order-cao-2026/', label: 'BOC CAO 2026' },
+  { source_key: 'boc', url: 'https://customs.gov.ph/customs-memorandum-order-cmo-2026/', label: 'BOC CMO 2026' },
+  { source_key: 'boc', url: 'https://customs.gov.ph/customs-memorandum-circular-cmc-2026/', label: 'BOC CMC 2026' },
+  { source_key: 'tariff-commission', url: 'https://finder.tariffcommission.gov.ph/', label: 'Tariff Commission Finder' },
+]
+
+const seedRegulatorySources = async (database: sqlite3.Database): Promise<void> => {
+  for (const seed of REGULATORY_SEED) {
+    await runStatement(
+      database,
+      `INSERT OR IGNORE INTO regulatory_sources (source_key, url, label) VALUES (?, ?, ?)`,
+      [seed.source_key, seed.url, seed.label]
+    )
+  }
+}
+
+export const getRegulatorySources = (): Promise<RegulatorySourceRow[]> => {
+  const database = getDatabase()
+  return new Promise((resolve, reject) => {
+    database.all(
+      'SELECT * FROM regulatory_sources ORDER BY source_key, id',
+      (err: Error | null, rows: RegulatorySourceRow[]) => {
+        if (err) reject(err)
+        else resolve(rows || [])
+      }
+    )
+  })
+}
+
+export const createRegulatorySource = (
+  sourceKey: string,
+  url: string,
+  label?: string,
+  notes?: string
+): Promise<RegulatorySourceRow> => {
+  const database = getDatabase()
+  return new Promise((resolve, reject) => {
+    database.run(
+      `INSERT INTO regulatory_sources (source_key, url, label, notes) VALUES (?, ?, ?, ?)`,
+      [sourceKey, url, label || null, notes || null],
+      function (this: { lastID: number }, err: Error | null) {
+        if (err) {
+          reject(err)
+          return
+        }
+        database.get(
+          'SELECT * FROM regulatory_sources WHERE id = ?',
+          [this.lastID],
+          (getErr: Error | null, row: RegulatorySourceRow) => {
+            if (getErr) reject(getErr)
+            else resolve(row)
+          }
+        )
+      }
+    )
+  })
+}
+
+export const updateRegulatorySource = (
+  id: number,
+  fields: Partial<{ url: string; label: string; is_active: number; notes: string }>
+): Promise<RegulatorySourceRow | null> => {
+  const database = getDatabase()
+  const entries = Object.entries(fields).filter(([, v]) => v !== undefined)
+  if (entries.length === 0) {
+    return Promise.resolve(null)
+  }
+
+  const setClauses = entries.map(([k]) => `${k} = ?`).join(', ')
+  const values = entries.map(([, v]) => v)
+
+  return new Promise((resolve, reject) => {
+    database.run(
+      `UPDATE regulatory_sources SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [...values, id],
+      (err: Error | null) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        database.get(
+          'SELECT * FROM regulatory_sources WHERE id = ?',
+          [id],
+          (getErr: Error | null, row: RegulatorySourceRow) => {
+            if (getErr) reject(getErr)
+            else resolve(row || null)
+          }
+        )
+      }
+    )
+  })
+}
+
+export const deleteRegulatorySource = (id: number): Promise<void> => {
+  const database = getDatabase()
+  return new Promise((resolve, reject) => {
+    database.run('DELETE FROM regulatory_sources WHERE id = ?', [id], (err: Error | null) => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
+
 export const seedInitialData = async (): Promise<void> => {
   const database = getDatabase()
 
@@ -881,6 +1011,7 @@ export const seedInitialData = async (): Promise<void> => {
   await insertTaxTypes(database)
   await insertTariffRates(database)
   await insertComplianceRules(database)
+  await seedRegulatorySources(database)
 }
 
 export const initializeDatabase = (): Promise<void> => {

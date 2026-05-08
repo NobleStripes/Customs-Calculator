@@ -245,20 +245,22 @@ export const BatchImport: React.FC = () => {
 
           <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
 
+          <label htmlFor="batch-csv-input" className="hint">Paste CSV data below or upload a file above</label>
           <textarea
+            id="batch-csv-input"
             value={rawCsv}
             onChange={(event) => setRawCsv(event.target.value)}
             placeholder={`${CSV_TEMPLATE_HEADER}\n${CSV_TEMPLATE_EXAMPLE}`}
           />
 
           <div className="actions">
-            <button className="btn btn-secondary" onClick={handleParse}>
+            <button className="btn btn-secondary" onClick={handleParse} disabled={!rawCsv.trim()}>
               Parse CSV
             </button>
-            <button className="btn btn-primary" onClick={handleRunBatch} disabled={loading}>
+            <button className="btn btn-primary" onClick={handleRunBatch} disabled={loading || shipments.length === 0}>
               {loading ? 'Running...' : 'Run Batch'}
             </button>
-            <button className="btn btn-outline" onClick={handleExportResults}>
+            <button className="btn btn-outline" onClick={handleExportResults} disabled={results.length === 0}>
               Export Results
             </button>
           </div>

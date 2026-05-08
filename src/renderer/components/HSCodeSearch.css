@@ -29,6 +29,15 @@
   animation: fade 0.8s ease-in-out infinite;
 }
 
+.search-slow {
+  position: absolute;
+  right: 36px;
+  font-size: 0.75rem;
+  color: #e9a432;
+  white-space: nowrap;
+  animation: fade 1s ease-in-out infinite;
+}
+
 @keyframes fade {
   0%,
   100% {

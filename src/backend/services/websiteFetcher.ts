@@ -1,9 +1,11 @@
 import axios from 'axios'
+import { getRegulatorySources } from '../db/database'
 
 const DEFAULT_TIMEOUT_MS = 10000
 const DEFAULT_MAX_HTML_LENGTH = 500000
 const DEFAULT_MAX_TEXT_LENGTH = 12000
 const DEFAULT_REGULATORY_RESULT_LIMIT = 6
+const SEED_CACHE_TTL_MS = 60_000
 
 const DEFAULT_ALLOWED_HOSTS = [
   'boc.gov.ph',
@@ -19,6 +21,7 @@ const DEFAULT_ALLOWED_HOSTS = [
 
 export type RegulatorySource = 'boc' | 'bir' | 'tariff-commission'
 
+// Fallback constant used when DB is unavailable at cold-start
 const REGULATORY_SEED_URLS: Record<RegulatorySource, string[]> = {
   bir: [
     'https://www.bir.gov.ph/',
@@ -34,6 +37,53 @@ const REGULATORY_SEED_URLS: Record<RegulatorySource, string[]> = {
   'tariff-commission': [
     'https://finder.tariffcommission.gov.ph/',
   ],
+}
+
+type SeedCache = {
+  data: Record<RegulatorySource, string[]>
+  expiresAt: number
+}
+
+let seedCache: SeedCache | null = null
+
+const getActiveSeedUrls = async (): Promise<Record<RegulatorySource, string[]>> => {
+  const now = Date.now()
+  if (seedCache && seedCache.expiresAt > now) {
+    return seedCache.data
+  }
+
+  try {
+    const rows = await getRegulatorySources()
+    const active = rows.filter((r) => r.is_active === 1)
+    const data: Record<RegulatorySource, string[]> = {
+      boc: [],
+      bir: [],
+      'tariff-commission': [],
+    }
+    for (const row of active) {
+      const key = row.source_key as RegulatorySource
+      if (key in data) {
+        data[key].push(row.url)
+      }
+    }
+
+    // If DB returned empty for a source, fall back to constant
+    for (const key of Object.keys(data) as RegulatorySource[]) {
+      if (data[key].length === 0) {
+        data[key] = REGULATORY_SEED_URLS[key]
+      }
+    }
+
+    seedCache = { data, expiresAt: now + SEED_CACHE_TTL_MS }
+    return data
+  } catch (error) {
+    console.warn('[WebsiteFetcher] Unable to load regulatory sources from DB; using fallback constant:', error)
+    return REGULATORY_SEED_URLS
+  }
+}
+
+export const invalidateRegulatorySourcesCache = (): void => {
+  seedCache = null
 }
 
 const REGULATORY_LINK_PATTERNS: Record<RegulatorySource, RegExp[]> = {
@@ -287,7 +337,8 @@ export class WebsiteFetcherService {
     source: RegulatorySource,
     query?: string
   ): Promise<string[]> {
-    const seeds = REGULATORY_SEED_URLS[source]
+    const allSeeds = await getActiveSeedUrls()
+    const seeds = allSeeds[source]
     const patterns = REGULATORY_LINK_PATTERNS[source]
     const discovered = new Set<string>(seeds)
 
