@@ -41,12 +41,13 @@ describe('TariffCalculator.calculateVAT', () => {
     expect(full.amount).toBeCloseTo(half.amount * 2)
   })
 
-  it('throws for a schedule code with no approved rate', async () => {
+  it('falls back to MFN rate for a schedule code with no approved row', async () => {
     const calculator = new TariffCalculatorClass()
 
-    await expect(
-      calculator.calculateVAT(10000, '8471.30', 'NON-EXISTENT-SCHEDULE')
-    ).rejects.toThrow()
+    // Unknown schedules fall back to MFN rather than throwing
+    const result = await calculator.calculateVAT(10000, '8471.30', 'NON-EXISTENT-SCHEDULE')
+    expect(result.rate).toBeGreaterThan(0)
+    expect(result.amount).toBeGreaterThan(0)
   })
 })
 
@@ -149,12 +150,12 @@ describe('TariffCalculator.calculateTotalLandedCost', () => {
     expect(result.total).toBeCloseTo(expected, 2)
   })
 
-  it('throws for a schedule code with no approved tariff row', async () => {
+  it('falls back to MFN rate for a schedule code with no approved tariff row', async () => {
     const calculator = new TariffCalculatorClass()
 
-    await expect(
-      calculator.calculateTotalLandedCost(10000, '8471.30', 'US', 'NO-SUCH-SCHEDULE')
-    ).rejects.toThrow('Failed to calculate total landed cost')
+    // Unknown schedules fall back to MFN rather than throwing
+    const result = await calculator.calculateTotalLandedCost(10000, '8471.30', 'US', 'NO-SUCH-SCHEDULE')
+    expect(result.total).toBeGreaterThan(0)
   })
 })
 

@@ -1084,11 +1084,9 @@ export class TariffDataIngestionService {
       }
 
       const finalStatus: TariffImportSummary['status'] =
-        importedRows === 0 && errorRows > 0
-          ? 'failed'
-          : errorRows > 0
-            ? 'completed_with_errors'
-            : 'completed'
+        errorRows > 0
+          ? 'completed_with_errors'
+          : 'completed'
 
       await run('UPDATE tariff_sources SET imported_at = CURRENT_TIMESTAMP WHERE id = ?', [sourceId])
       await updateImportJobStatus(importJobId, finalStatus, importedRows, pendingReviewRows, errorRows)
