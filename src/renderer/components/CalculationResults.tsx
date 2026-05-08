@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { appApi } from '../lib/appApi'
 import './CalculationResults.css'
 
@@ -166,6 +166,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
   const [exporting, setExporting] = useState(false)
   const [exportMessage, setExportMessage] = useState<string | null>(null)
   const [exportFormat, setExportFormat] = useState<'pdf' | 'word' | 'excel'>('pdf')
+  const exportSuccessTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const calculationCurrency = results.calculationCurrency || 'PHP'
 
   const formatCurrency = (amount: number, currency: string) => {
@@ -251,7 +252,10 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
         throw new Error(response.error || 'Unable to generate document')
       }
 
-      setExportMessage(`Saved report to: ${response.data.path}`)
+      const msg = `Saved report to: ${response.data.path}`
+      setExportMessage(msg)
+      if (exportSuccessTimer.current) clearTimeout(exportSuccessTimer.current)
+      exportSuccessTimer.current = setTimeout(() => setExportMessage(null), 5000)
     } catch (error) {
       setExportMessage(String(error))
     } finally {
@@ -262,6 +266,15 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
   return (
     <div className="calculation-results">
       <h2>Calculation Results</h2>
+
+      {/* Sticky total bar */}
+      <div className="results-sticky-bar" aria-live="polite">
+        <span className="results-sticky-label">Total Landed Cost:</span>
+        <span className="results-sticky-value">{formatCurrency(results.totalLandedCost, calculationCurrency)}</span>
+        {(results.penalties?.totalPenalties ?? 0) > 0 && (
+          <span className="results-sticky-payable">Payable incl. penalties: {formatCurrency(results.totalPayable ?? results.totalLandedCost, calculationCurrency)}</span>
+        )}
+      </div>
 
       {/* Entry type badge */}
       {results.entryType && (
@@ -496,7 +509,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
           </div>
           <div className="breakdown-table">
             <div className="breakdown-row">
-              <span>CUD</span>
+              <span><abbr title="Customs Uplift Duty">CUD</abbr></span>
               <strong>{formatCurrency(dutyAmount, calculationCurrency)}</strong>
             </div>
             {exciseAmount > 0 && (
@@ -540,28 +553,28 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
             <div className="breakdown-row spacer-row" aria-hidden="true" />
             {extraFees.transitCharge > 0 && (
               <div className="breakdown-row">
-                <span>TC</span>
+                <span><abbr title="Transit Charge">TC</abbr></span>
                 <strong>{formatCurrency(extraFees.transitCharge, calculationCurrency)}</strong>
               </div>
             )}
             <div className="breakdown-row">
-              <span>IPF</span>
+              <span><abbr title="Import Processing Fee">IPF</abbr></span>
               <strong>{formatCurrency(extraFees.ipc, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
-              <span>CSF</span>
+              <span><abbr title="Container Security Fee">CSF</abbr></span>
               <strong>{formatCurrency(extraFees.csf, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
-              <span>CDS</span>
+              <span><abbr title="Customs Documentary Stamp">CDS</abbr></span>
               <strong>{formatCurrency(extraFees.cds, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
-              <span>IRS</span>
+              <span><abbr title="Import Revenue Surcharge">IRS</abbr></span>
               <strong>{formatCurrency(extraFees.irs, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row">
-              <span>LRF</span>
+              <span><abbr title="License and Registration Fee">LRF</abbr></span>
               <strong>{formatCurrency(extraFees.lrf, calculationCurrency)}</strong>
             </div>
             <div className="breakdown-row total-row">

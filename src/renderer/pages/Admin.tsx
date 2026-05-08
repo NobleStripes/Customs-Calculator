@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { appApi, type ReviewRowProvenance } from '../lib/appApi'
+import { appApi, type ReviewRowProvenance, type RegulatorySourceRow } from '../lib/appApi'
 import './Admin.css'
 
 type ReviewRow = {
@@ -120,7 +120,7 @@ type TariffImportResult = {
 
 type TariffUploadMode = 'csv-text' | 'file-binary'
 
-type Tab = 'review' | 'jobs' | 'audit' | 'sources'
+type Tab = 'review' | 'jobs' | 'audit' | 'sources' | 'reg-sources'
 
 const PAGE_SIZE = 20
 const DEFAULT_CONFIDENCE_FILTER = 100
@@ -262,6 +262,17 @@ export const Admin: React.FC = () => {
   const [auditHsFilter, setAuditHsFilter] = useState('')
   const [auditOffset, setAuditOffset] = useState(0)
 
+  // Regulatory Sources state
+  const [regSources, setRegSources] = useState<RegulatorySourceRow[]>([])
+  const [regSourcesLoading, setRegSourcesLoading] = useState(false)
+  const [regSourcesError, setRegSourcesError] = useState<string | null>(null)
+  const [regSourcesSuccess, setRegSourcesSuccess] = useState<string | null>(null)
+  const [newRegSourceKey, setNewRegSourceKey] = useState('boc')
+  const [newRegSourceUrl, setNewRegSourceUrl] = useState('')
+  const [newRegSourceLabel, setNewRegSourceLabel] = useState('')
+  const [newRegSourceNotes, setNewRegSourceNotes] = useState('')
+  const [regSourcesSaving, setRegSourcesSaving] = useState(false)
+
   const loadJobs = useCallback(async () => {
     setJobsLoading(true)
     setJobsError(null)
@@ -335,15 +346,31 @@ export const Admin: React.FC = () => {
     }
   }, [])
 
+  const loadRegSources = useCallback(async () => {
+    setRegSourcesLoading(true)
+    setRegSourcesError(null)
+    try {
+      const result = await appApi.getRegulatorySources()
+      if (result.success && result.data) {
+        setRegSources(result.data)
+      }
+    } catch (err) {
+      setRegSourcesError(String(err))
+    } finally {
+      setRegSourcesLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     const handle = setTimeout(() => {
       void loadJobs()
       void loadSources()
       void loadCatalogHealth()
+      void loadRegSources()
     }, 0)
 
     return () => clearTimeout(handle)
-  }, [loadJobs, loadSources, loadCatalogHealth])
+  }, [loadJobs, loadSources, loadCatalogHealth, loadRegSources])
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -355,10 +382,14 @@ export const Admin: React.FC = () => {
         void loadSources()
         void loadCatalogHealth()
       }
+
+      if (tab === 'reg-sources') {
+        void loadRegSources()
+      }
     }, 0)
 
     return () => clearTimeout(handle)
-  }, [tab, auditHsFilter, auditOffset, loadAudit, loadSources, loadCatalogHealth])
+  }, [tab, auditHsFilter, auditOffset, loadAudit, loadSources, loadCatalogHealth, loadRegSources])
 
   const jobsWithPending = useMemo(() => jobs.filter((j) => j.pending_review_rows > 0), [jobs])
 
@@ -814,6 +845,9 @@ export const Admin: React.FC = () => {
         </button>
         <button className={`admin-tab ${tab === 'sources' ? 'active' : ''}`} onClick={() => setTab('sources')}>
           Tariff Sources
+        </button>
+        <button className={`admin-tab ${tab === 'reg-sources' ? 'active' : ''}`} onClick={() => setTab('reg-sources')}>
+          Regulatory Sources
         </button>
       </div>
 
@@ -1523,6 +1557,187 @@ export const Admin: React.FC = () => {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'reg-sources' && (
+        <div className="admin-section">
+          <h2 className="admin-section-title">Regulatory Seed URLs</h2>
+          <p className="admin-section-desc">
+            Manage the regulatory page URLs used by the auto-fetcher to discover tariff and policy updates.
+            Changes take effect on the next fetch cycle.
+          </p>
+
+          {regSourcesError && <div className="admin-error">{regSourcesError}</div>}
+          {regSourcesSuccess && <div className="admin-success">{regSourcesSuccess}</div>}
+          {regSourcesLoading && <p className="admin-loading">Loading regulatory sources…</p>}
+
+          {!regSourcesLoading && (
+            <div className="table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Source Key</th>
+                    <th>URL</th>
+                    <th>Label</th>
+                    <th>Active</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {regSources.length === 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center' }}>No regulatory sources found.</td>
+                    </tr>
+                  )}
+                  {regSources.map((row) => (
+                    <tr key={row.id}>
+                      <td><code>{row.source_key}</code></td>
+                      <td className="reg-url-cell">
+                        <a href={row.url} target="_blank" rel="noreferrer" className="reg-url-link">{row.url}</a>
+                      </td>
+                      <td>{row.label || <span className="text-muted">—</span>}</td>
+                      <td>
+                        <button
+                          className={`btn btn-sm ${row.is_active === 1 ? 'btn-success' : 'btn-outline'}`}
+                          disabled={regSourcesSaving}
+                          onClick={async () => {
+                            setRegSourcesSaving(true)
+                            setRegSourcesError(null)
+                            try {
+                              const res = await appApi.updateRegulatorySource(row.id, { is_active: row.is_active === 1 ? 0 : 1 })
+                              if (res.success) {
+                                await loadRegSources()
+                                setRegSourcesSuccess(`Source "${row.url}" ${row.is_active === 1 ? 'deactivated' : 'activated'}.`)
+                                setTimeout(() => setRegSourcesSuccess(null), 3000)
+                              } else {
+                                setRegSourcesError('Failed to update source.')
+                              }
+                            } catch (err) {
+                              setRegSourcesError(String(err))
+                            } finally {
+                              setRegSourcesSaving(false)
+                            }
+                          }}
+                        >
+                          {row.is_active === 1 ? 'Active' : 'Inactive'}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          disabled={regSourcesSaving}
+                          onClick={async () => {
+                            if (!window.confirm(`Delete "${row.url}"?`)) return
+                            setRegSourcesSaving(true)
+                            setRegSourcesError(null)
+                            try {
+                              const res = await appApi.deleteRegulatorySource(row.id)
+                              if (res.success) {
+                                await loadRegSources()
+                                setRegSourcesSuccess('Source deleted.')
+                                setTimeout(() => setRegSourcesSuccess(null), 3000)
+                              } else {
+                                setRegSourcesError('Failed to delete source.')
+                              }
+                            } catch (err) {
+                              setRegSourcesError(String(err))
+                            } finally {
+                              setRegSourcesSaving(false)
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="reg-sources-add-form">
+            <h3 className="reg-sources-add-title">Add New Source</h3>
+            <div className="reg-sources-form-row">
+              <label className="reg-sources-label">
+                Source Key
+                <select
+                  className="form-select"
+                  value={newRegSourceKey}
+                  onChange={(e) => setNewRegSourceKey(e.target.value)}
+                >
+                  <option value="boc">boc</option>
+                  <option value="bir">bir</option>
+                  <option value="tariff-commission">tariff-commission</option>
+                </select>
+              </label>
+              <label className="reg-sources-label reg-sources-label-url">
+                URL <span aria-hidden="true">*</span>
+                <input
+                  type="url"
+                  className="form-input"
+                  placeholder="https://…"
+                  value={newRegSourceUrl}
+                  onChange={(e) => setNewRegSourceUrl(e.target.value)}
+                />
+              </label>
+              <label className="reg-sources-label">
+                Label
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Optional label"
+                  value={newRegSourceLabel}
+                  onChange={(e) => setNewRegSourceLabel(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="reg-sources-form-row">
+              <label className="reg-sources-label reg-sources-label-notes">
+                Notes
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Optional notes"
+                  value={newRegSourceNotes}
+                  onChange={(e) => setNewRegSourceNotes(e.target.value)}
+                />
+              </label>
+              <button
+                className="btn btn-primary btn-sm reg-sources-add-btn"
+                disabled={regSourcesSaving || !newRegSourceUrl.trim()}
+                onClick={async () => {
+                  setRegSourcesSaving(true)
+                  setRegSourcesError(null)
+                  try {
+                    const res = await appApi.createRegulatorySource({
+                      source_key: newRegSourceKey,
+                      url: newRegSourceUrl.trim(),
+                      label: newRegSourceLabel.trim() || undefined,
+                      notes: newRegSourceNotes.trim() || undefined,
+                    })
+                    if (res.success) {
+                      setNewRegSourceUrl('')
+                      setNewRegSourceLabel('')
+                      setNewRegSourceNotes('')
+                      await loadRegSources()
+                      setRegSourcesSuccess('New source added.')
+                      setTimeout(() => setRegSourcesSuccess(null), 3000)
+                    } else {
+                      setRegSourcesError('Failed to add source.')
+                    }
+                  } catch (err) {
+                    setRegSourcesError(String(err))
+                  } finally {
+                    setRegSourcesSaving(false)
+                  }
+                }}
+              >
+                Add Source
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

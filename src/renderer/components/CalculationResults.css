@@ -595,3 +595,41 @@
     font-size: 0.76rem;
   }
 }
+
+/* Sticky total bar */
+.results-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-primary, #2563eb);
+  color: #fff;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.9375rem;
+}
+
+.results-sticky-label {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.results-sticky-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.results-sticky-payable {
+  font-size: 0.875rem;
+  opacity: 0.85;
+  margin-left: auto;
+}
+
+abbr[title] {
+  text-decoration: underline dotted;
+  cursor: help;
+}

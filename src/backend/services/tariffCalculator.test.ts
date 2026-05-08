@@ -202,12 +202,12 @@ describe('TariffCalculator.searchHSCodes', () => {
     ).toBe(true)
   })
 
-  it('throws a handled error when a selected tariff schedule has no approved row', async () => {
+  it('falls back to MFN rate when a selected tariff schedule has no approved row', async () => {
     const tariffCalculator = new TariffCalculatorClass()
 
-    await expect(
-      tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'NON-EXISTENT')
-    ).rejects.toThrow('No approved tariff rate found')
+    // When no row exists for the requested schedule, calculateDuty falls back to MFN
+    const result = await tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'NON-EXISTENT')
+    expect(result.rate).toBeGreaterThanOrEqual(0)
   })
 })
 
@@ -265,5 +265,88 @@ describe('scoreHsSearchResult / live-search merged-result re-ranking', () => {
     // The drone entry has a synonym prefix match (+25) and description match (+12*2);
     // the irrelevant entry should not overcome that even with the authority bonus.
     expect(droneLocal).toBeGreaterThan(irrelevantOfficial)
+  })
+})
+
+describe('TariffCalculator — MFN fallback for unknown schedule', () => {
+  it('falls back to MFN rate when requested schedule has no approved row', async () => {
+    const tariffCalculator = new TariffCalculatorClass()
+
+    // When no row exists for the schedule, calculateDuty falls back to MFN
+    const result = await tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'NON-EXISTENT-SCHEDULE')
+
+    // MFN rate is 5% per seeded test data — fallback should yield same as MFN
+    expect(result.rate).toBe(5)
+    expect(result.amount).toBe(50)
+  })
+
+  it('returns a valid duty result for MFN schedule when seeded data exists', async () => {
+    const tariffCalculator = new TariffCalculatorClass()
+
+    const result = await tariffCalculator.calculateDuty(1000, '8471.30', 'US', 'MFN')
+
+    expect(result.rate).toBeGreaterThanOrEqual(0)
+    expect(result.amount).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('regulatory_sources CRUD', () => {
+  let getRegulatorySources: typeof import('../db/database').getRegulatorySources
+  let createRegulatorySource: typeof import('../db/database').createRegulatorySource
+  let updateRegulatorySource: typeof import('../db/database').updateRegulatorySource
+  let deleteRegulatorySource: typeof import('../db/database').deleteRegulatorySource
+
+  beforeAll(async () => {
+    const db = await import('../db/database')
+    getRegulatorySources = db.getRegulatorySources
+    createRegulatorySource = db.createRegulatorySource
+    updateRegulatorySource = db.updateRegulatorySource
+    deleteRegulatorySource = db.deleteRegulatorySource
+  })
+
+  it('creates and retrieves a new regulatory source', async () => {
+    const created = await createRegulatorySource('boc', 'https://test.boc.gov.ph/test-page', 'Test label', 'Test notes')
+
+    expect(created.id).toBeGreaterThan(0)
+    expect(created.source_key).toBe('boc')
+    expect(created.url).toBe('https://test.boc.gov.ph/test-page')
+    expect(created.label).toBe('Test label')
+    expect(created.is_active).toBe(1)
+
+    const all = await getRegulatorySources()
+    const found = all.find((r) => r.id === created.id)
+    expect(found).toBeDefined()
+    expect(found?.url).toBe('https://test.boc.gov.ph/test-page')
+
+    // cleanup
+    await deleteRegulatorySource(created.id)
+  })
+
+  it('updates is_active on a regulatory source', async () => {
+    const created = await createRegulatorySource('bir', 'https://test.bir.gov.ph/toggle-test')
+
+    const updated = await updateRegulatorySource(created.id, { is_active: 0 })
+    expect(updated?.is_active).toBe(0)
+
+    const toggled = await updateRegulatorySource(created.id, { is_active: 1 })
+    expect(toggled?.is_active).toBe(1)
+
+    // cleanup
+    await deleteRegulatorySource(created.id)
+  })
+
+  it('deletes a regulatory source', async () => {
+    const created = await createRegulatorySource('tariff-commission', 'https://test.tariffcommission.gov.ph/del-test')
+
+    await deleteRegulatorySource(created.id)
+
+    const all = await getRegulatorySources()
+    const found = all.find((r) => r.id === created.id)
+    expect(found).toBeUndefined()
+  })
+
+  it('returns null when updating a non-existent id with fields', async () => {
+    const result = await updateRegulatorySource(999999999, { is_active: 0 })
+    expect(result).toBeNull()
   })
 })

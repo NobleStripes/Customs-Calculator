@@ -290,6 +290,7 @@ export const Calculator: React.FC = () => {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [selectedLookupRow, setSelectedLookupRow] = useState<AppHsCodeRow | null>(null)
+  const errorRef = React.useRef<HTMLDivElement>(null)
 
   const reloadHistory = async () => {
     try {
@@ -547,10 +548,34 @@ export const Calculator: React.FC = () => {
         setError('Official tariff finder lookup succeeded, but calculation still requires approved local tariff data for this HS code and schedule.')
       } else {
         setError(errorMessage)
+      setTimeout(() => errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50)
       }
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleReset = () => {
+    setFormData((prev) => ({
+      ...prev,
+      value: 0,
+      freight: 0,
+      insurance: 0,
+      hsCode: '',
+      originCountry: settings.defaultOriginCountry || '',
+      scheduleCode: settings.defaultScheduleCode || 'MFN',
+      exciseCategory: undefined,
+      exciseQuantity: undefined,
+      exciseUnit: undefined,
+      exciseNrp: undefined,
+      sweetenedBeverageSugarType: undefined,
+      petroleumProductType: undefined,
+    }))
+    setDetectedExciseCategory(null)
+    setResults(null)
+    setError(null)
+    setHsCodeValidationMessage(null)
+    setSelectedLookupRow(null)
   }
 
   return (
@@ -567,7 +592,7 @@ export const Calculator: React.FC = () => {
             <h2>Shipment Details</h2>
 
             <div className="form-group">
-              <label htmlFor="hs-code">HS Code</label>
+              <label htmlFor="hs-code">HS Code <span className="required-asterisk" aria-hidden="true">*</span></label>
               <HSCodeSearch
                 onSelect={handleHSCodeSelect}
                 selectedCode={formData.hsCode}
@@ -579,7 +604,7 @@ export const Calculator: React.FC = () => {
 
             <div className="form-row">
               <div className="form-group">
-                <label htmlFor="value">FOB Value</label>
+                <label htmlFor="value">FOB Value <span className="required-asterisk" aria-hidden="true">*</span></label>
                 <input
                   id="value"
                   type="number"
@@ -1134,6 +1159,13 @@ export const Calculator: React.FC = () => {
               </div>
             </div>
 
+            {/* Excise banner — shown when HS code maps to an excise category */}
+            {detectedExciseCategory && detectedExciseCategory !== 'none' && (
+              <div className="excise-banner" role="note">
+                <strong>Excise Tax Applies</strong> — This HS code is subject to excise tax under TRAIN Law ({detectedExciseCategory.replace(/_/g, ' ')}).
+              </div>
+            )}
+
             {/* Excise tax section — shown when HS code maps to an excise category */}
             {detectedExciseCategory && detectedExciseCategory !== 'none' && (
               <div className="form-section excise-section">
@@ -1246,15 +1278,25 @@ export const Calculator: React.FC = () => {
               </div>
             )}
 
-            {error && <div className="error-message">{error}</div>}
+            {error && <div ref={errorRef} className="error-message" role="alert" aria-live="assertive">{error}</div>}
 
-            <button
-              className="btn btn-primary"
-              onClick={handleCalculate}
-              disabled={loading}
-            >
-              {loading ? 'Calculating...' : 'Calculate'}
-            </button>
+            <div className="calculator-form-actions">
+              <button
+                className="btn btn-primary"
+                onClick={handleCalculate}
+                disabled={loading}
+              >
+                {loading ? 'Calculating...' : 'Calculate'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={handleReset}
+                disabled={loading}
+              >
+                Reset
+              </button>
+            </div>
           </div>
         </div>
 

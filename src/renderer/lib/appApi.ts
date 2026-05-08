@@ -136,6 +136,17 @@ type ExciseTaxBreakdown = {
 /** CMTA import classification category */
 export type ImportType = 'free' | 'regulated' | 'restricted' | 'prohibited'
 
+export type RegulatorySourceRow = {
+  id: number
+  source_key: string
+  url: string
+  label: string | null
+  is_active: number
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type ImportClassificationResult = {
   importType: ImportType
   /** Regulatory agency acronyms whose prior permit is required before BOC release */
@@ -1015,6 +1026,7 @@ const isProtectedAdminPath = (path: string): boolean => {
   return path.startsWith('/api/import/')
     || path.startsWith('/api/import-jobs/')
     || path.startsWith('/api/review-rows/')
+    || path.startsWith('/api/admin/')
     || path === '/api/import-jobs'
     || path === '/api/runtime-settings'
 }
@@ -1967,6 +1979,26 @@ export const appApi = {
       }
     )
   },
+
+  getRegulatorySources: () =>
+    callApi<RegulatorySourceRow[]>('/api/admin/regulatory-sources'),
+
+  createRegulatorySource: (payload: { source_key: string; url: string; label?: string; notes?: string }) =>
+    callApi<RegulatorySourceRow>('/api/admin/regulatory-sources', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateRegulatorySource: (id: number, payload: { url?: string; label?: string; is_active?: number; notes?: string }) =>
+    callApi<RegulatorySourceRow>(`/api/admin/regulatory-sources/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteRegulatorySource: (id: number) =>
+    callApi<void>(`/api/admin/regulatory-sources/${id}`, {
+      method: 'DELETE',
+    }),
 }
 
 export type AppApi = typeof appApi

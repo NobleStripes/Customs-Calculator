@@ -338,3 +338,25 @@
   color: #664d03;
   line-height: 1.5;
 }
+
+.required-asterisk {
+  color: #dc2626;
+  margin-left: 2px;
+}
+
+.calculator-form-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.excise-banner {
+  padding: 0.5rem 0.75rem;
+  background: #fef3c7;
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: #92400e;
+  margin-bottom: 0.75rem;
+}
