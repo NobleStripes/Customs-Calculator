@@ -1044,6 +1044,31 @@ const getClientAdminApiKey = (): string => {
   return String(window.localStorage.getItem(ADMIN_API_KEY_STORAGE_KEY) || '').trim()
 }
 
+const parseApiPayload = async <T>(response: Response): Promise<{ success?: boolean; data?: T; error?: string }> => {
+  if (typeof response.text === 'function') {
+    const rawBody = await response.text()
+    if (!rawBody.trim()) {
+      return {}
+    }
+
+    try {
+      return JSON.parse(rawBody) as { success?: boolean; data?: T; error?: string }
+    } catch {
+      throw new Error('Received invalid JSON response from server')
+    }
+  }
+
+  if (typeof response.json === 'function') {
+    try {
+      return (await response.json()) as { success?: boolean; data?: T; error?: string }
+    } catch {
+      throw new Error('Received invalid JSON response from server')
+    }
+  }
+
+  return {}
+}
+
 const callApi = async <T>(path: string, init?: RequestInit): ApiResponse<T> => {
   try {
     const adminApiKey = getClientAdminApiKey()
@@ -1062,7 +1087,7 @@ const callApi = async <T>(path: string, init?: RequestInit): ApiResponse<T> => {
       body: init?.body,
     })
 
-    const payload = (await response.json()) as { success?: boolean; data?: T; error?: string }
+    const payload = await parseApiPayload<T>(response)
 
     if (!response.ok || payload.success === false) {
       return {

@@ -383,6 +383,34 @@ describe('appApi HS lookup', () => {
     expect(result.data?.results[0]?.sourceType).toBe('local-fallback')
   })
 
+  it('falls back safely when live lookup returns an empty response body', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '',
+    } as Response)
+
+    const result = await appApi.searchLiveHSCodes('oil filter')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.status).toBe('fallback')
+    expect(result.data?.fallbackUsed).toBe(true)
+  })
+
+  it('falls back safely when live lookup returns malformed JSON', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '{',
+    } as Response)
+
+    const result = await appApi.searchLiveHSCodes('oil filter')
+
+    expect(result.success).toBe(true)
+    expect(result.data?.status).toBe('fallback')
+    expect(result.data?.fallbackUsed).toBe(true)
+  })
+
   it('falls back to live exact-match results when the local resolve endpoint returns null', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce({
