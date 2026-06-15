@@ -1,0 +1,37 @@
+name: Release Consistency
+
+on:
+  push:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'docs/changelog/**'
+      - 'scripts/check-release-consistency.mjs'
+      - '.github/workflows/release-consistency.yml'
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'docs/changelog/**'
+      - 'scripts/check-release-consistency.mjs'
+      - '.github/workflows/release-consistency.yml'
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate release consistency
+        run: node scripts/check-release-consistency.mjs

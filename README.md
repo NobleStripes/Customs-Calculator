@@ -35,22 +35,20 @@ The project is in an active build-out phase: core calculation and operator workf
 
 ## Release Notes
 
-### Current Release: v0.5.0
+### Current Release: v1.0.0
 
-- Added full PHL 2026 customs compliance fee and tax engine: CMTA administrative fees (IPF, CDS, DST, LRF, brokerage), excise tax for 5 RA 10963/11467 categories (spirits, beer/wines, tobacco, automobiles, sweetened beverages, petroleum), corrected VAT base per NIRC Sec. 107, official-rate FX precedence (BSP -> BOC -> live -> cache -> fallback), and all three entry tiers (de minimis / informal / formal).
-- Added goods classification engine: CMTA import type (Free / Regulated / Restricted / Prohibited) for all 99 HS chapters + 30+ heading overrides, agency clearance requirements with full names, strategic trade / STMO flag (RA 10697), VAT-exempt goods flag (NIRC Sec. 109), and FTA Certificate of Origin form identification for 9 PHL FTA schedules.
-- Import Classification panel added to calculation results: import-type badge, agency clearance list, CoO alert, strategic trade warning, and VAT-exempt note.
-- CoO hint shown under schedule selector when a non-MFN FTA schedule is chosen.
-- Additional hardening updates in this pass: official HS lookup in-flight dedup + stale-cache fallback, HTML ingestion text-pattern fallback, compliance rule refinements for de minimis/FDA/NTC messaging, chapter drill-down search UI, fee composition chart, mobile layout upgrades, and admin audit actor attribution.
-- Total suite now 197/197 passing.
+- Consolidates production-ready operator workflows from v0.x releases into a 1.0 baseline.
+- Includes frontend/admin/runtime refinements delivered through v0.6.0 and prior hardening milestones.
+- Introduces release consistency guardrails to keep package metadata and release docs in sync.
+- Aligns release indexing and current-release metadata across package, changelog, and README.
 
 Full release details:
 
-- [docs/changelog/v0.5.0.md](docs/changelog/v0.5.0.md)
-- [docs/changelog/v0.4.1.md](docs/changelog/v0.4.1.md)
+- [docs/changelog/v1.0.0.md](docs/changelog/v1.0.0.md)
+- [docs/changelog/v0.6.0.md](docs/changelog/v0.6.0.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
-## Calculation Model Snapshot (v0.5.0)
+## Calculation Model Snapshot (v1.0.0)
 
 The calculator currently follows this server-side sequence:
 
@@ -279,6 +277,8 @@ For issues, feature requests, or contributions:
 The full changelog has moved out of this README into dedicated release-note files:
 
 - Changelog index: [CHANGELOG.md](CHANGELOG.md)
+- 1.0.0 release notes: [docs/changelog/v1.0.0.md](docs/changelog/v1.0.0.md)
+- 0.6.0 release notes: [docs/changelog/v0.6.0.md](docs/changelog/v0.6.0.md)
 - 0.5.0 release notes: [docs/changelog/v0.5.0.md](docs/changelog/v0.5.0.md)
 - 0.4.1 release notes: [docs/changelog/v0.4.1.md](docs/changelog/v0.4.1.md)
 - 0.4.0 release notes: [docs/changelog/v0.4.0.md](docs/changelog/v0.4.0.md)
@@ -288,4 +288,4 @@ The full changelog has moved out of this README into dedicated release-note file
 
 ---
 
-**Last Updated:** May 2, 2026
+**Last Updated:** June 15, 2026

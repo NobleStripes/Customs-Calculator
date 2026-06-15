@@ -1,6 +1,6 @@
 {
   "name": "customs-calculator",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "description": "Philippines Customs Duty & Compliance Calculator - Website",
   "homepage": "./",
   "author": "NobleStripes",
@@ -22,7 +22,9 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "lint": "eslint src --ext .ts,.tsx",
-    "format": "prettier --write \"src/**/*.{ts,tsx,json,css,md}\""
+    "format": "prettier --write \"src/**/*.{ts,tsx,json,css,md}\"",
+    "release:check": "node scripts/check-release-consistency.mjs",
+    "release:prepare": "npm run release:check && npm run lint && npm test"
   },
   "dependencies": {
     "axios": "^1.7.0",

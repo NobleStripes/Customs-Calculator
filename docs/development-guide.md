@@ -84,6 +84,29 @@ npm run lint
 npm run format
 ```
 
+## Release Workflow
+
+Use this checklist before cutting a release tag.
+
+```bash
+# 1) Validate release metadata consistency
+npm run release:check
+
+# 2) Run pre-release quality gates
+npm run release:prepare
+```
+
+`release:check` verifies version alignment between `package.json`, `package-lock.json`, `CHANGELOG.md` package note, `README.md` current release heading, and the current release entry in `CHANGELOG.md`.
+
+If you are releasing a new version:
+
+1. Update `package.json` version.
+2. Ensure `package-lock.json` top-level versions match.
+3. Add `docs/changelog/vX.Y.Z.md`.
+4. Mark that version as current in `CHANGELOG.md`.
+5. Update `README.md` current release heading and release links.
+6. Re-run `npm run release:check`.
+
 ## Contributor Notes
 
 - Prefer updating the dedicated docs when calculation or architecture behavior changes.
