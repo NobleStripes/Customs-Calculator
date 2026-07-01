@@ -93,7 +93,7 @@ export class ComplianceChecker {
             const hsCategory = hsRow?.category || 'General'
             const normalizedCategory = hsCategory.toLowerCase()
 
-            if (hsCategory === 'Electronics') {
+            if (hsCategory === 'Electronics' || hsCategory === 'Computers') {
               requiredDocuments.push("Manufacturer's Specification Sheet")
               // Radio / telecommunications equipment (Chapters 84-85) requires NTC type acceptance
               const hsChapter = hsCode.replace(/[^0-9]/g, '').slice(0, 2)
