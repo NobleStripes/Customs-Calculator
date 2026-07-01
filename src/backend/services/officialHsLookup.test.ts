@@ -128,4 +128,132 @@ describe('OfficialHsLookupService', () => {
     expect(fetchWebsite).toHaveBeenCalledTimes(1)
     expect(first.results[0]?.code).toBe(second.results[0]?.code)
   })
+
+  it('expires cache entries after TTL period', async () => {
+    const fetchWebsite = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rawHtml: '<div>8471.30 - Portable automatic data processing machines - 5%</div>',
+        textContent: '',
+        fetchedAt: '2026-04-27T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        rawHtml: '<div>8471.30 - Updated description</div>',
+        textContent: '',
+        fetchedAt: '2026-04-27T00:05:01.000Z',
+      })
+
+    const service = new OfficialHsLookupService({ fetchWebsite })
+    const cache = (service as unknown as { cache: Map<string, { expiresAt: number; payload: unknown }> }).cache
+
+    // First search: live result
+    const firstResult = await service.search('847130')
+    expect(firstResult.status).toBe('live')
+    expect(fetchWebsite).toHaveBeenCalledTimes(1)
+
+    // Expire the cache entry by setting expiresAt to the past
+    const entry = cache.get('847130')
+    if (entry) {
+      cache.set('847130', { ...entry, expiresAt: Date.now() - 1000 })
+    }
+
+    // Second search: cache expired, should fetch again
+    const secondResult = await service.search('847130')
+    expect(secondResult.status).toBe('live')
+    expect(fetchWebsite).toHaveBeenCalledTimes(2)
+  })
+
+  it('includes cacheReason field for valid cache hits', async () => {
+    const fetchWebsite = vi.fn().mockResolvedValue({
+      rawHtml: '<div>8471.30 - Portable automatic data processing machines - 5%</div>',
+      textContent: '',
+      fetchedAt: '2026-04-27T00:00:00.000Z',
+    })
+
+    const service = new OfficialHsLookupService({ fetchWebsite })
+    await service.search('847130')
+    const cachedResult = await service.search('847130')
+
+    expect(cachedResult.cacheReason).toBe('ttl-valid')
+  })
+
+  it('includes cacheReason fetch-failure for stale cache on error', async () => {
+    const fetchWebsite = vi.fn()
+      .mockResolvedValueOnce({
+        rawHtml: '<div>8471.30 - Portable automatic data processing machines - 5%</div>',
+        textContent: '',
+        fetchedAt: '2026-04-27T00:00:00.000Z',
+      })
+      .mockRejectedValueOnce(new Error('fetch failed'))
+
+    const service = new OfficialHsLookupService({ fetchWebsite })
+    const cache = (service as unknown as { cache: Map<string, { expiresAt: number; payload: unknown }> }).cache
+
+    // First search: populate cache
+    await service.search('847130')
+
+    // Force cache expiration
+    const entry = cache.get('847130')
+    if (entry) {
+      cache.set('847130', { ...entry, expiresAt: Date.now() - 1000 })
+    }
+
+    // Second search: fetch fails, should return stale cache
+    const staleResult = await service.search('847130')
+    expect(staleResult.status).toBe('cache')
+    expect(staleResult.cacheReason).toBe('fetch-failure')
+  })
+
+  it('enforces LRU eviction at max cache entries', async () => {
+    const fetchWebsite = vi.fn().mockImplementation((args) => {
+      return Promise.resolve({
+        rawHtml: `<div>${args.query} - result</div>`,
+        textContent: '',
+        fetchedAt: new Date().toISOString(),
+      })
+    })
+
+    const service = new OfficialHsLookupService({ fetchWebsite })
+    const cache = (service as unknown as { cache: Map<string, unknown> }).cache
+
+    // Fill cache to max capacity with different queries
+    const maxEntries = OFFICIAL_TARIFF_LOOKUP_CONFIG.maxCacheEntries
+    for (let i = 0; i < maxEntries; i++) {
+      await service.search(`query${i}`)
+    }
+
+    expect(cache.size).toBe(maxEntries)
+
+    // Add one more entry, should evict oldest
+    await service.search(`query${maxEntries}`)
+
+    expect(cache.size).toBe(maxEntries)
+    // Oldest entry should be gone
+    const firstResult = await service.search(`query0`)
+    expect(fetchWebsite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'query0',
+      })
+    )
+  })
+
+  it('tracks cache statistics', async () => {
+    const fetchWebsite = vi.fn().mockResolvedValue({
+      rawHtml: '<div>8471.30 - test</div>',
+      textContent: '',
+      fetchedAt: '2026-04-27T00:00:00.000Z',
+    })
+
+    const service = new OfficialHsLookupService({ fetchWebsite })
+    await service.search('query1')
+    await service.search('query2')
+    await service.search('query3')
+
+    const stats = service.getCacheStats()
+    expect(stats.size).toBe(3)
+    expect(stats.maxSize).toBe(OFFICIAL_TARIFF_LOOKUP_CONFIG.maxCacheEntries)
+    expect(stats.entries).toHaveLength(3)
+    expect(stats.entries[0]).toHaveProperty('query')
+    expect(stats.entries[0]).toHaveProperty('expiresAt')
+  })
 })

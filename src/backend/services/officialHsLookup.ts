@@ -49,6 +49,7 @@ export interface OfficialHsLookupResponse {
   fetchedAt: string
   cacheExpiresAt: string
   results: OfficialHsLookupResult[]
+  cacheReason?: 'ttl-valid' | 'ttl-expired' | 'fetch-failure' | 'initial'
 }
 
 type CachedLookup = {
@@ -353,6 +354,7 @@ export class OfficialHsLookupService {
     return {
       ...cached.payload,
       status: 'cache',
+      cacheReason: 'ttl-valid',
       results: cached.payload.results.map((row) => ({
         ...row,
         sourceType: 'official-site-cache',
@@ -370,6 +372,7 @@ export class OfficialHsLookupService {
       ...cached.payload,
       status: 'cache',
       fetchedAt: new Date().toISOString(),
+      cacheReason: 'fetch-failure',
       results: cached.payload.results.map((row) => ({
         ...row,
         sourceType: 'official-site-cache',

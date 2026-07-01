@@ -158,11 +158,23 @@ export class ComplianceChecker {
    */
   isRestricted(hsCode: string): Promise<boolean> {
     return new Promise((resolve) => {
+      // First check the hs_codes table for the is_restricted flag
       this.db.get(
-        `SELECT COUNT(*) as count FROM compliance_rules WHERE hs_code_range = ? AND restrictions LIKE '%prohibited%'`,
+        `SELECT is_restricted FROM hs_codes WHERE code = ?`,
         [hsCode],
-        (_err: Error | null, row: CountRow | undefined) => {
-          resolve((row?.count || 0) > 0)
+        (_err: Error | null, hsRow: { is_restricted?: number } | undefined) => {
+          if (hsRow && hsRow.is_restricted === 1) {
+            return resolve(true)
+          }
+
+          // Fall back to compliance_rules table for restrictions
+          this.db.get(
+            `SELECT COUNT(*) as count FROM compliance_rules WHERE hs_code_range = ? AND restrictions LIKE '%prohibited%'`,
+            [hsCode],
+            (_err: Error | null, row: CountRow | undefined) => {
+              resolve((row?.count || 0) > 0)
+            }
+          )
         }
       )
     })

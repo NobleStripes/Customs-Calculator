@@ -12,6 +12,7 @@ export type HSCatalogRawEntry = {
   code: string
   description: string
   category: string
+  isRestricted?: boolean
 }
 
 // prettier-ignore
@@ -468,6 +469,9 @@ const RAW_CATALOG: readonly HSCatalogRawEntry[] = [
 
   // Ch 84: Nuclear reactors, boilers, machinery
   { code: '8408.20', description: 'Compression-ignition internal combustion engines for vehicles (diesel)', category: 'Engines' },
+  { code: '8408.20.10', description: 'Compression-ignition engines for vehicles, 50 < displacement ≤ 500 cc', category: 'Engines' },
+  { code: '8408.20.20', description: 'Compression-ignition engines for vehicles, 500 < displacement ≤ 1500 cc', category: 'Engines' },
+  { code: '8408.20.30', description: 'Compression-ignition engines for vehicles, displacement > 1500 cc', category: 'Engines' },
   { code: '8409.91', description: 'Parts for spark-ignition internal combustion engines', category: 'Engine Parts' },
   { code: '8409.99', description: 'Parts for compression-ignition internal combustion engines', category: 'Engine Parts' },
   { code: '8421.23', description: 'Oil or petrol-filters for internal combustion engines', category: 'Engine Parts' },
@@ -476,7 +480,12 @@ const RAW_CATALOG: readonly HSCatalogRawEntry[] = [
   { code: '8429.52', description: 'Self-propelled excavators', category: 'Construction Equipment' },
   { code: '8443.32', description: 'Other printers capable of connecting to an ADP machine or to a network', category: 'Office Equipment' },
   { code: '8471.30', description: 'Portable automatic data processing machines, weight ≤ 10 kg (laptops)', category: 'Computers' },
+  { code: '8471.30.10', description: 'Laptops with processor speed ≤ 1.5 GHz', category: 'Computers' },
+  { code: '8471.30.20', description: 'Laptops with processor speed > 1.5 GHz and memory ≤ 4 GB', category: 'Computers' },
+  { code: '8471.30.30', description: 'Laptops with processor speed > 1.5 GHz and memory > 4 GB', category: 'Computers' },
   { code: '8471.40', description: 'Automatic data processing machines containing CPU and I/O unit in same housing', category: 'Computers' },
+  { code: '8471.40.10', description: 'Desktop computers, standard', category: 'Computers' },
+  { code: '8471.40.20', description: 'All-in-one desktop computers (integrated monitor)', category: 'Computers' },
   { code: '8471.50', description: 'Other processing units for automatic data processing machines', category: 'Computers' },
   { code: '8471.70', description: 'Storage units for automatic data processing machines', category: 'Computers' },
   { code: '8473.30', description: 'Parts and accessories for automatic data processing machines', category: 'Computer Parts' },
@@ -530,14 +539,32 @@ const RAW_CATALOG: readonly HSCatalogRawEntry[] = [
   { code: '8701.21', description: 'Road tractors for semi-trailers, with compression-ignition engine (diesel)', category: 'Vehicles' },
   { code: '8702.10', description: 'Motor vehicles for transport of ≥ 10 persons, compression-ignition (diesel)', category: 'Vehicles' },
   { code: '8703.21', description: 'Passenger cars, spark-ignition, cylinder capacity ≤ 1,000 cc', category: 'Vehicles' },
+  { code: '8703.21.10', description: 'Passenger cars, spark-ignition, ≤ 1,000 cc, manual transmission', category: 'Vehicles' },
+  { code: '8703.21.20', description: 'Passenger cars, spark-ignition, ≤ 1,000 cc, automatic transmission', category: 'Vehicles' },
   { code: '8703.22', description: 'Passenger cars, spark-ignition, 1,000 cc < capacity ≤ 1,500 cc', category: 'Vehicles' },
+  { code: '8703.22.10', description: 'Passenger cars, spark-ignition, 1,000–1,500 cc, manual transmission', category: 'Vehicles' },
+  { code: '8703.22.20', description: 'Passenger cars, spark-ignition, 1,000–1,500 cc, automatic transmission', category: 'Vehicles' },
   { code: '8703.23', description: 'Passenger cars, spark-ignition, 1,500 cc < capacity ≤ 3,000 cc', category: 'Vehicles' },
+  { code: '8703.23.10', description: 'Passenger cars, spark-ignition, 1,500–3,000 cc, manual transmission', category: 'Vehicles' },
+  { code: '8703.23.20', description: 'Passenger cars, spark-ignition, 1,500–3,000 cc, automatic transmission', category: 'Vehicles' },
   { code: '8703.24', description: 'Passenger cars, spark-ignition, capacity > 3,000 cc', category: 'Vehicles' },
+  { code: '8703.24.10', description: 'Passenger cars, spark-ignition, > 3,000 cc, manual transmission', category: 'Vehicles' },
+  { code: '8703.24.20', description: 'Passenger cars, spark-ignition, > 3,000 cc, automatic transmission', category: 'Vehicles' },
   { code: '8703.31', description: 'Passenger cars, compression-ignition (diesel), ≤ 1,500 cc', category: 'Vehicles' },
+  { code: '8703.31.10', description: 'Passenger cars, compression-ignition, ≤ 1,500 cc, manual transmission', category: 'Vehicles' },
+  { code: '8703.31.20', description: 'Passenger cars, compression-ignition, ≤ 1,500 cc, automatic transmission', category: 'Vehicles' },
   { code: '8703.32', description: 'Passenger cars, compression-ignition (diesel), 1,500 cc–2,500 cc', category: 'Vehicles' },
+  { code: '8703.32.10', description: 'Passenger cars, compression-ignition, 1,500–2,500 cc, manual transmission', category: 'Vehicles' },
+  { code: '8703.32.20', description: 'Passenger cars, compression-ignition, 1,500–2,500 cc, automatic transmission', category: 'Vehicles' },
   { code: '8703.40', description: 'Passenger cars, spark-ignition + electric motor (hybrid)', category: 'Vehicles' },
+  { code: '8703.40.10', description: 'Hybrid passenger cars, series hybrid', category: 'Vehicles' },
+  { code: '8703.40.20', description: 'Hybrid passenger cars, parallel hybrid', category: 'Vehicles' },
   { code: '8703.80', description: 'Passenger cars, electric motor only (EV)', category: 'Electric Vehicles' },
+  { code: '8703.80.10', description: 'Battery electric vehicles (BEV), range ≤ 300 km', category: 'Electric Vehicles' },
+  { code: '8703.80.20', description: 'Battery electric vehicles (BEV), range > 300 km', category: 'Electric Vehicles' },
   { code: '8704.21', description: 'Motor vehicles for transport of goods, diesel, GVW ≤ 5 tonnes', category: 'Vehicles' },
+  { code: '8704.21.10', description: 'Pickup trucks, diesel, GVW ≤ 5 tonnes', category: 'Vehicles' },
+  { code: '8704.21.20', description: 'Cargo vans, diesel, GVW ≤ 5 tonnes', category: 'Vehicles' },
   { code: '8704.22', description: 'Motor vehicles for transport of goods, diesel, GVW 5–20 tonnes', category: 'Vehicles' },
   { code: '8704.31', description: 'Motor vehicles for transport of goods, gasoline, GVW ≤ 5 tonnes', category: 'Vehicles' },
   { code: '8706.00', description: 'Chassis fitted with engines, for motor vehicles', category: 'Vehicle Parts' },
@@ -554,7 +581,11 @@ const RAW_CATALOG: readonly HSCatalogRawEntry[] = [
   { code: '8708.94', description: 'Steering wheels, steering columns and steering boxes for motor vehicles', category: 'Vehicle Parts' },
   { code: '8708.99', description: 'Other parts and accessories for motor vehicles', category: 'Vehicle Parts' },
   { code: '8711.20', description: 'Motorcycles with reciprocating piston engine, 50 cc < capacity ≤ 250 cc', category: 'Motorcycles' },
+  { code: '8711.20.10', description: 'Scooters and mopeds, 50–250 cc', category: 'Motorcycles' },
+  { code: '8711.20.20', description: 'Sport motorcycles, 50–250 cc', category: 'Motorcycles' },
   { code: '8711.30', description: 'Motorcycles with reciprocating piston engine, 250 cc < capacity ≤ 500 cc', category: 'Motorcycles' },
+  { code: '8711.30.10', description: 'Cruiser motorcycles, 250–500 cc', category: 'Motorcycles' },
+  { code: '8711.30.20', description: 'Sport motorcycles, 250–500 cc', category: 'Motorcycles' },
   { code: '8711.60', description: 'Motorcycles, with electric motor for propulsion', category: 'Electric Vehicles' },
 
   // Ch 88: Aircraft
@@ -602,10 +633,10 @@ const RAW_CATALOG: readonly HSCatalogRawEntry[] = [
 
   // ── SECTION XIX: Arms and Ammunition (Ch 93) ─────────────────────────────
 
-  { code: '9302.00', description: 'Revolvers and pistols', category: 'Arms' },
-  { code: '9303.20', description: 'Other sporting, hunting or target-shooting shotguns', category: 'Arms' },
-  { code: '9306.21', description: 'Cartridges for shotguns', category: 'Ammunition' },
-  { code: '9306.30', description: 'Other cartridges and parts thereof', category: 'Ammunition' },
+  { code: '9302.00', description: 'Revolvers and pistols', category: 'Arms', isRestricted: true },
+  { code: '9303.20', description: 'Other sporting, hunting or target-shooting shotguns', category: 'Arms', isRestricted: true },
+  { code: '9306.21', description: 'Cartridges for shotguns', category: 'Ammunition', isRestricted: true },
+  { code: '9306.30', description: 'Other cartridges and parts thereof', category: 'Ammunition', isRestricted: true },
 
   // ── SECTION XX: Miscellaneous Manufactured Articles (Ch 94–96) ──────────
 
@@ -663,6 +694,7 @@ export const getCoreCatalogWithMetadata = (): Array<
     sectionCode?: string
     sectionName?: string
     metadataSource: string
+    isRestricted?: boolean
   }
 > => {
   return RAW_CATALOG.map((row) => {
@@ -674,6 +706,7 @@ export const getCoreCatalogWithMetadata = (): Array<
       sectionCode: meta?.sectionCode,
       sectionName: meta?.sectionName,
       metadataSource: 'seed',
+      isRestricted: row.isRestricted ?? false,
     }
   })
 }

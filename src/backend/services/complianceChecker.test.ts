@@ -118,4 +118,32 @@ describe('ComplianceChecker.validateShipment', () => {
     expect(result.isCompliant).toBe(false)
     expect(result.issues.some((i) => i.toLowerCase().includes('value must be greater'))).toBe(true)
   })
+
+  it('detects restricted goods (arms) and marks as non-compliant', async () => {
+    const checker = new ComplianceCheckerClass()
+
+    const result = await checker.validateShipment({
+      hsCode: '9302.00',
+      value: 1000,
+      origin: 'USA',
+      destination: 'MNL',
+    })
+
+    expect(result.isCompliant).toBe(false)
+    expect(result.issues.some((i) => i.toLowerCase().includes('restricted') || i.toLowerCase().includes('prohibited'))).toBe(true)
+  })
+
+  it('detects restricted ammunition and marks as non-compliant', async () => {
+    const checker = new ComplianceCheckerClass()
+
+    const result = await checker.validateShipment({
+      hsCode: '9306.30',
+      value: 500,
+      origin: 'JPN',
+      destination: 'MNL',
+    })
+
+    expect(result.isCompliant).toBe(false)
+    expect(result.issues.some((i) => i.toLowerCase().includes('restricted') || i.toLowerCase().includes('prohibited'))).toBe(true)
+  })
 })

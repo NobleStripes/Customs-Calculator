@@ -958,6 +958,29 @@ export class TariffDataIngestionService {
 
   previewRows(rows: TariffImportRow[], options?: { defaultCatalogVersion?: string }): TariffImportPreviewResult {
     const parsedRows = rows.map((row, idx) => validateRow(row, idx + 1, options))
+    
+    // Detect duplicate rows (same HS code and schedule code)
+    const seenCombinations = new Map<string, number[]>()
+    for (let i = 0; i < parsedRows.length; i++) {
+      const row = parsedRows[i]
+      if (row.normalized) {
+        const key = `${row.normalized.hsCode}:${row.normalized.scheduleCode}`
+        if (!seenCombinations.has(key)) {
+          seenCombinations.set(key, [])
+        }
+        seenCombinations.get(key)!.push(i)
+      }
+    }
+    
+    // Mark duplicates with errors
+    for (const [, indices] of seenCombinations.entries()) {
+      if (indices.length > 1) {
+        for (const idx of indices) {
+          parsedRows[idx].errors.push(`Duplicate HS code and schedule combination (row ${indices[0] + 1})`)
+        }
+      }
+    }
+    
     const validRows = parsedRows.filter((row) => row.errors.length === 0).length
 
     return {

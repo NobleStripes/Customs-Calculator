@@ -343,4 +343,101 @@ describe('TariffDataIngestionService', () => {
 
     expect(row?.catalog_version).toBe('AHTN-2022')
   })
+
+  it('detects duplicate rows in import preview', () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const preview = service.previewRows([
+      {
+        hsCode: '8471.30',
+        scheduleCode: 'MFN',
+        dutyRate: '5%',
+        vatRate: '12%',
+      },
+      {
+        hsCode: '8471.30',
+        scheduleCode: 'MFN',
+        dutyRate: '3%',
+        vatRate: '12%',
+      },
+      {
+        hsCode: '8703.21',
+        scheduleCode: 'MFN',
+        dutyRate: '4%',
+      },
+    ])
+
+    expect(preview.totalRows).toBe(3)
+    expect(preview.validRows).toBe(1) // Only the non-duplicate rows are valid
+    expect(preview.invalidRows).toBe(2)
+    // Both duplicate rows should have error messages
+    expect(preview.rows[0]?.errors.some((e) => e.includes('Duplicate'))).toBe(true)
+    expect(preview.rows[1]?.errors.some((e) => e.includes('Duplicate'))).toBe(true)
+    expect(preview.rows[2]?.errors.length).toBe(0) // Non-duplicate should be valid
+  })
+
+  it('validates invalid HS codes in import preview', () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const preview = service.previewRows([
+      {
+        hsCode: '999', // Invalid: only 3 digits, needs 6, 8, or 10
+        scheduleCode: 'MFN',
+        dutyRate: '5%',
+      },
+      {
+        hsCode: '847130', // Valid
+        scheduleCode: 'MFN',
+        dutyRate: '5%',
+      },
+      {
+        hsCode: '8703.21', // Valid and different
+        scheduleCode: 'MFN',
+        dutyRate: '5%',
+      },
+    ])
+
+    expect(preview.totalRows).toBe(3)
+    expect(preview.validRows).toBe(2) // Both valid HS codes should pass
+    expect(preview.rows[0]?.errors.some((e) => e.includes('valid'))).toBe(true)
+    expect(preview.rows[1]?.normalized?.hsCode).toBe('8471.30')
+    expect(preview.rows[2]?.normalized?.hsCode).toBe('8703.21')
+  })
+
+  it('validates out-of-range duty rates in import preview', () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const preview = service.previewRows([
+      {
+        hsCode: '8471.30',
+        scheduleCode: 'MFN',
+        dutyRate: '150%', // Invalid: > 100%
+      },
+      {
+        hsCode: '8703.21',
+        scheduleCode: 'MFN',
+        dutyRate: '5%', // Valid
+      },
+    ])
+
+    expect(preview.totalRows).toBe(2)
+    expect(preview.validRows).toBe(1)
+    expect(preview.rows[0]?.errors.some((e) => e.includes('Duty rate'))).toBe(true)
+    expect(preview.rows[1]?.normalized?.dutyRate).toBeCloseTo(0.05)
+  })
+
+  it('normalizes schedule codes during preview', () => {
+    const service = new TariffDataIngestionServiceClass()
+
+    const preview = service.previewRows([
+      {
+        hsCode: '8471.30',
+        scheduleCode: ' rcep ',
+        dutyRate: '3%',
+      },
+    ])
+
+    expect(preview.validRows).toBe(1)
+    expect(preview.rows[0]?.normalized?.scheduleCode).toBe('RCEP')
+  })
 })
