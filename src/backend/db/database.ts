@@ -576,46 +576,43 @@ export const ensureTariffRatesSchemaCompatibility = (database: sqlite3.Database)
   })
 }
 
-const insertHSCodes = (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[]): Promise<void> => {
-  return new Promise((resolve) => {
-    let count = 0
-    const total = hsCodesData.length
-    if (total === 0) {
-      resolve()
-      return
-    }
+const insertHSCodes = async (database: sqlite3.Database, hsCodesData: HSCodeSeedRow[]): Promise<void> => {
+  if (hsCodesData.length === 0) return
 
-    hsCodesData.forEach((item) => {
-      database.run(
-        `
-          INSERT OR IGNORE INTO hs_codes
-          (code, description, category, catalog_version, chapter_code, section_code, section_name, metadata_source, unit, is_restricted)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          item.code,
-          item.description,
-          item.category,
-          item.catalogVersion || 'AHTN-2022',
-          item.chapterCode || null,
-          item.sectionCode || null,
-          item.sectionName || null,
-          item.metadataSource || 'seed',
-          item.unit || null,
-          item.isRestricted ? 1 : 0,
-        ],
-        (err: Error | null) => {
-          if (err) {
-            console.error(`Error inserting HS code ${item.code}:`, err)
-          }
-          count += 1
-          if (count === total) {
-            resolve()
-          }
-        }
-      )
-    })
-  })
+  // Batch within a transaction so a full catalog is fast and cannot be half seeded.
+  const batchSize = 50
+  await runStatement(database, 'BEGIN TRANSACTION')
+  try {
+    for (let offset = 0; offset < hsCodesData.length; offset += batchSize) {
+      const batch = hsCodesData.slice(offset, offset + batchSize)
+      const params = batch.flatMap((item) => [
+        item.code,
+        item.description,
+        item.category,
+        item.catalogVersion || 'AHTN-2022',
+        item.chapterCode || null,
+        item.sectionCode || null,
+        item.sectionName || null,
+        item.metadataSource || 'seed',
+        item.unit || null,
+        item.isRestricted ? 1 : 0,
+      ])
+      await runStatement(database, `
+        INSERT INTO hs_codes
+        (code, description, category, catalog_version, chapter_code, section_code, section_name, metadata_source, unit, is_restricted)
+        VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
+        ON CONFLICT(code) DO UPDATE SET
+          description = excluded.description,
+          metadata_source = excluded.metadata_source
+        WHERE excluded.metadata_source = 'official-snapshot'
+          AND hs_codes.metadata_source IN ('seed', 'official-snapshot')
+      `, params)
+    }
+    await runStatement(database, 'COMMIT')
+  } catch (error) {
+    await runStatement(database, 'ROLLBACK')
+    throw error
+  }
 }
 
 const insertCatalogVersions = (database: sqlite3.Database): Promise<void> => {

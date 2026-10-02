@@ -1,12 +1,11 @@
 /**
  * Core AHTN 2022 HS Catalog Seed Data — Philippines Customs Calculator
  *
- * Coverage: all 21 sections, chapters 01-97, ~430 key subheadings.
- * Codes are at the HS 6-digit (XXXX.XX) level unless an 8-digit AHTN
- * distinction is needed. Chapter/section metadata is auto-populated via
- * getHsCodeMetadata() at seed time.
+ * Uses the shared official Finder snapshot plus legacy entries retained for
+ * compatibility with existing calculations and compliance categories.
  */
 import { getHsCodeMetadata } from '../../shared/hsLookupQuery'
+import { OFFICIAL_HS_CATALOG } from '../../shared/hsCatalog'
 
 export type HSCatalogRawEntry = {
   code: string
@@ -685,7 +684,8 @@ const RAW_CATALOG: readonly HSCatalogRawEntry[] = [
 
 /**
  * Returns the full core catalog with chapter/section metadata populated.
- * Safe to call at DB seed time; uses INSERT OR IGNORE so re-runs are idempotent.
+ * Official descriptions replace seed descriptions; legacy categories and
+ * restriction flags are preserved. This catalog does not supply tariff rates.
  */
 export const getCoreCatalogWithMetadata = (): Array<
   HSCatalogRawEntry & {
@@ -697,7 +697,18 @@ export const getCoreCatalogWithMetadata = (): Array<
     isRestricted?: boolean
   }
 > => {
-  return RAW_CATALOG.map((row) => {
+  const rows = new Map<string, HSCatalogRawEntry & { metadataSource: string }>(
+    RAW_CATALOG.map((row) => [row.code, { ...row, metadataSource: 'seed' }])
+  )
+  for (const row of OFFICIAL_HS_CATALOG) {
+    const legacy = rows.get(row.code)
+    rows.set(row.code, {
+      ...row,
+      category: legacy?.category ?? row.category,
+      isRestricted: legacy?.isRestricted ?? false,
+    })
+  }
+  return Array.from(rows.values()).map((row) => {
     const meta = getHsCodeMetadata(row.code)
     return {
       ...row,
@@ -705,7 +716,6 @@ export const getCoreCatalogWithMetadata = (): Array<
       chapterCode: meta?.chapterCode,
       sectionCode: meta?.sectionCode,
       sectionName: meta?.sectionName,
-      metadataSource: 'seed',
       isRestricted: row.isRestricted ?? false,
     }
   })

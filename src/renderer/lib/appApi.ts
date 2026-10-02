@@ -14,6 +14,7 @@ import {
   getContainerSecurityFeeUsd,
 } from '../../backend/services/customsRules'
 import { FALLBACK_EXCHANGE_RATES } from '../../shared/fallbackExchangeRates'
+import { OFFICIAL_HS_CATALOG } from '../../shared/hsCatalog'
 
 type ApiResponse<T> = Promise<{ success: boolean; data?: T; error?: string }>
 
@@ -438,7 +439,7 @@ export type ReviewRowProvenance = {
 
 const todayDate = new Date().toISOString().split('T')[0]
 
-const hsCodes: HSCodeRow[] = [
+const legacyHsCodes: HSCodeRow[] = [
   { code: '8471.30', description: 'Automatic data processing machines, portable', category: 'Electronics' },
   { code: '8517.62', description: 'Cellular telephones for mobile networks', category: 'Electronics' },
   { code: '6204.62', description: "Women's suits of synthetic fibers", category: 'Textiles' },
@@ -455,6 +456,14 @@ const hsCodes: HSCodeRow[] = [
   { code: '7326.90', description: 'Steel articles, miscellaneous', category: 'Steel' },
   { code: '4418.90', description: 'Wood articles, miscellaneous', category: 'Wood' },
 ]
+
+const legacyHsCodesByCode = new Map(legacyHsCodes.map((row) => [row.code, row]))
+const hsCodes: HSCodeRow[] = OFFICIAL_HS_CATALOG.map((row) => ({
+  ...row,
+  category: legacyHsCodesByCode.get(row.code)?.category ?? row.category,
+}))
+const officialCodes = new Set(hsCodes.map((row) => row.code))
+hsCodes.push(...legacyHsCodes.filter((row) => !officialCodes.has(row.code)))
 
 const tariffRates: TariffRateRow[] = [
   { hs_code: '8471.30', schedule_code: 'MFN', duty_rate: 0.05, vat_rate: 0.12, surcharge_rate: 0, effective_date: todayDate },
@@ -737,7 +746,9 @@ const requireCurrentTariff = (hsCode: string, scheduleCode: string = 'MFN'): Tar
   throw new Error(`No approved tariff rate found for HS code ${hsCode} under schedule ${normalizeScheduleCode(scheduleCode)}`)
 }
 
-const searchHSRows = (query: string): HSCodeRow[] => {
+const searchHSRows = (query: string, options?: { limit?: number }): HSCodeRow[] => {
+  const requestedLimit = options?.limit ?? 20
+  const limit = Number.isFinite(requestedLimit) ? Math.max(5, Math.min(100, Math.floor(requestedLimit))) : 20
   const normalizedQuery = query.trim().toUpperCase()
   const compactQuery = normalizedQuery.replace(/\./g, '')
   const queryTerms = normalizedQuery.split(/\s+/).filter(Boolean)
@@ -746,35 +757,41 @@ const searchHSRows = (query: string): HSCodeRow[] => {
     return []
   }
 
+  // Keep former search phrases as aliases while displaying the official description.
+  const descriptionsForSearch = (row: HSCodeRow): string[] => [
+    row.description.toUpperCase(),
+    legacyHsCodesByCode.get(row.code)?.description.toUpperCase() ?? '',
+  ]
   return [...hsCodes]
     .filter((row) => {
       const normalizedCode = row.code.toUpperCase()
       const compactCode = normalizedCode.replace(/\./g, '')
-      const normalizedDescription = row.description.toUpperCase()
       return (
         normalizedCode.includes(normalizedQuery) ||
         compactCode.includes(compactQuery) ||
-        normalizedDescription.includes(normalizedQuery) ||
-        queryTerms.every((term) => normalizedDescription.includes(term))
+        descriptionsForSearch(row).some((description) =>
+          description.includes(normalizedQuery) || queryTerms.every((term) => description.includes(term))
+        )
       )
     })
     .sort((left, right) => {
       const score = (row: HSCodeRow): number => {
         const normalizedCode = row.code.toUpperCase()
         const compactCode = normalizedCode.replace(/\./g, '')
-        const normalizedDescription = row.description.toUpperCase()
 
         if (compactCode === compactQuery) return 0
         if (normalizedCode === normalizedQuery) return 1
         if (normalizedCode.startsWith(normalizedQuery)) return 2
         if (compactCode.startsWith(compactQuery)) return 3
-        if (normalizedDescription.includes(normalizedQuery)) return 4
+        if (descriptionsForSearch(row).some((description) =>
+          description.includes(normalizedQuery) || queryTerms.every((term) => description.includes(term))
+        )) return 4
         return 5
       }
 
-      return score(left) - score(right) || left.code.localeCompare(right.code)
+      return score(left) - score(right) || left.code.length - right.code.length || left.code.localeCompare(right.code)
     })
-    .slice(0, 20)
+    .slice(0, limit)
 }
 
 const createLocalLookupRows = (
@@ -1396,7 +1413,7 @@ export const appApi = {
       return remoteResult
     }
 
-    return makeSuccess(searchHSRows(query))
+    return makeSuccess(searchHSRows(query, options))
   },
 
   searchLiveHSCodes: async (query: string, options?: { limit?: number }): ApiResponse<LiveHSLookupResponse> => {
@@ -1416,7 +1433,7 @@ export const appApi = {
       )
     }
 
-    const fallbackRows = searchHSRows(query)
+    const fallbackRows = searchHSRows(query, options)
     return makeSuccess(
       wrapLocalLiveLookupFallback(
         query,
