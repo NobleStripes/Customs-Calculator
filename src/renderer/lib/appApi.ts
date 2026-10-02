@@ -4,6 +4,16 @@ import {
   isCodeLikeQuery,
   normalizeExactHsCode,
 } from '../../shared/hsLookupQuery'
+import { calculatePenaltyAmounts, calculateTradeRemedyDuties } from '../../shared/calculationSteps'
+import {
+  BIR_DOCUMENTARY_STAMP_TAX_PHP,
+  CUSTOMS_DOCUMENTARY_STAMP_PHP,
+  LEGAL_RESEARCH_FUND_PHP,
+  TRANSIT_CHARGE_PHP,
+  getBrokerageFeePhp,
+  getContainerSecurityFeeUsd,
+} from '../../backend/services/customsRules'
+import { FALLBACK_EXCHANGE_RATES } from '../../shared/fallbackExchangeRates'
 
 type ApiResponse<T> = Promise<{ success: boolean; data?: T; error?: string }>
 
@@ -519,22 +529,6 @@ const complianceRules: ComplianceRuleRow[] = [
   },
 ]
 
-const fallbackRates: Record<string, number> = {
-  USD: 1,
-  PHP: 56,
-  EUR: 0.92,
-  CNY: 7.24,
-  SGD: 1.35,
-  JPY: 149.5,
-  GBP: 0.79,
-  INR: 83.12,
-}
-
-const CUSTOMS_DOCUMENTARY_STAMP_PHP = 100
-const BIR_DOCUMENTARY_STAMP_TAX_PHP = 30
-const TRANSIT_CHARGE_PHP = 1000
-const LEGAL_RESEARCH_FUND_PHP = 10
-
 const estimatePortHandlingFeesLocal = (payload: {
   arrivalDate?: string
   containerSize: ShipmentRow['containerSize']
@@ -610,7 +604,7 @@ const evaluateSection800ExemptionLocal = (
   }
 
   if (shipment.importerStatus === 'ofw') {
-    const eligible = Boolean(shipment.ofwHomeApplianceClaim) && !Boolean(shipment.ofwHomeApplianceAlreadyAvailedThisYear)
+    const eligible = Boolean(shipment.ofwHomeApplianceClaim) && !shipment.ofwHomeApplianceAlreadyAvailedThisYear
     return {
       eligible,
       exemptionType: eligible ? 'ofw' : 'none',
@@ -677,31 +671,6 @@ const getImportProcessingChargePhp = (dutiableValuePhp: number): number => {
   if (dutiableValuePhp <= 500000) return 1000
   if (dutiableValuePhp <= 750000) return 1500
   return 2000
-}
-
-const getContainerSecurityFeeUsd = (containerSize: ShipmentRow['containerSize']): number => {
-  if (containerSize === '40ft') return 10
-  if (containerSize === '20ft') return 5
-  return 0
-}
-
-const getBrokerageFeePhp = (taxableValuePhp: number): number => {
-  // Tiered schedule based on BOC CMO 11-2014 brokerage fee schedule
-  if (taxableValuePhp <= 50000) return 1000
-  if (taxableValuePhp <= 75000) return 1500
-  if (taxableValuePhp <= 100000) return 2000
-  if (taxableValuePhp <= 150000) return 2500
-  if (taxableValuePhp <= 200000) return 3000
-  if (taxableValuePhp <= 250000) return 3500
-  if (taxableValuePhp <= 300000) return 4000
-  if (taxableValuePhp <= 400000) return 4500
-  if (taxableValuePhp <= 500000) return 5000
-  if (taxableValuePhp <= 750000) return 5500
-  if (taxableValuePhp <= 1000000) return 6000
-  if (taxableValuePhp <= 1500000) return 7000
-  if (taxableValuePhp <= 2000000) return 8000
-  if (taxableValuePhp <= 5000000) return 9000
-  return 10000
 }
 
 const importJobs: Array<Record<string, unknown>> = []
@@ -1130,8 +1099,8 @@ const convertCurrencyLocally = (amount: number, fromCurrency: string, toCurrency
     }
   }
 
-  const fromRate = fallbackRates[from] || 1
-  const toRate = fallbackRates[to] || 1
+  const fromRate = FALLBACK_EXCHANGE_RATES[from] || 1
+  const toRate = FALLBACK_EXCHANGE_RATES[to] || 1
   const rate = toRate / fromRate
 
   return {
@@ -1282,6 +1251,61 @@ const getComplianceRequirementsRemote = async (payload: {
 
 const batchCalculateRemote = async (shipments: ShipmentRow[]) =>
   postApi<BatchResultRow[]>('/api/calculate/batch', { shipments })
+
+const calculateLocalValuation = async (shipment: ShipmentRow) => {
+  const shipmentCurrency = shipment.currency.toUpperCase()
+  const taxableInputAmount = shipment.value + shipment.freight + shipment.insurance
+  const conversionResult = await getCurrencyConversion(taxableInputAmount, shipmentCurrency, 'PHP')
+  if (!conversionResult.success || !conversionResult.data) {
+    throw new Error(conversionResult.error || 'Batch currency conversion failed')
+  }
+
+  const converted = conversionResult.data
+  const valueInPhp = shipmentCurrency === 'PHP' ? taxableInputAmount : converted.convertedAmount
+  const fobPhp = shipmentCurrency === 'PHP' ? shipment.value : shipment.value * converted.rate
+  const section800Exemption = evaluateSection800ExemptionLocal(shipment, fobPhp)
+  const adjustedTaxableValuePhp = Math.max(0, valueInPhp - section800Exemption.exemptAmountPhp)
+  const valuationReferenceRisk = evaluateValuationRiskLocal(
+    shipment.hsCode,
+    Math.max(0, fobPhp - section800Exemption.exemptAmountPhp)
+  )
+
+  return { shipmentCurrency, converted, section800Exemption, adjustedTaxableValuePhp, valuationReferenceRisk }
+}
+
+const calculateLocalFees = async (shipment: ShipmentRow, taxableValuePhp: number) => {
+  const brokerageFeePhp = getBrokerageFeePhp(taxableValuePhp)
+  const csfUsd = getContainerSecurityFeeUsd(shipment.containerSize)
+  let csfPhp = 0
+  if (csfUsd > 0) {
+    const csfConversion = await getCurrencyConversion(csfUsd, 'USD', 'PHP')
+    if (!csfConversion.success || !csfConversion.data) {
+      throw new Error(csfConversion.error || 'CSF conversion failed')
+    }
+    csfPhp = csfConversion.data.convertedAmount
+  }
+
+  const transitChargePhp = shipment.declarationType === 'transit' ? TRANSIT_CHARGE_PHP : 0
+  const ipcPhp = shipment.declarationType === 'transit' ? 250 : getImportProcessingChargePhp(taxableValuePhp)
+  const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
+  const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
+  const lrfPhp = LEGAL_RESEARCH_FUND_PHP
+  const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp + lrfPhp
+  const portHandlingFees = estimatePortHandlingFeesLocal({
+    arrivalDate: shipment.arrivalDate,
+    containerSize: shipment.containerSize,
+    storageDelayDays: shipment.storageDelayDays,
+    dutiableValuePhp: taxableValuePhp,
+  })
+  const arrastreWharfagePhp = shipment.arrastreWharfage > 0
+    ? shipment.arrastreWharfage
+    : portHandlingFees.totalPortHandling
+
+  return {
+    brokerageFeePhp, csfPhp, transitChargePhp, ipcPhp, cdsPhp, irsPhp, lrfPhp,
+    totalGlobalFeesPhp, portHandlingFees, arrastreWharfagePhp,
+  }
+}
 
 const previewTariffImportRemote = async (payload: { csvText?: string; contentBase64?: string; fileName?: string; rows?: Record<string, unknown>[] }) =>
   postApi<{ totalRows: number; validRows: number; invalidRows: number; rows: ImportPreviewRow[] }>('/api/import/tariff-rates/preview', payload)
@@ -1537,57 +1561,28 @@ export const appApi = {
     try {
       const results: BatchResultRow[] = []
       for (const shipment of shipments) {
-        const shipmentCurrency = shipment.currency.toUpperCase()
         const scheduleCode = normalizeScheduleCode(shipment.scheduleCode)
-        const taxableInputAmount = shipment.value + shipment.freight + shipment.insurance
-        const conversionResult = await getCurrencyConversion(taxableInputAmount, shipmentCurrency, 'PHP')
-        if (!conversionResult.success || !conversionResult.data) {
-          throw new Error(conversionResult.error || 'Batch currency conversion failed')
-        }
-
-        const converted = conversionResult.data
-        const valueInPhp = shipmentCurrency === 'PHP' ? taxableInputAmount : converted.convertedAmount
-  const fobPhp = shipmentCurrency === 'PHP' ? shipment.value : shipment.value * converted.rate
-  const section800Exemption = evaluateSection800ExemptionLocal(shipment, fobPhp)
-  const adjustedTaxableValuePhp = Math.max(0, valueInPhp - section800Exemption.exemptAmountPhp)
-  const valuationReferenceRisk = evaluateValuationRiskLocal(shipment.hsCode, Math.max(0, fobPhp - section800Exemption.exemptAmountPhp))
+        const {
+          shipmentCurrency, converted, section800Exemption,
+          adjustedTaxableValuePhp, valuationReferenceRisk,
+        } = await calculateLocalValuation(shipment)
         const destinationPort = normalizeDestinationPort(shipment.destinationPort)
         const tariffRow = requireCurrentTariff(shipment.hsCode, scheduleCode)
-  const dutyAmount = adjustedTaxableValuePhp * (tariffRow?.duty_rate || 0)
-  const surchargeAmount = adjustedTaxableValuePhp * (tariffRow?.surcharge_rate || 0)
-  const antiDumpingDutyRate = Number.isFinite(Number(shipment.antiDumpingDutyRate)) ? Number(shipment.antiDumpingDutyRate) : 0
-  const countervailingDutyRate = Number.isFinite(Number(shipment.countervailingDutyRate)) ? Number(shipment.countervailingDutyRate) : 0
-  const safeguardDutyRate = Number.isFinite(Number(shipment.safeguardDutyRate)) ? Number(shipment.safeguardDutyRate) : 0
-  const antiDumpingDutyAmount = adjustedTaxableValuePhp * Math.max(0, antiDumpingDutyRate)
-  const countervailingDutyAmount = adjustedTaxableValuePhp * Math.max(0, countervailingDutyRate)
-  const safeguardDutyAmount = adjustedTaxableValuePhp * Math.max(0, safeguardDutyRate)
-  const totalTradeRemediesPhp = antiDumpingDutyAmount + countervailingDutyAmount + safeguardDutyAmount
-  const brokerageFeePhp = getBrokerageFeePhp(adjustedTaxableValuePhp)
-        const csfUsd = getContainerSecurityFeeUsd(shipment.containerSize)
-        let csfPhp = 0
-
-        if (csfUsd > 0) {
-          const csfConversion = await getCurrencyConversion(csfUsd, 'USD', 'PHP')
-          if (!csfConversion.success || !csfConversion.data) {
-            throw new Error(csfConversion.error || 'CSF conversion failed')
-          }
-
-          csfPhp = csfConversion.data.convertedAmount
-        }
-
-        const transitChargePhp = shipment.declarationType === 'transit' ? TRANSIT_CHARGE_PHP : 0
-        const ipcPhp = shipment.declarationType === 'transit' ? 250 : getImportProcessingChargePhp(adjustedTaxableValuePhp)
-        const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
-        const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
-        const lrfPhp = LEGAL_RESEARCH_FUND_PHP
-        const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp + lrfPhp
-        const portHandlingFees = estimatePortHandlingFeesLocal({
-          arrivalDate: shipment.arrivalDate,
-          containerSize: shipment.containerSize,
-          storageDelayDays: shipment.storageDelayDays,
-          dutiableValuePhp: adjustedTaxableValuePhp,
-        })
-        const arrastreWharfagePhp = shipment.arrastreWharfage > 0 ? shipment.arrastreWharfage : portHandlingFees.totalPortHandling
+        const dutyAmount = adjustedTaxableValuePhp * (tariffRow?.duty_rate || 0)
+        const surchargeAmount = adjustedTaxableValuePhp * (tariffRow?.surcharge_rate || 0)
+        const {
+          rates: {
+            antiDumping: antiDumpingDutyRate,
+            countervailing: countervailingDutyRate,
+            safeguard: safeguardDutyRate,
+          },
+          amounts: tradeRemedies,
+        } = calculateTradeRemedyDuties(adjustedTaxableValuePhp, shipment)
+        const totalTradeRemediesPhp = tradeRemedies.total
+        const {
+          brokerageFeePhp, csfPhp, transitChargePhp, ipcPhp, cdsPhp, irsPhp, lrfPhp,
+          totalGlobalFeesPhp, portHandlingFees, arrastreWharfagePhp,
+        } = await calculateLocalFees(shipment, adjustedTaxableValuePhp)
         const vatBasePhp = adjustedTaxableValuePhp + dutyAmount + surchargeAmount + totalTradeRemediesPhp + brokerageFeePhp + arrastreWharfagePhp + shipment.doxStampOthers + totalGlobalFeesPhp
         const vatAmount = vatBasePhp * (tariffRow?.vat_rate || 0.12)
         const assessedCustomsValueInput = Number.isFinite(Number(shipment.assessedCustomsValue))
@@ -1596,21 +1591,34 @@ export const appApi = {
         const assessedCustomsValuePhp = assessedCustomsValueInput > 0
           ? (shipmentCurrency === 'PHP' ? assessedCustomsValueInput : assessedCustomsValueInput * converted.rate)
           : 0
-        const undervaluationDetected = assessedCustomsValuePhp > adjustedTaxableValuePhp * 1.1
-        const deficiencyValuePhp = Math.max(0, assessedCustomsValuePhp - adjustedTaxableValuePhp)
         const dutyRate = (tariffRow?.duty_rate || 0)
         const surchargeRate = (tariffRow?.surcharge_rate || 0)
         const tradeRemedyRate = antiDumpingDutyRate + countervailingDutyRate + safeguardDutyRate
         const vatRate = (tariffRow?.vat_rate || 0.12)
-        const deficiencyDutyTaxPhp = deficiencyValuePhp * (dutyRate + surchargeRate + tradeRemedyRate + vatRate)
-        const undervaluationSurchargePhp = undervaluationDetected ? deficiencyDutyTaxPhp * 2.5 : 0
         const baseDutyTaxPhp = dutyAmount + surchargeAmount + totalTradeRemediesPhp + vatAmount
-        const misclassificationDetected = Boolean(shipment.misclassificationDetected)
-        const clericalError = Boolean(shipment.clericalError)
-        const misclassificationSurchargePhp = misclassificationDetected && !clericalError ? baseDutyTaxPhp * 2.5 : 0
-        const latePaymentDays = Number.isFinite(Number(shipment.latePaymentDays)) ? Math.max(0, Number(shipment.latePaymentDays)) : 0
-        const latePaymentInterestPhp = baseDutyTaxPhp * 0.20 * (latePaymentDays / 365)
-        const totalPenaltiesPhp = undervaluationSurchargePhp + misclassificationSurchargePhp + latePaymentInterestPhp
+        const {
+          undervaluationDetected,
+          misclassificationDetected,
+          clericalError,
+          latePaymentDays,
+          amounts: {
+            undervaluationSurcharge: undervaluationSurchargePhp,
+            misclassificationSurcharge: misclassificationSurchargePhp,
+            latePaymentInterest: latePaymentInterestPhp,
+            totalPenalties: totalPenaltiesPhp,
+          },
+        } = calculatePenaltyAmounts({
+          assessedCustomsValuePhp,
+          dutiableValuePhp: adjustedTaxableValuePhp,
+          dutyRate,
+          surchargeRate,
+          tradeRemedyRate,
+          vatRate,
+          baseDutyTaxPhp,
+          misclassificationDetected: shipment.misclassificationDetected,
+          clericalError: shipment.clericalError,
+          latePaymentDays: shipment.latePaymentDays,
+        })
         const totalLandedCost = vatBasePhp + vatAmount
         const totalPayable = totalLandedCost + totalPenaltiesPhp
         const penaltyNotes = [
@@ -1629,12 +1637,7 @@ export const appApi = {
           section800Exemption,
           valuationReferenceRisk,
           portHandlingFees,
-          tradeRemedies: {
-            antiDumping: antiDumpingDutyAmount,
-            countervailing: countervailingDutyAmount,
-            safeguard: safeguardDutyAmount,
-            total: totalTradeRemediesPhp,
-          },
+          tradeRemedies,
           importClassification: {
             importType: 'free' as const,
             agencies: [],
@@ -1675,12 +1678,7 @@ export const appApi = {
               vat: vatAmount,
               totalItemTax: dutyAmount + vatAmount,
             },
-            tradeRemedies: {
-              antiDumping: antiDumpingDutyAmount,
-              countervailing: countervailingDutyAmount,
-              safeguard: safeguardDutyAmount,
-              total: totalTradeRemediesPhp,
-            },
+            tradeRemedies,
             globalFees: {
               transitCharge: transitChargePhp,
               ipc: ipcPhp,
