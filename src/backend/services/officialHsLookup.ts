@@ -1,12 +1,13 @@
 import { load } from 'cheerio'
 import { WebsiteFetcherService } from './websiteFetcher'
-import { isCodeLikeQuery } from '../../shared/hsLookupQuery'
+import { getHsCodeMetadata, isCodeLikeQuery, normalizeExactHsCode } from '../../shared/hsLookupQuery'
+import { parseOfficialCatalog } from './officialCatalogParser'
 
 export const OFFICIAL_TARIFF_LOOKUP_CONFIG = {
   host: 'finder.tariffcommission.gov.ph',
-  path: '/search-by-code',
-  codeQueryParam: 'ahtn',
-  textQueryParam: 'keyword',
+  path: '/item_search',
+  codeQueryParam: 'search',
+  textQueryParam: 'search',
   maxResults: 20,
   cacheTtlMs: 5 * 60 * 1000,
   // Maximum number of queries held in memory at once; oldest entry evicted when exceeded.
@@ -115,7 +116,7 @@ const buildLookupUrl = (query: string): string => {
     isCodeLikeQuery(normalizedQuery)
       ? OFFICIAL_TARIFF_LOOKUP_CONFIG.codeQueryParam
       : OFFICIAL_TARIFF_LOOKUP_CONFIG.textQueryParam,
-    normalizedQuery
+    isCodeLikeQuery(normalizedQuery) ? normalizeExactHsCode(normalizedQuery) ?? normalizedQuery : normalizedQuery
   )
 
   return url.toString()
@@ -175,6 +176,28 @@ export const extractOfficialHsLookupRows = (
   query: string,
   sourceUrl: string
 ): OfficialHsLookupResult[] => {
+  if (rawHtml.trim().startsWith('{')) {
+    const payload = JSON.parse(rawHtml) as { data?: unknown }
+    if (!Array.isArray(payload.data)) {
+      throw new Error('Official tariff lookup returned an invalid catalog response')
+    }
+    const rows = parseOfficialCatalog(payload.data).map(([code, description]): ParsedLookupRow => {
+      const matchedBy = getMatchType(query, { code, description })
+      return {
+        code,
+        description,
+        category: getHsCodeMetadata(code)?.sectionName ?? getCategoryFromDescription(description),
+        matchedBy,
+        confidence: matchedBy === 'code' ? 96 : matchedBy === 'mixed' ? 92 : 88,
+      }
+    })
+    return rankParsedRows(query, rows).slice(0, OFFICIAL_TARIFF_LOOKUP_CONFIG.maxResults).map((row) => ({
+      ...row,
+      sourceType: 'official-site',
+      sourceLabel: 'Tariff Commission Finder',
+      sourceUrl,
+    }))
+  }
   const tableRows: ParsedLookupRow[] = []
   const normalizedRows: ParsedLookupRow[] = []
   const seen = new Set<string>()

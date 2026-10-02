@@ -209,7 +209,9 @@ export const scoreHsSearchResult = (
   else if (normalizedCode === normalizedQuery) score += 130
   else if (compactCode.startsWith(compactQuery) || normalizedCode.startsWith(normalizedQuery)) score += 80
 
-  if (normalizedDescription.includes(normalizedQuery)) {
+  const originalTerms = tokenizeSearchText(normalizedQuery)
+  if (normalizedDescription.includes(normalizedQuery) ||
+    originalTerms.every((term) => normalizedDescription.includes(term))) {
     score += 50
   }
 
@@ -231,6 +233,9 @@ export const scoreHsSearchResult = (
 
   if (!chapter99Intent && compactCode.startsWith('99')) {
     score -= 90
+  }
+  if (chapter99Intent && compactCode.startsWith('99')) {
+    score += 90
   }
 
   score -= row.code.length
@@ -418,6 +423,7 @@ export class TariffCalculator {
       const compactQuery = normalizedQuery.replace(/\./g, '')
       const { expandedTerms, preferredPrefixes } = getSynonymProfile(normalizedQuery)
       const queryTerms = expandedTerms
+      const chapter99Intent = hasChapter99Intent(normalizedQuery)
       const limit = Math.max(5, Math.min(100, Math.floor(options?.limit || 20)))
       const expandedLimit = Math.max(limit * 6, 40)
 
@@ -434,6 +440,9 @@ export class TariffCalculator {
         ? queryTerms.map(() => 'UPPER(description) LIKE ?').join(' OR ')
         : '0'
       const descriptionTermParams = queryTerms.map((term) => `%${term}%`)
+      const originalTerms = tokenizeSearchText(normalizedQuery)
+      const descriptionAllTermClause = originalTerms.map(() => 'UPPER(description) LIKE ?').join(' AND ')
+      const descriptionAllTermParams = originalTerms.map((term) => `%${term}%`)
 
       const sql = `
         SELECT
@@ -443,9 +452,10 @@ export class TariffCalculator {
           CASE
             WHEN REPLACE(UPPER(code), '.', '') = ? THEN 0
             WHEN UPPER(code) = ? THEN 1
+            WHEN ? = 1 AND code LIKE '99%' THEN 2
             WHEN UPPER(code) LIKE ? THEN 2
             WHEN REPLACE(UPPER(code), '.', '') LIKE ? THEN 3
-            WHEN UPPER(description) LIKE ? THEN 4
+            WHEN UPPER(description) LIKE ? OR (${descriptionAllTermClause}) THEN 4
             WHEN ${descriptionTermClause} THEN 5
             ELSE 6
           END AS rank
@@ -461,9 +471,11 @@ export class TariffCalculator {
       const sqlParams = [
         compactQuery,
         normalizedQuery,
+        chapter99Intent ? 1 : 0,
         startsWithQuery,
         compactStartsWithQuery,
         searchQuery,
+        ...descriptionAllTermParams,
         ...descriptionTermParams,
         searchQuery,
         compactSearchQuery,
@@ -471,8 +483,6 @@ export class TariffCalculator {
         ...descriptionTermParams,
         expandedLimit,
       ]
-
-      const chapter99Intent = hasChapter99Intent(normalizedQuery)
 
       this.db.all(
         sql,
@@ -507,7 +517,10 @@ export class TariffCalculator {
         // For description-style queries, apply Fuse.js fuzzy re-ranking over the SQL
         // candidates so misspellings and partial word overlaps still surface good results.
         const isDescriptionQuery = !isCodeLikeQuery(normalizedQuery)
-        if (isDescriptionQuery && rankedRows.length > 0) {
+        const bestHasAllTerms = rankedRows.length > 0 && originalTerms.every((term) =>
+          rankedRows[0].description.toUpperCase().includes(term)
+        )
+        if (isDescriptionQuery && rankedRows.length > 0 && !bestHasAllTerms && !chapter99Intent) {
           const fuse = new Fuse(rankedRows, {
             keys: ['description'],
             threshold: 0.45,

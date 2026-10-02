@@ -6,6 +6,17 @@ import {
 } from './officialHsLookup'
 
 describe('extractOfficialHsLookupRows', () => {
+  it('parses the JSON endpoint actually used by the official Finder', () => {
+    const rows = extractOfficialHsLookupRows(JSON.stringify({ data: [
+      { code: '8471.30', desc: '<p>- Portable computers :</p>', status: 'active' },
+      { code: '8471.30.20', desc: '<p>- - Laptops &amp; notebooks</p>', status: 'active' },
+      { code: 'ex 8471.30.20', desc: 'FTA concession', agreement_id: 13 },
+    ] }), '84713020', 'https://finder.tariffcommission.gov.ph/item_search?search=8471.30.20')
+    expect(rows.map((row) => row.code)).toEqual(['8471.30.20', '8471.30'])
+    expect(rows[0]).toMatchObject({ description: 'Portable computers — Laptops & notebooks', sourceType: 'official-site' })
+    expect(rows[0].officialDutyRate).toBeUndefined()
+  })
+
   it('parses official finder table rows into normalized lookup results', () => {
     const rows = extractOfficialHsLookupRows(
       `
@@ -45,6 +56,13 @@ describe('extractOfficialHsLookupRows', () => {
       officialScheduleCode: 'MFN',
     })
   })
+
+  it('rejects malformed JSON catalog responses instead of extracting incidental digits', () => {
+    expect(() => extractOfficialHsLookupRows('{"error":"847130 unavailable"}', '847130', 'https://finder.tariffcommission.gov.ph/item_search'))
+      .toThrow('invalid catalog response')
+    expect(() => extractOfficialHsLookupRows('{"data":', '847130', 'https://finder.tariffcommission.gov.ph/item_search'))
+      .toThrow()
+  })
 })
 
 describe('OfficialHsLookupService', () => {
@@ -81,7 +99,19 @@ describe('OfficialHsLookupService', () => {
 
     const request = fetchWebsite.mock.calls[0]?.[0]
     expect(request?.url).toContain(`https://${OFFICIAL_TARIFF_LOOKUP_CONFIG.host}${OFFICIAL_TARIFF_LOOKUP_CONFIG.path}`)
-    expect(request?.url).toContain('keyword=portable+computers')
+    expect(request?.url).toContain('search=portable+computers')
+  })
+
+  it('formats compact code queries for the official JSON search endpoint', async () => {
+    const fetchWebsite = vi.fn().mockResolvedValue({ rawHtml: '{"data":[]}', fetchedAt: '2026-10-02T00:00:00.000Z' })
+    await new OfficialHsLookupService({ fetchWebsite }).search('85171300')
+    expect(fetchWebsite.mock.calls[0][0].url).toBe('https://finder.tariffcommission.gov.ph/item_search?search=8517.13.00')
+  })
+
+  it('preserves descriptive queries that contain numbers', async () => {
+    const fetchWebsite = vi.fn().mockResolvedValue({ rawHtml: '{"data":[]}', fetchedAt: '2026-10-02T00:00:00.000Z' })
+    await new OfficialHsLookupService({ fetchWebsite }).search('model 123456 computer')
+    expect(fetchWebsite.mock.calls[0][0].url).toContain('search=model+123456+computer')
   })
 
   it('returns stale cache when live fetch fails', async () => {

@@ -776,6 +776,10 @@ app.get('/api/hs-codes/search', async (request, response) => {
 
 app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => {
   const normalizedQuery = normalizeHsSearchQuery(request.query.query)
+  const requestedLimit = Number(request.query.limit)
+  const normalizedLimit = Number.isFinite(requestedLimit)
+    ? Math.max(5, Math.min(100, Math.floor(requestedLimit)))
+    : 20
 
   if (!normalizedQuery) {
     return sendError(
@@ -788,12 +792,12 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
   try {
     const lookupResult = await officialHsLookup.search(normalizedQuery)
 
-    const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: 20 })
+    const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: normalizedLimit })
     const localResults = fallbackResults.map((row) => ({
       ...row,
       confidence: LOCAL_CATALOG_CONFIDENCE_SCORE,
       sourceType: 'local-catalog',
-      sourceLabel: 'Approved local tariff catalog',
+      sourceLabel: 'Local HS catalog',
       sourceUrl: '',
       matchedBy: isCodeLikeQuery(normalizedQuery) ? 'code' : 'description',
       authorityRank: 3,
@@ -849,6 +853,7 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
         return String((a.item as { code?: string }).code || '').localeCompare(String((b.item as { code?: string }).code || ''))
       })
       .map(({ item }) => item)
+      .slice(0, normalizedLimit)
 
     if (rankedResults.length > 0) {
       return response.json({
@@ -906,7 +911,7 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
         })
       }
 
-      const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: 20 })
+      const fallbackResults = await tariffCalculator.searchHSCodes(normalizedQuery, { limit: normalizedLimit })
       return response.json({
         success: true,
         data: {
@@ -921,7 +926,7 @@ app.get('/api/hs-codes/live-search', fetchLimiter, async (request, response) => 
             ...row,
             confidence: FALLBACK_CONFIDENCE_SCORE,
             sourceType: 'local-catalog',
-            sourceLabel: 'Approved local tariff catalog',
+            sourceLabel: 'Local HS catalog',
             sourceUrl: '',
             matchedBy: isCodeLikeQuery(normalizedQuery) ? 'code' : 'description',
           })),

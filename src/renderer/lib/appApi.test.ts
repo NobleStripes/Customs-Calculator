@@ -6,6 +6,31 @@ afterEach(() => {
 })
 
 describe('hsCodeLookup', () => {
+  it('finds specific AHTN codes across the official catalog when the API is unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+    for (const code of ['0101.21.00', '0904.11.10', '8471.30.20', '8517.13.00', '9706.10.00']) {
+      const result = await appApi.resolveHSCode(code.replace(/\./g, ''))
+      expect(result.data?.code).toBe(code)
+    }
+    const result = await appApi.searchLiveHSCodes('smartphones')
+    expect(result.data?.results.some((row) => row.code === '8517.13.00')).toBe(true)
+  })
+
+  it('does not assume a tariff rate for newly available catalog codes', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+    const result = await appApi.calculateDuty({ value: 100_000, hsCode: '8517.13.00', originCountry: 'CHN' })
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('No approved tariff rate found')
+  })
+
+  it('honors the requested result limit with the API unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+    expect((await appApi.searchHSCodes('84', { limit: 50 })).data).toHaveLength(50)
+    expect((await appApi.searchLiveHSCodes('84', { limit: 50 })).data?.results).toHaveLength(50)
+    expect(hsCodeLookup.searchHSRows('84', { limit: 5 })).toHaveLength(5)
+    expect(hsCodeLookup.searchHSRows('84', { limit: Number.NaN })).toHaveLength(20)
+  })
+
   it('returns ranked lookup results for partial chapter input', () => {
     const results = hsCodeLookup.searchHSRows('8471')
 

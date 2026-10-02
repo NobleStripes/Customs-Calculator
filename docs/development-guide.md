@@ -2,33 +2,37 @@
 
 This document covers common contributor workflows for extending and maintaining Customs-Calculator.
 
-## Adding New HS Codes
+## Maintaining HS Code Coverage
 
-1. Edit `src/backend/db/database.ts` in the `seedInitialData()` function.
-2. Add a new entry to `hsCodesData`:
+The server and browser fallback share `src/shared/data/ahtn2022.json`, a snapshot of
+the [Tariff Commission Finder's public catalog](https://finder.tariffcommission.gov.ph/item_search).
+The snapshot contains 13,391 distinct base codes across chapters 01–97, excluding
+reserved chapter 77. It includes selectable 6, 8, and 10-digit codes. Heading
+descriptions provide context for entries such as "Other"; headings themselves
+are not selectable codes. FTA-specific "ex" concessions and duplicate records
+are excluded. Legacy seed entries are retained for existing calculations.
 
-```typescript
-{ code: '1234.56', description: 'Product', category: 'Category' }
+Refresh the snapshot with:
+
+```bash
+npm run catalog:update
 ```
 
-3. Add the matching tariff rate to `tariffData`:
+The updater downloads every page, verifies record counts and chapter coverage,
+and writes source metadata, retrieval time, and a SHA-256 digest with the snapshot.
+Review the resulting diff and run `npm test -- --run` before committing it.
+Rebuild the browser and restart the API to apply the updated snapshot. API startup
+adds missing rows and refreshes seed descriptions; manually imported descriptions,
+categories, restrictions, units, and existing tariff rates are preserved.
 
-```typescript
-{ hs_code: '1234.56', duty_rate: 0.10, vat_rate: 0.12 }
-```
+**Code coverage and rate coverage are separate.** The snapshot contains code
+metadata only. The bundled calculation fallback still has the existing 15 MFN
+rate rows. Add rates through the existing tariff ingestion and approval workflow;
+do not copy a six-digit parent rate onto new AHTN subcodes or assume zero duty.
+Calculation rejects codes without an approved rate for the selected schedule.
 
-4. Refresh the browser app or restart the local server so the updated seed data is applied.
-
-### 2026 Catalog Curation Guidance
-
-When extending HS coverage, prefer a weighted-catalog model over a blind full-list import:
-
-1. Keep a curated high-usage core (consumer/e-commerce heavy headings).
-2. Rely on official lookup for long-tail industrial headings.
-3. Prefer adding 8-digit AHTN rows for computation paths; keep 6-digit entries as search helpers only.
-4. Prioritize permit-sensitive headings (NTC/FDA/FPA/etc.) so compliance warnings trigger early.
-
-For future nomenclature transitions, avoid hardcoding a single static edition. Keep import/migration pipelines ready for AHTN version rollover.
+The snapshot is labelled AHTN-2022. Use the existing catalog-version migration
+workflow for a new nomenclature edition instead of changing the label on old data.
 
 ## Adding New Compliance Rules
 
