@@ -19,31 +19,23 @@ import {
 import { WebsiteFetcherService, type RegulatorySource, invalidateRegulatorySourcesCache } from '../backend/services/websiteFetcher'
 import * as autoFetcher from '../backend/services/autoFetcher'
 import {
-  BIR_DOCUMENTARY_STAMP_TAX_PHP,
-  CUSTOMS_DOCUMENTARY_STAMP_PHP,
-  LEGAL_RESEARCH_FUND_PHP,
-  TRANSIT_CHARGE_PHP,
   applyInsuranceBenchmark,
   checkDeMinimis,
-  estimatePortHandlingFees,
   evaluateSection800Exemption,
   evaluateValuationReferenceRisk,
-  getBrokerageFeePhp,
-  getContainerSecurityFeeUsd,
   getEntryType,
-  getImportProcessingChargePhp,
   normalizeDestinationPort,
 } from '../backend/services/customsRules'
 import {
-  calculateExciseTax,
-  getExciseCategoryForHsCode,
-  type ExciseTaxCategory,
-  type ExciseTaxUnit,
-  type PetroleumProductType,
-  type SweetenedBeverageSugarType,
-} from '../backend/services/exciseTax'
+  calculateLandedCostSubtotal,
+  calculateShipmentExcise,
+  calculateShipmentFees,
+  estimateShipmentPortFees,
+  getArrastreWharfagePhp,
+} from '../backend/services/shipmentCalculation'
 import { getRuntimeSettings, updateRuntimeSettings } from '../backend/services/runtimeSettings'
 import { classifyImport } from '../backend/services/importClassification'
+import { calculatePenaltyAmounts, calculateTradeRemedyDuties } from '../shared/calculationSteps'
 
 const app = express()
 const websiteFetcher = new WebsiteFetcherService()
@@ -373,15 +365,8 @@ app.post('/api/calculate/batch', async (request, response) => {
       // --- Step 2: De minimis check (uses FOB value only, per CMTA Sec. 423) ---
       const deMinimisCheck = checkDeMinimis(adjustedFobPhp, resolvedCode.code)
       if (deMinimisCheck.exempt) {
-        const estimatedPortFees = estimatePortHandlingFees({
-          arrivalDate: typeof shipment.arrivalDate === 'string' ? shipment.arrivalDate : undefined,
-          containerSize: typeof shipment.containerSize === 'string' ? shipment.containerSize : '20ft',
-          storageDelayDays: Number.isFinite(Number(shipment.storageDelayDays)) ? Number(shipment.storageDelayDays) : 0,
-          dutiableValuePhp: adjustedFobPhp,
-        })
-        const arrastreWharfagePhp = Number(shipment.arrastreWharfage || 0) > 0
-          ? Number(shipment.arrastreWharfage || 0)
-          : estimatedPortFees.totalPortHandling
+        const estimatedPortFees = estimateShipmentPortFees(shipment, adjustedFobPhp)
+        const arrastreWharfagePhp = getArrastreWharfagePhp(shipment, estimatedPortFees.totalPortHandling)
         const doxStampOthersPhp = Number(shipment.doxStampOthers || 0)
         results.push({
           ...shipment,
@@ -452,88 +437,36 @@ app.post('/api/calculate/batch', async (request, response) => {
       const dutiableValuePhp = adjustedFobPhp + insurancePhp + freightPhp
       const entryType = getEntryType(dutiableValuePhp)
 
-      const estimatedPortFees = estimatePortHandlingFees({
-        arrivalDate: typeof shipment.arrivalDate === 'string' ? shipment.arrivalDate : undefined,
-        containerSize: typeof shipment.containerSize === 'string' ? shipment.containerSize : '20ft',
-        storageDelayDays: Number.isFinite(Number(shipment.storageDelayDays)) ? Number(shipment.storageDelayDays) : 0,
-        dutiableValuePhp,
-      })
+      const estimatedPortFees = estimateShipmentPortFees(shipment, dutiableValuePhp)
 
       // --- Step 5: Customs duty ---
       const dutyResult = await tariffCalculator.calculateDuty(dutiableValuePhp, resolvedCode.code, String(shipment.originCountry || ''), scheduleCode)
 
       // --- Step 5.5: Trade remedy duties (anti-dumping, countervailing, safeguard) ---
-      const antiDumpingDutyRate = Number.isFinite(Number(shipment.antiDumpingDutyRate)) ? Number(shipment.antiDumpingDutyRate) : 0
-      const countervailingDutyRate = Number.isFinite(Number(shipment.countervailingDutyRate)) ? Number(shipment.countervailingDutyRate) : 0
-      const safeguardDutyRate = Number.isFinite(Number(shipment.safeguardDutyRate)) ? Number(shipment.safeguardDutyRate) : 0
-      const antiDumpingDutyAmount = dutiableValuePhp * Math.max(0, antiDumpingDutyRate)
-      const countervailingDutyAmount = dutiableValuePhp * Math.max(0, countervailingDutyRate)
-      const safeguardDutyAmount = dutiableValuePhp * Math.max(0, safeguardDutyRate)
-      const totalTradeRemedyDuty = antiDumpingDutyAmount + countervailingDutyAmount + safeguardDutyAmount
+      const { amounts: tradeRemedies } = calculateTradeRemedyDuties(dutiableValuePhp, shipment)
+      const totalTradeRemedyDuty = tradeRemedies.total
 
       // --- Step 6: Excise tax ---
-      const exciseCategory: ExciseTaxCategory | 'none' =
-        (typeof shipment.exciseCategory === 'string' && shipment.exciseCategory !== 'none'
-          ? shipment.exciseCategory as ExciseTaxCategory
-          : getExciseCategoryForHsCode(resolvedCode.code))
-      let exciseTaxResult = {
-        amount: 0, adValorem: 0, specific: 0,
-        category: exciseCategory === 'none' ? 'none' : exciseCategory,
-        basis: 'N/A', notes: 'No excise tax applicable',
-      }
-      if (exciseCategory !== 'none') {
-        const exciseQuantity = Number.isFinite(Number(shipment.exciseQuantity)) ? Number(shipment.exciseQuantity) : 0
-        if (exciseQuantity > 0) {
-          exciseTaxResult = {
-            ...calculateExciseTax({
-              category: exciseCategory,
-              quantity: exciseQuantity,
-              unit: (shipment.exciseUnit as ExciseTaxUnit) ?? 'liter',
-              nrpOrDutiableValue: Number.isFinite(Number(shipment.exciseNrp)) ? Number(shipment.exciseNrp) : dutiableValuePhp,
-              sweetenedBeverageSugarType: shipment.sweetenedBeverageSugarType as SweetenedBeverageSugarType | undefined,
-              petroleumProductType: shipment.petroleumProductType as PetroleumProductType | undefined,
-            }),
-            category: exciseCategory,
-          }
-        }
-      }
+      const { category: exciseCategory, tax: exciseTaxResult } =
+        calculateShipmentExcise(shipment, resolvedCode.code, dutiableValuePhp)
 
       // --- Step 7: Fixed fees ---
-      const brokerageFeePhp = getBrokerageFeePhp(dutiableValuePhp)
-      const csfUsd = getContainerSecurityFeeUsd(String(shipment.containerSize || '20ft').toLowerCase())
-      let csfPhp = 0
-      if (csfUsd > 0) {
-        const csfConversionResult = await currencyConverter.convert(csfUsd, 'USD', 'PHP')
-        csfPhp = csfConversionResult.convertedAmount
-      }
-      const declarationType = String(shipment.declarationType || 'consumption').toLowerCase()
-      const transitChargePhp = declarationType === 'transit' ? TRANSIT_CHARGE_PHP : 0
-      const ipcPhp = declarationType === 'transit' ? 250 : getImportProcessingChargePhp(dutiableValuePhp)
-      const cdsPhp = CUSTOMS_DOCUMENTARY_STAMP_PHP
-      const irsPhp = BIR_DOCUMENTARY_STAMP_TAX_PHP
-      const lrfPhp = LEGAL_RESEARCH_FUND_PHP
-      const arrastreWharfagePhp = Number(shipment.arrastreWharfage || 0) > 0
-        ? Number(shipment.arrastreWharfage || 0)
-        : estimatedPortFees.totalPortHandling
-      const doxStampOthersPhp = Number(shipment.doxStampOthers || 0)
+      const fees = await calculateShipmentFees(shipment, dutiableValuePhp, estimatedPortFees.totalPortHandling, currencyConverter)
+      const {
+        brokerageFeePhp, csfPhp, transitChargePhp, ipcPhp, cdsPhp, irsPhp, lrfPhp,
+        arrastreWharfagePhp, doxStampOthersPhp, totalGlobalFeesPhp,
+      } = fees
 
       // --- Step 8: Landed Cost (BOC formula — this is the VAT base) ---
       // Landed Cost = Dutiable Value + Customs Duty + Excise Tax + Brokerage + IPF + CDS + DST + LRF
-      const landedCostSubtotal =
-        dutiableValuePhp +
-        dutyResult.amount +
-        dutyResult.surcharge +
-        totalTradeRemedyDuty +
-        exciseTaxResult.amount +
-        brokerageFeePhp +
-        ipcPhp +
-        cdsPhp +
-        irsPhp +
-        lrfPhp +
-        transitChargePhp +
-        csfPhp +
-        arrastreWharfagePhp +
-        doxStampOthersPhp
+      const landedCostSubtotal = calculateLandedCostSubtotal({
+        dutiableValuePhp,
+        dutyAmountPhp: dutyResult.amount,
+        dutySurchargePhp: dutyResult.surcharge,
+        tradeRemedyDutyPhp: totalTradeRemedyDuty,
+        exciseTaxPhp: exciseTaxResult.amount,
+        fees,
+      })
 
       // --- Step 9: VAT = 12% of Landed Cost ---
       const vatResult = await tariffCalculator.calculateVAT(landedCostSubtotal, resolvedCode.code, scheduleCode)
@@ -548,36 +481,39 @@ app.post('/api/calculate/batch', async (request, response) => {
             ? assessedCustomsValueInput
             : (await currencyConverter.convert(assessedCustomsValueInput, shipmentCurrency, 'PHP')).convertedAmount)
         : 0
-      const undervaluationDetected = assessedCustomsValuePhp > dutiableValuePhp * 1.1
-      const valuationDeficiencyPhp = Math.max(0, assessedCustomsValuePhp - dutiableValuePhp)
       const dutyRate = Math.max(0, dutyResult.rate / 100)
       const surchargeRate = dutiableValuePhp > 0 ? Math.max(0, dutyResult.surcharge / dutiableValuePhp) : 0
       const tradeRemedyRate = dutiableValuePhp > 0 ? totalTradeRemedyDuty / dutiableValuePhp : 0
       const vatRate = Math.max(0, (vatResult.rate || 12) / 100)
-      const deficiencyDutyTaxPhp = valuationDeficiencyPhp * (dutyRate + surchargeRate + tradeRemedyRate + vatRate)
-      const undervaluationSurchargePhp = undervaluationDetected ? deficiencyDutyTaxPhp * 2.5 : 0
-
       const baseDutyTaxPhp =
         dutyResult.amount +
         dutyResult.surcharge +
         totalTradeRemedyDuty +
         exciseTaxResult.amount +
         vatAmountPhp
-      const misclassificationDetected = Boolean(shipment.misclassificationDetected)
-      const clericalError = Boolean(shipment.clericalError)
-      const misclassificationSurchargePhp =
-        misclassificationDetected && !clericalError
-          ? baseDutyTaxPhp * 2.5
-          : 0
-
-      const latePaymentDays = Number.isFinite(Number(shipment.latePaymentDays))
-        ? Math.max(0, Number(shipment.latePaymentDays))
-        : 0
-      const latePaymentInterestPhp = baseDutyTaxPhp * 0.20 * (latePaymentDays / 365)
-      const totalPenaltiesPhp =
-        undervaluationSurchargePhp +
-        misclassificationSurchargePhp +
-        latePaymentInterestPhp
+      const {
+        undervaluationDetected,
+        misclassificationDetected,
+        clericalError,
+        latePaymentDays,
+        amounts: {
+          undervaluationSurcharge: undervaluationSurchargePhp,
+          misclassificationSurcharge: misclassificationSurchargePhp,
+          latePaymentInterest: latePaymentInterestPhp,
+          totalPenalties: totalPenaltiesPhp,
+        },
+      } = calculatePenaltyAmounts({
+        assessedCustomsValuePhp,
+        dutiableValuePhp,
+        dutyRate,
+        surchargeRate,
+        tradeRemedyRate,
+        vatRate,
+        baseDutyTaxPhp,
+        misclassificationDetected: shipment.misclassificationDetected,
+        clericalError: shipment.clericalError,
+        latePaymentDays: shipment.latePaymentDays,
+      })
       const totalLandedCostPhp = landedCostSubtotal + vatAmountPhp
       const totalPayablePhp = totalLandedCostPhp + totalPenaltiesPhp
       const penaltyNotes = [
@@ -594,8 +530,6 @@ app.post('/api/calculate/batch', async (request, response) => {
           ? `Late payment interest estimated at 20% p.a. for ${latePaymentDays} days.`
           : '',
       ].filter(Boolean)
-
-      const totalGlobalFeesPhp = transitChargePhp + ipcPhp + csfPhp + cdsPhp + irsPhp + lrfPhp
 
       const complianceResult = await complianceChecker.getRequirements(resolvedCode.code, dutiableValuePhp, destinationPort)
       const importClassification = classifyImport(resolvedCode.code, scheduleCode)
@@ -618,12 +552,7 @@ app.post('/api/calculate/batch', async (request, response) => {
           rate: dutyResult.rate,
           notes: dutyResult.notes,
         },
-        tradeRemedies: {
-          antiDumping: antiDumpingDutyAmount,
-          countervailing: countervailingDutyAmount,
-          safeguard: safeguardDutyAmount,
-          total: totalTradeRemedyDuty,
-        },
+        tradeRemedies,
         exciseTax: exciseTaxResult,
         vat: {
           amount: vatAmountPhp,
@@ -651,12 +580,7 @@ app.post('/api/calculate/batch', async (request, response) => {
             vat: vatAmountPhp,
             totalItemTax: dutyResult.amount + dutyResult.surcharge + exciseTaxResult.amount + vatAmountPhp,
           },
-          tradeRemedies: {
-            antiDumping: antiDumpingDutyAmount,
-            countervailing: countervailingDutyAmount,
-            safeguard: safeguardDutyAmount,
-            total: totalTradeRemedyDuty,
-          },
+          tradeRemedies,
           globalFees: {
             transitCharge: transitChargePhp,
             ipc: ipcPhp,

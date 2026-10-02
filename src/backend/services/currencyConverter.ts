@@ -1,4 +1,5 @@
 import { getDatabase } from '../db/database'
+import { FALLBACK_EXCHANGE_RATES } from '../../shared/fallbackExchangeRates'
 import axios from 'axios'
 import { getRuntimeSettings } from './runtimeSettings'
 
@@ -7,9 +8,6 @@ const EXCHANGE_RATES_API = 'https://api.exchangerate-api.com/v4/latest'
 // BOC publishes weekly exchange rates for customs valuation purposes.
 // The table is on this page (HTML table with currency code and PHP rate).
 const BOC_EXCHANGE_RATE_URL = 'https://customs.gov.ph/exchange-rates/'
-
-// BOC rates are valid for one week; cache them with a 7-day TTL.
-const BOC_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 // BSP (Bangko Sentral ng Pilipinas) publishes the Philippine Deal System Fixing (PDSF) daily
 // reference rate — the legally mandated rate for customs valuation under RA 8183.
@@ -347,19 +345,8 @@ export class CurrencyConverter {
    */
   private getFallbackRate(fromCurrency: string, toCurrency: string): number {
     // Simplified fallback rates (against USD)
-    const rates: Record<string, number> = {
-      USD: 1,
-      PHP: 56,
-      EUR: 0.92,
-      CNY: 7.24,
-      SGD: 1.35,
-      JPY: 149.5,
-      GBP: 0.79,
-      INR: 83.12,
-    }
-
-    const fromRate = rates[fromCurrency] || 1
-    const toRate = rates[toCurrency] || 1
+    const fromRate = FALLBACK_EXCHANGE_RATES[fromCurrency] || 1
+    const toRate = FALLBACK_EXCHANGE_RATES[toCurrency] || 1
 
     return toRate / fromRate
   }
